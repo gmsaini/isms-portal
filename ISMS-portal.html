@@ -1,0 +1,1666 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ISMS — Infrastructure Service Management System</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root {
+  --bg:        #f0f4f8;
+  --surface:   #ffffff;
+  --surface2:  #f7f9fc;
+  --surface3:  #eef2f7;
+  --border:    #dde3ed;
+  --border2:   #c8d2e0;
+
+  --primary:   #1a56db;
+  --primary-lt:#e8f0fe;
+  --primary-dk:#1240aa;
+
+  --accent2:   #7c3aed;
+  --accent3:   #059669;
+  --accent4:   #d97706;
+  --danger:    #dc2626;
+  --info:      #0891b2;
+
+  --network:   #0891b2;
+  --security:  #dc2626;
+  --compute:   #d97706;
+  --cloud:     #7c3aed;
+  --storage:   #059669;
+  --database:  #ea580c;
+
+  --text:      #0f172a;
+  --text-dim:  #374151;
+  --text-muted:#6b7280;
+  --text-light:#9ca3af;
+
+  --radius:    12px;
+  --radius-sm: 8px;
+  --shadow:    0 1px 4px rgba(15,23,42,0.08), 0 4px 16px rgba(15,23,42,0.04);
+  --shadow-md: 0 4px 20px rgba(15,23,42,0.12);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  overflow-x: hidden;
+  font-size: 14px;
+}
+
+/* ══════════════════ SIDEBAR ══════════════════ */
+.sidebar {
+  position: fixed; left: 0; top: 0; bottom: 0; width: 256px;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  z-index: 100; box-shadow: 2px 0 12px rgba(15,23,42,0.05);
+  overflow: hidden;
+}
+.sidebar-nav {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.sidebar-nav::-webkit-scrollbar { width: 4px; }
+.sidebar-nav::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+/* Logo block */
+.sidebar-logo {
+  padding: 20px 20px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 12px;
+}
+.logo-icon {
+  width: 42px; height: 42px; border-radius: 10px;
+  background: linear-gradient(135deg, #1a56db 0%, #3b82f6 50%, #0891b2 100%);
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 12px rgba(26,86,219,0.35);
+  flex-shrink: 0;
+  position: relative; overflow: hidden;
+}
+.logo-icon::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(255,255,255,0.06) 4px, rgba(255,255,255,0.06) 8px);
+}
+.logo-icon svg { position: relative; z-index: 1; }
+.logo-text { line-height: 1; }
+.logo-name {
+  font-size: 20px; font-weight: 800; letter-spacing: -0.5px;
+  background: linear-gradient(120deg, #1a56db, #0891b2);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.logo-tagline {
+  font-size: 9.5px; color: var(--text-muted); letter-spacing: 1.8px;
+  text-transform: uppercase; margin-top: 2px; font-weight: 600;
+}
+
+.nav-section { padding: 14px 10px 4px; }
+.nav-label {
+  font-size: 9.5px; letter-spacing: 2px; text-transform: uppercase;
+  color: var(--text-light); padding: 0 10px; margin-bottom: 4px; font-weight: 700;
+}
+.nav-item {
+  display: flex; align-items: center; gap: 9px;
+  padding: 9px 10px; border-radius: var(--radius-sm);
+  cursor: pointer; transition: all .15s;
+  font-size: 13.5px; font-weight: 500; color: var(--text-muted);
+  user-select: none; position: relative;
+}
+.nav-item:hover { background: var(--surface2); color: var(--text); }
+.nav-item.active {
+  background: var(--primary-lt); color: var(--primary); font-weight: 600;
+}
+.nav-item.active::before {
+  content: ''; position: absolute; left: 0; top: 20%; bottom: 20%;
+  width: 3px; border-radius: 2px; background: var(--primary);
+}
+.nav-icon { width: 17px; height: 17px; flex-shrink: 0; opacity: .65; }
+.nav-item.active .nav-icon { opacity: 1; }
+.nav-badge {
+  margin-left: auto; background: var(--danger);
+  color: #fff; font-size: 10px; font-weight: 700;
+  padding: 1px 6px; border-radius: 20px; line-height: 16px;
+}
+
+.sidebar-bottom {
+  flex-shrink: 0;
+  padding: 14px;
+  border-top: 1px solid var(--border);
+}
+.user-chip {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border-radius: var(--radius-sm);
+  background: var(--surface2); cursor: pointer;
+  transition: background .15s;
+}
+.user-chip:hover { background: var(--surface3); }
+.user-avatar {
+  width: 34px; height: 34px; border-radius: 50%;
+  background: linear-gradient(135deg, #1a56db, #0891b2);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 700; color: #fff; flex-shrink: 0;
+}
+.user-name { font-size: 13px; font-weight: 600; color: var(--text); }
+.user-role { font-size: 11px; color: var(--text-muted); }
+
+/* ══════════════════ MAIN ══════════════════ */
+.main { margin-left: 256px; min-height: 100vh; }
+.topbar {
+  position: sticky; top: 0; z-index: 50;
+  background: rgba(255,255,255,0.92);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--border);
+  padding: 14px 28px;
+  display: flex; align-items: center; justify-content: space-between;
+  box-shadow: 0 1px 0 var(--border);
+}
+.topbar-left { display: flex; align-items: center; gap: 12px; }
+.breadcrumb { font-size: 12px; color: var(--text-muted); }
+.breadcrumb span { color: var(--text); font-weight: 600; }
+.topbar-title { font-size: 18px; font-weight: 700; color: var(--text); }
+.topbar-actions { display: flex; gap: 8px; align-items: center; }
+
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 15px; border-radius: var(--radius-sm);
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  border: none; transition: all .15s; font-family: inherit; line-height: 1;
+}
+.btn-primary { background: var(--primary); color: #fff; }
+.btn-primary:hover { background: var(--primary-dk); box-shadow: 0 4px 12px rgba(26,86,219,0.3); }
+.btn-outline { background: #fff; color: var(--text-dim); border: 1px solid var(--border2); }
+.btn-outline:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-lt); }
+.btn-success { background: var(--accent3); color: #fff; }
+.btn-success:hover { background: #047857; }
+.btn-ghost { background: transparent; color: var(--text-muted); border: none; padding: 8px; border-radius: var(--radius-sm); }
+.btn-ghost:hover { background: var(--surface2); color: var(--text); }
+.btn-sm { padding: 5px 11px; font-size: 12px; }
+.btn-xs { padding: 3px 9px; font-size: 11px; border-radius: 6px; }
+
+.content { padding: 28px; }
+
+/* ══════════════════ PAGES ══════════════════ */
+.page { display: none; animation: fadeUp .22s ease; }
+.page.active { display: block; }
+@keyframes fadeUp { from { opacity:0; transform: translateY(8px); } to { opacity:1; transform: none; } }
+
+/* ══════════════════ CARDS ══════════════════ */
+.card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 22px;
+  box-shadow: var(--shadow);
+}
+.card-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 18px;
+}
+.card-title {
+  font-size: 14px; font-weight: 700; color: var(--text);
+  display: flex; align-items: center; gap: 7px;
+}
+.card-title-icon {
+  width: 28px; height: 28px; border-radius: 7px;
+  background: var(--primary-lt); display: flex; align-items: center; justify-content: center;
+}
+
+/* ══════════════════ STAT CARDS ══════════════════ */
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px,1fr)); gap: 14px; margin-bottom: 22px; }
+.stat-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 18px 20px;
+  box-shadow: var(--shadow); position: relative; overflow: hidden;
+  transition: box-shadow .2s, transform .2s;
+}
+.stat-card:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
+.stat-card::after {
+  content: ''; position: absolute;
+  bottom: -20px; right: -20px;
+  width: 80px; height: 80px; border-radius: 50%;
+  opacity: .06;
+}
+.stat-card.c1::after { background: var(--primary); }
+.stat-card.c2::after { background: var(--accent2); }
+.stat-card.c3::after { background: var(--accent3); }
+.stat-card.c4::after { background: var(--accent4); }
+.stat-card.c5::after { background: var(--danger); }
+.stat-card.c6::after { background: var(--database); }
+.stat-icon {
+  width: 36px; height: 36px; border-radius: 9px;
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 12px; font-size: 18px;
+}
+.stat-label { font-size: 11px; font-weight: 600; color: var(--text-muted); letter-spacing: .8px; text-transform: uppercase; margin-bottom: 5px; }
+.stat-value { font-size: 28px; font-weight: 800; line-height: 1; color: var(--text); }
+.stat-badge {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 11px; font-weight: 600; padding: 2px 8px;
+  border-radius: 20px; margin-top: 8px;
+}
+.badge-up { background: #d1fae5; color: #065f46; }
+.badge-down { background: #fee2e2; color: #991b1b; }
+.badge-neutral { background: #f1f5f9; color: var(--text-muted); }
+
+/* ══════════════════ GRIDS ══════════════════ */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px; }
+.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.mb-20 { margin-bottom: 20px; }
+.mb-14 { margin-bottom: 14px; }
+
+/* ══════════════════ TABLES ══════════════════ */
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+thead th {
+  text-align: left; padding: 10px 14px;
+  font-size: 10.5px; letter-spacing: 1px; text-transform: uppercase;
+  color: var(--text-muted); background: var(--surface2);
+  border-bottom: 1px solid var(--border);
+  font-weight: 700; white-space: nowrap;
+}
+thead th:first-child { border-radius: var(--radius-sm) 0 0 0; }
+thead th:last-child { border-radius: 0 var(--radius-sm) 0 0; }
+tbody tr { border-bottom: 1px solid var(--surface3); transition: background .1s; }
+tbody tr:last-child { border-bottom: none; }
+tbody tr:hover { background: #f8faff; }
+tbody td { padding: 11px 14px; color: var(--text-dim); vertical-align: middle; }
+tbody td strong { color: var(--text); font-weight: 600; }
+
+/* ══════════════════ TAGS ══════════════════ */
+.team-tag {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 9px; border-radius: 20px;
+  font-size: 11px; font-weight: 700;
+}
+.tag-network  { background: #e0f2fe; color: #0369a1; }
+.tag-security { background: #fee2e2; color: #b91c1c; }
+.tag-compute  { background: #fef3c7; color: #92400e; }
+.tag-cloud    { background: #ede9fe; color: #5b21b6; }
+.tag-storage  { background: #d1fae5; color: #065f46; }
+.tag-database { background: #ffedd5; color: #9a3412; }
+
+.status-tag {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 9px; border-radius: 20px;
+  font-size: 11px; font-weight: 600;
+}
+.status-active  { background: #d1fae5; color: #065f46; }
+.status-pending { background: #fef3c7; color: #92400e; }
+.status-done    { background: #f1f5f9; color: var(--text-muted); }
+.status-blocked { background: #fee2e2; color: #b91c1c; }
+
+/* ══════════════════ PROGRESS ══════════════════ */
+.progress-bar { height: 6px; background: var(--surface3); border-radius: 3px; overflow: hidden; }
+.progress-fill { height: 100%; border-radius: 3px; transition: width .6s ease; }
+
+/* ══════════════════ FORMS ══════════════════ */
+.form-grid   { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.form-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+.form-group  { display: flex; flex-direction: column; gap: 5px; }
+.form-group.full { grid-column: 1 / -1; }
+label { font-size: 12px; font-weight: 600; color: var(--text-muted); }
+input, select, textarea {
+  background: var(--surface2); border: 1px solid var(--border2);
+  border-radius: var(--radius-sm); padding: 9px 12px;
+  color: var(--text); font-family: inherit; font-size: 13px;
+  transition: all .15s; outline: none;
+}
+input:focus, select:focus, textarea:focus {
+  border-color: var(--primary); box-shadow: 0 0 0 3px rgba(26,86,219,0.1);
+  background: #fff;
+}
+textarea { resize: vertical; min-height: 80px; }
+
+/* ══════════════════ MODAL ══════════════════ */
+.modal-overlay {
+  display: none; position: fixed; inset: 0;
+  background: rgba(15,23,42,0.45); backdrop-filter: blur(6px);
+  z-index: 1000; align-items: center; justify-content: center;
+}
+.modal-overlay.open { display: flex; }
+.modal {
+  background: #fff; border: 1px solid var(--border);
+  border-radius: 16px; padding: 28px; width: 640px;
+  max-width: 95vw; max-height: 90vh; overflow-y: auto;
+  box-shadow: var(--shadow-md); animation: slideUp .25s ease;
+}
+@keyframes slideUp { from { opacity:0; transform: translateY(24px); } to { opacity:1; transform: none; } }
+.modal-title { font-size: 18px; font-weight: 800; color: var(--text); margin-bottom: 22px; }
+.modal-footer {
+  display: flex; justify-content: flex-end; gap: 8px;
+  margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border);
+}
+
+/* ══════════════════ TABS ══════════════════ */
+.tabs {
+  display: flex; gap: 2px; margin-bottom: 22px;
+  background: var(--surface3); border-radius: 10px;
+  padding: 4px; width: fit-content;
+}
+.tab {
+  padding: 8px 16px; cursor: pointer; font-size: 13px;
+  font-weight: 600; color: var(--text-muted);
+  border-radius: 7px; transition: all .15s; user-select: none;
+}
+.tab:hover { color: var(--text); background: rgba(255,255,255,.6); }
+.tab.active { background: #fff; color: var(--primary); box-shadow: 0 1px 4px rgba(15,23,42,.1); }
+
+/* ══════════════════ CHARTS ══════════════════ */
+.chart-container    { position: relative; height: 240px; }
+.chart-container-sm { position: relative; height: 190px; }
+.chart-container-lg { position: relative; height: 320px; }
+.chart-container-xl { position: relative; height: 380px; }
+
+/* ══════════════════ UTIL METERS ══════════════════ */
+.util-meter { margin-bottom: 13px; }
+.util-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; font-size: 13px; }
+.util-name { font-weight: 600; color: var(--text); }
+.util-pct  { font-size: 12px; color: var(--text-muted); font-weight: 600; }
+
+/* ══════════════════ MEMBER CARDS ══════════════════ */
+.member-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px,1fr)); gap: 14px; }
+.member-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 18px;
+  box-shadow: var(--shadow); transition: all .2s;
+}
+.member-card:hover { border-color: var(--primary); box-shadow: var(--shadow-md); transform: translateY(-2px); }
+.member-avatar {
+  width: 44px; height: 44px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; font-weight: 800; margin-bottom: 10px;
+}
+.member-name  { font-weight: 700; font-size: 14px; color: var(--text); margin-bottom: 2px; }
+.member-title { font-size: 11.5px; color: var(--text-muted); margin-bottom: 10px; }
+.member-stats { display: flex; gap: 10px; }
+.member-stat  { font-size: 11px; color: var(--text-muted); }
+.member-stat strong { display: block; font-size: 17px; font-weight: 800; color: var(--text); line-height: 1.2; }
+
+/* ══════════════════ SECTION HEADER ══════════════════ */
+.section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+.section-title  { font-size: 22px; font-weight: 800; color: var(--text); }
+.section-sub    { font-size: 13px; color: var(--text-muted); margin-top: 2px; font-weight: 400; }
+
+/* ══════════════════ TEAM CARDS ══════════════════ */
+.team-cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px,1fr)); gap: 16px; }
+.team-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 20px;
+  box-shadow: var(--shadow); transition: all .2s; cursor: pointer;
+}
+.team-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+
+/* ══════════════════ CUSTOM REPORT BUILDER ══════════════════ */
+.report-builder {
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 20px; margin-bottom: 20px;
+}
+.report-field-picker { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+.field-chip {
+  padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;
+  border: 1.5px solid var(--border2); background: #fff; cursor: pointer;
+  color: var(--text-muted); transition: all .15s; user-select: none;
+}
+.field-chip:hover  { border-color: var(--primary); color: var(--primary); background: var(--primary-lt); }
+.field-chip.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+.report-preview-area {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 20px; min-height: 200px;
+}
+
+/* ══════════════════ TOAST ══════════════════ */
+.toast {
+  position: fixed; bottom: 24px; right: 24px;
+  background: var(--text); color: #fff;
+  border-radius: var(--radius-sm); padding: 12px 18px;
+  font-size: 13px; font-weight: 500; z-index: 9000;
+  animation: toastIn .3s ease; min-width: 260px;
+  display: flex; align-items: center; gap: 10px;
+  box-shadow: 0 8px 24px rgba(15,23,42,0.25);
+}
+.toast.toast-success { border-left: 3px solid var(--accent3); }
+.toast.toast-error   { border-left: 3px solid var(--danger); }
+@keyframes toastIn { from { opacity:0; transform: translateY(12px); } to { opacity:1; transform: none; } }
+
+/* ══════════════════ FILTER BAR ══════════════════ */
+.filter-bar {
+  display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 18px;
+  margin-bottom: 18px; box-shadow: var(--shadow);
+}
+.filter-bar select, .filter-bar input { font-size: 13px; padding: 7px 11px; }
+
+/* ══════════════════ INSIGHT CARDS ══════════════════ */
+.insight-card {
+  border-radius: var(--radius-sm); padding: 14px 16px;
+  margin-bottom: 10px; display: flex; gap: 12px; align-items: flex-start;
+}
+.insight-card.warn  { background: #fffbeb; border: 1px solid #fde68a; }
+.insight-card.alert { background: #fef2f2; border: 1px solid #fecaca; }
+.insight-card.good  { background: #f0fdf4; border: 1px solid #a7f3d0; }
+.insight-card.info  { background: #eff6ff; border: 1px solid #bfdbfe; }
+.insight-icon { font-size: 20px; line-height: 1; flex-shrink: 0; margin-top: 1px; }
+.insight-title { font-size: 13px; font-weight: 700; margin-bottom: 3px; }
+.insight-desc  { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+
+/* ══════════════════ SCROLLBAR ══════════════════ */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+/* ══════════════════ DIVIDER ══════════════════ */
+.divider { height: 1px; background: var(--border); margin: 20px 0; }
+
+/* ══════════════════ KPI RING ══════════════════ */
+.kpi-ring-wrap { display: flex; align-items: center; justify-content: center; padding: 10px 0 4px; }
+.kpi-ring { position: relative; width: 120px; height: 120px; }
+.kpi-ring svg { transform: rotate(-90deg); }
+.kpi-ring-text { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.kpi-ring-num  { font-size: 24px; font-weight: 800; color: var(--text); line-height: 1; }
+.kpi-ring-lbl  { font-size: 10px; color: var(--text-muted); font-weight: 600; margin-top: 2px; }
+
+/* ══════════════════ RESPONSIVE ══════════════════ */
+@media(max-width:960px) {
+  .sidebar { transform: translateX(-256px); }
+  .main { margin-left: 0; }
+  .grid-2,.grid-3,.grid-4 { grid-template-columns: 1fr; }
+  .form-grid,.form-grid-3 { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════════ SIDEBAR ══════════════════════════════ -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <div class="logo-icon">
+      <!-- Shield + Server stack logo -->
+      <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
+        <path d="M13 2L4 6V13C4 17.97 7.9 22.56 13 24C18.1 22.56 22 17.97 22 13V6L13 2Z" fill="rgba(255,255,255,0.9)"/>
+        <rect x="8" y="10" width="10" height="2.5" rx="1.2" fill="#1a56db"/>
+        <rect x="8" y="13.5" width="10" height="2.5" rx="1.2" fill="#0891b2"/>
+        <circle cx="18.5" cy="10.75" r="1" fill="#1a56db"/>
+        <circle cx="18.5" cy="14.75" r="1" fill="#0891b2"/>
+      </svg>
+    </div>
+    <div class="logo-text">
+      <div class="logo-name">ISMS</div>
+      <div class="logo-tagline">Infra Service Mgmt</div>
+    </div>
+  </div>
+
+  <div class="sidebar-nav">
+  <div class="nav-section">
+    <div class="nav-label">Overview</div>
+    <div class="nav-item active" data-page="dashboard" onclick="showPage('dashboard')">
+      <svg class="nav-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+      Dashboard
+    </div>
+    <div class="nav-item" data-page="activities" onclick="showPage('activities')">
+      <svg class="nav-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+      Activities
+    </div>
+    <div class="nav-item" data-page="timelog" onclick="showPage('timelog')">
+      <svg class="nav-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+      Time Log
+      <span class="nav-badge">3</span>
+    </div>
+  </div>
+
+  <div class="nav-section">
+    <div class="nav-label">Teams</div>
+    <div class="nav-item" data-page="teams" onclick="showPage('teams')">
+      <svg class="nav-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+      Team Management
+    </div>
+    <div class="nav-item" data-page="members" onclick="showPage('members')">
+      <svg class="nav-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      Members
+    </div>
+    <div class="nav-item" data-page="bandwidth" onclick="showPage('bandwidth')">
+      <svg class="nav-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
+      Bandwidth &amp; Capacity
+    </div>
+  </div>
+
+  <div class="nav-section">
+    <div class="nav-label">Analytics</div>
+    <div class="nav-item" data-page="reports" onclick="showPage('reports')">
+      <svg class="nav-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+      Reports
+    </div>
+    <div class="nav-item" data-page="custom-reports" onclick="showPage('custom-reports')">
+      <svg class="nav-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+      Custom Reports
+    </div>
+    <div class="nav-item" data-page="planning" onclick="showPage('planning')">
+      <svg class="nav-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+      Capacity Planning
+    </div>
+  </div>
+
+  <div class="nav-section">
+    <div class="nav-label">System</div>
+    <div class="nav-item" data-page="settings" onclick="showPage('settings')">
+      <svg class="nav-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+      Settings
+    </div>
+  </div>
+  </div><!-- /sidebar-nav -->
+
+  <div class="sidebar-bottom">
+    <div class="user-chip">
+      <div class="user-avatar">SA</div>
+      <div>
+        <div class="user-name">Sarah Admin</div>
+        <div class="user-role">Infra Manager</div>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<!-- ══════════════════════════════ MAIN ══════════════════════════════ -->
+<main class="main">
+  <div class="topbar">
+    <div class="topbar-left">
+      <div>
+        <div class="topbar-title" id="page-title">Dashboard</div>
+        <div class="breadcrumb">ISMS &rsaquo; <span id="breadcrumb-current">Dashboard</span></div>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <select style="font-size:12px;padding:6px 10px;border-radius:8px;" id="global-month" onchange="refreshAll()">
+        <option value="2025-03">March 2025</option>
+        <option value="2025-02">February 2025</option>
+        <option value="2025-01">January 2025</option>
+      </select>
+      <button class="btn btn-outline btn-sm" onclick="exportToCSV()">
+        <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+        Export
+      </button>
+      <button class="btn btn-primary btn-sm" onclick="openAddModal()">
+        <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        New Activity
+      </button>
+    </div>
+  </div>
+
+  <div class="content">
+
+<!-- ════════════════════════ PAGE: DASHBOARD ════════════════════════ -->
+<div class="page active" id="page-dashboard">
+  <div class="section-header">
+    <div>
+      <div class="section-title">Operations Overview</div>
+      <div class="section-sub">March 2025 &mdash; Infrastructure Group · All 6 Teams</div>
+    </div>
+  </div>
+
+  <div class="stats-grid">
+    <div class="stat-card c1">
+      <div class="stat-icon" style="background:#eff6ff">📋</div>
+      <div class="stat-label">Total Activities</div>
+      <div class="stat-value" style="color:var(--primary)">124</div>
+      <div class="stat-badge badge-up">↑ 12 this week</div>
+    </div>
+    <div class="stat-card c2">
+      <div class="stat-icon" style="background:#f5f3ff">⏱</div>
+      <div class="stat-label">Hours Logged</div>
+      <div class="stat-value" style="color:var(--accent2)">2,847</div>
+      <div class="stat-badge badge-up">↑ 8% vs last month</div>
+    </div>
+    <div class="stat-card c3">
+      <div class="stat-icon" style="background:#f0fdf4">📊</div>
+      <div class="stat-label">Avg Utilization</div>
+      <div class="stat-value" style="color:var(--accent3)">78%</div>
+      <div class="stat-badge badge-up">↑ 3% vs plan</div>
+    </div>
+    <div class="stat-card c4">
+      <div class="stat-icon" style="background:#fffbeb">👥</div>
+      <div class="stat-label">Active Teams</div>
+      <div class="stat-value" style="color:var(--accent4)">6</div>
+      <div class="stat-badge badge-neutral">All operational</div>
+    </div>
+    <div class="stat-card c5">
+      <div class="stat-icon" style="background:#fef2f2">🏖</div>
+      <div class="stat-label">On Leave</div>
+      <div class="stat-value" style="color:var(--danger)">4</div>
+      <div class="stat-badge badge-neutral">This week</div>
+    </div>
+    <div class="stat-card c6">
+      <div class="stat-icon" style="background:#fff7ed">⚠</div>
+      <div class="stat-label">Blocked Activities</div>
+      <div class="stat-value" style="color:var(--database)">5</div>
+      <div class="stat-badge badge-down">Needs attention</div>
+    </div>
+  </div>
+
+  <div class="grid-2 mb-20">
+    <div class="card">
+      <div class="card-header"><div class="card-title">Hours Logged by Team</div></div>
+      <div class="chart-container"><canvas id="teamHoursChart"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title">Team Utilization</div><span style="font-size:11px;color:var(--text-muted)">vs Net Capacity</span></div>
+      <div style="padding: 4px 0;">
+        <div class="util-meter">
+          <div class="util-header"><span class="util-name">🌐 Network</span><span class="util-pct" style="color:#0369a1">82% · 328h / 400h</span></div>
+          <div class="progress-bar"><div class="progress-fill" style="width:82%;background:var(--network)"></div></div>
+        </div>
+        <div class="util-meter">
+          <div class="util-header"><span class="util-name">🔒 Security</span><span class="util-pct" style="color:#b91c1c">91% · 546h / 600h</span></div>
+          <div class="progress-bar"><div class="progress-fill" style="width:91%;background:var(--security)"></div></div>
+        </div>
+        <div class="util-meter">
+          <div class="util-header"><span class="util-name">⚙️ Compute</span><span class="util-pct" style="color:#92400e">74% · 444h / 600h</span></div>
+          <div class="progress-bar"><div class="progress-fill" style="width:74%;background:var(--compute)"></div></div>
+        </div>
+        <div class="util-meter">
+          <div class="util-header"><span class="util-name">☁️ Cloud</span><span class="util-pct" style="color:#5b21b6">88% · 528h / 600h</span></div>
+          <div class="progress-bar"><div class="progress-fill" style="width:88%;background:var(--cloud)"></div></div>
+        </div>
+        <div class="util-meter">
+          <div class="util-header"><span class="util-name">💾 Storage</span><span class="util-pct" style="color:#065f46">65% · 260h / 400h</span></div>
+          <div class="progress-bar"><div class="progress-fill" style="width:65%;background:var(--storage)"></div></div>
+        </div>
+        <div class="util-meter">
+          <div class="util-header"><span class="util-name">🗄️ Database</span><span class="util-pct" style="color:#9a3412">79% · 316h / 400h</span></div>
+          <div class="progress-bar"><div class="progress-fill" style="width:79%;background:var(--database)"></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid-2 mb-20">
+    <div class="card">
+      <div class="card-header"><div class="card-title">Activity Type Distribution</div></div>
+      <div class="chart-container"><canvas id="activityTypeChart"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title">Weekly Hours Trend</div></div>
+      <div class="chart-container"><canvas id="weeklyTrendChart"></canvas></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Recent Activity Log</div>
+      <button class="btn btn-outline btn-sm" onclick="showPage('activities')">View All →</button>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Activity</th><th>Team</th><th>Member</th><th>Category</th><th>Hours</th><th>Date</th><th>Status</th></tr></thead>
+      <tbody id="recent-table"></tbody>
+    </table></div>
+  </div>
+</div>
+
+<!-- ════════════════════════ PAGE: ACTIVITIES ════════════════════════ -->
+<div class="page" id="page-activities">
+  <div class="section-header">
+    <div><div class="section-title">Activities</div><div class="section-sub">All functional team activities</div></div>
+    <button class="btn btn-primary" onclick="openAddModal()">+ New Activity</button>
+  </div>
+  <div class="filter-bar">
+    <select id="filter-team" onchange="renderActivities()"><option value="">All Teams</option><option>Network</option><option>Security</option><option>Compute</option><option>Cloud</option><option>Storage</option><option>Database</option></select>
+    <select id="filter-type" onchange="renderActivities()"><option value="">All Types</option><option>Project</option><option>Incident</option><option>Change</option><option>BAU</option><option>Training</option><option>Meeting</option></select>
+    <select id="filter-status" onchange="renderActivities()"><option value="">All Status</option><option>Active</option><option>Pending</option><option>Done</option><option>Blocked</option></select>
+    <select id="filter-priority" onchange="renderActivities()"><option value="">All Priorities</option><option>Critical</option><option>High</option><option>Medium</option><option>Low</option></select>
+    <input type="text" placeholder="🔍 Search activities..." style="flex:1;min-width:160px;" id="filter-search" oninput="renderActivities()">
+  </div>
+  <div class="card">
+    <div class="table-wrap"><table>
+      <thead><tr><th>ID</th><th>Activity Name</th><th>Team</th><th>Assigned To</th><th>Type</th><th>Category</th><th>Progress</th><th>Priority</th><th>Status</th><th>Actions</th></tr></thead>
+      <tbody id="activities-table"></tbody>
+    </table></div>
+  </div>
+</div>
+
+<!-- ════════════════════════ PAGE: TIME LOG ════════════════════════ -->
+<div class="page" id="page-timelog">
+  <div class="section-header">
+    <div><div class="section-title">Time Log</div><div class="section-sub">Track hours spent per activity</div></div>
+    <button class="btn btn-primary" onclick="openTimeModal()">+ Log Time</button>
+  </div>
+  <div class="grid-2 mb-20">
+    <div class="card"><div class="card-header"><div class="card-title">My Hours This Month</div></div><div class="chart-container-sm"><canvas id="myHoursChart"></canvas></div></div>
+    <div class="card"><div class="card-header"><div class="card-title">Time by Category</div></div><div class="chart-container-sm"><canvas id="timeCatChart"></canvas></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header"><div class="card-title">All Time Entries</div><span style="font-size:12px;color:var(--text-muted)">March 2025</span></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Date</th><th>Member</th><th>Activity</th><th>Type</th><th>Category</th><th>Hours</th><th>Notes</th></tr></thead>
+      <tbody id="timelog-table"></tbody>
+    </table></div>
+  </div>
+</div>
+
+<!-- ════════════════════════ PAGE: TEAMS ════════════════════════ -->
+<div class="page" id="page-teams">
+  <div class="section-header">
+    <div><div class="section-title">Team Management</div><div class="section-sub">6 functional infrastructure teams</div></div>
+    <button class="btn btn-primary" onclick="showToast('Use Settings → Teams to add a new team','success')">+ Add Team</button>
+  </div>
+  <div class="team-cards-grid" id="teams-grid"></div>
+</div>
+
+<!-- ════════════════════════ PAGE: MEMBERS ════════════════════════ -->
+<div class="page" id="page-members">
+  <div class="section-header">
+    <div><div class="section-title">Team Members</div><div class="section-sub">All infrastructure group members</div></div>
+    <button class="btn btn-primary" onclick="openMemberModal()">+ Add Member</button>
+  </div>
+  <div class="filter-bar">
+    <select id="member-filter-team" onchange="renderMembers()"><option value="">All Teams</option><option>Network</option><option>Security</option><option>Compute</option><option>Cloud</option><option>Storage</option><option>Database</option></select>
+    <input type="text" placeholder="🔍 Search members..." style="flex:1;" id="member-search" oninput="renderMembers()">
+  </div>
+  <div class="member-grid" id="members-grid"></div>
+</div>
+
+<!-- ════════════════════════ PAGE: BANDWIDTH ════════════════════════ -->
+<div class="page" id="page-bandwidth">
+  <div class="section-header">
+    <div><div class="section-title">Bandwidth &amp; Capacity</div><div class="section-sub">Team availability, leave and utilization</div></div>
+    <button class="btn btn-outline" onclick="openVacationModal()">+ Add Leave</button>
+  </div>
+  <div class="grid-2 mb-20">
+    <div class="card">
+      <div class="card-header"><div class="card-title">Capacity Summary</div><span style="font-size:12px;color:var(--text-muted)">March 2025</span></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Team</th><th>Members</th><th>Avail Hrs</th><th>Vacation Hrs</th><th>Net Cap</th><th>Utilized</th><th>%</th></tr></thead>
+        <tbody id="capacity-table"></tbody>
+      </table></div>
+    </div>
+    <div class="card"><div class="card-header"><div class="card-title">Capacity vs Utilization</div></div><div class="chart-container"><canvas id="capacityChart"></canvas></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header"><div class="card-title">Leave Calendar — March 2025</div></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Member</th><th>Team</th><th>From</th><th>To</th><th>Days</th><th>Hours</th><th>Type</th></tr></thead>
+      <tbody id="vacation-table"></tbody>
+    </table></div>
+  </div>
+</div>
+
+<!-- ════════════════════════ PAGE: REPORTS ════════════════════════ -->
+<div class="page" id="page-reports">
+  <div class="section-header">
+    <div><div class="section-title">Standard Reports</div><div class="section-sub">Pre-built utilization, activity and capacity analytics</div></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-outline btn-sm" onclick="exportToCSV()">Export CSV</button>
+      <button class="btn btn-success btn-sm">Open in Power BI</button>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab(this,'rpt-util')">Team Utilization</div>
+    <div class="tab" onclick="switchTab(this,'rpt-member')">Per Member</div>
+    <div class="tab" onclick="switchTab(this,'rpt-activity')">Activity Wise</div>
+    <div class="tab" onclick="switchTab(this,'rpt-trend')">Trend Analysis</div>
+    <div class="tab" onclick="switchTab(this,'rpt-vacation')">Leave Impact</div>
+  </div>
+
+  <!-- Utilization -->
+  <div id="rpt-util">
+    <div class="grid-4 mb-20">
+      <div class="card" style="padding:16px;text-align:center">
+        <div style="font-size:11px;color:var(--text-muted);font-weight:700;letter-spacing:.8px;text-transform:uppercase;margin-bottom:8px">Avg Utilization</div>
+        <div style="font-size:36px;font-weight:800;color:var(--primary)">78%</div>
+        <div style="font-size:11px;color:var(--accent3);font-weight:600;margin-top:4px">↑ +3% vs Feb</div>
+      </div>
+      <div class="card" style="padding:16px;text-align:center">
+        <div style="font-size:11px;color:var(--text-muted);font-weight:700;letter-spacing:.8px;text-transform:uppercase;margin-bottom:8px">Over Utilized</div>
+        <div style="font-size:36px;font-weight:800;color:var(--danger)">1</div>
+        <div style="font-size:11px;color:var(--danger);font-weight:600;margin-top:4px">Security &gt; 90%</div>
+      </div>
+      <div class="card" style="padding:16px;text-align:center">
+        <div style="font-size:11px;color:var(--text-muted);font-weight:700;letter-spacing:.8px;text-transform:uppercase;margin-bottom:8px">Under Utilized</div>
+        <div style="font-size:36px;font-weight:800;color:var(--accent4)">1</div>
+        <div style="font-size:11px;color:var(--accent4);font-weight:600;margin-top:4px">Storage &lt; 70%</div>
+      </div>
+      <div class="card" style="padding:16px;text-align:center">
+        <div style="font-size:11px;color:var(--text-muted);font-weight:700;letter-spacing:.8px;text-transform:uppercase;margin-bottom:8px">Total Net Capacity</div>
+        <div style="font-size:36px;font-weight:800;color:var(--accent3)">2,952h</div>
+        <div style="font-size:11px;color:var(--text-muted);font-weight:600;margin-top:4px">After leave deduction</div>
+      </div>
+    </div>
+    <div class="grid-2 mb-20">
+      <div class="card"><div class="card-header"><div class="card-title">Utilization % by Team</div></div><div class="chart-container-lg"><canvas id="rptUtil1"></canvas></div></div>
+      <div class="card"><div class="card-header"><div class="card-title">Capacity vs Hours Logged</div></div><div class="chart-container-lg"><canvas id="rptUtil2"></canvas></div></div>
+    </div>
+    <div class="card"><div class="card-header"><div class="card-title">Utilization Detail</div></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Team</th><th>Lead</th><th>Headcount</th><th>Available Hrs</th><th>Leave Hrs</th><th>Net Capacity</th><th>Logged Hrs</th><th>Utilization %</th><th>Status</th></tr></thead>
+        <tbody id="rpt-util-table"></tbody>
+      </table></div>
+    </div>
+  </div>
+
+  <!-- Per Member -->
+  <div id="rpt-member" style="display:none">
+    <div class="grid-2 mb-20">
+      <div class="card"><div class="card-header"><div class="card-title">Hours per Member</div></div><div class="chart-container-lg"><canvas id="rptMember1"></canvas></div></div>
+      <div class="card"><div class="card-header"><div class="card-title">Individual Utilization %</div></div><div class="chart-container-lg"><canvas id="rptMember2"></canvas></div></div>
+    </div>
+    <div class="card"><div class="card-header"><div class="card-title">Member Detail</div></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Member</th><th>Team</th><th>Role</th><th>Capacity</th><th>Leave Hrs</th><th>Net Cap</th><th>Logged Hrs</th><th>Util %</th></tr></thead>
+        <tbody id="rpt-member-table"></tbody>
+      </table></div>
+    </div>
+  </div>
+
+  <!-- Activity Wise -->
+  <div id="rpt-activity" style="display:none">
+    <div class="grid-2 mb-20">
+      <div class="card"><div class="card-header"><div class="card-title">Hours by Activity Type</div></div><div class="chart-container-lg"><canvas id="rptAct1"></canvas></div></div>
+      <div class="card"><div class="card-header"><div class="card-title">Hours by Category</div></div><div class="chart-container-lg"><canvas id="rptAct2"></canvas></div></div>
+    </div>
+    <div class="card"><div class="card-header"><div class="card-title">Top Activities by Hours</div></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Activity</th><th>Team</th><th>Type</th><th>Logged Hrs</th><th>Est Hrs</th><th>Completion</th><th>Status</th></tr></thead>
+        <tbody id="rpt-act-table"></tbody>
+      </table></div>
+    </div>
+  </div>
+
+  <!-- Trend -->
+  <div id="rpt-trend" style="display:none">
+    <div class="card mb-20"><div class="card-header"><div class="card-title">6-Month Utilization Trend by Team</div></div><div class="chart-container-xl"><canvas id="rptTrend"></canvas></div></div>
+    <div class="card"><div class="card-header"><div class="card-title">Monthly Hours Comparison</div></div><div class="chart-container-lg"><canvas id="rptTrend2"></canvas></div></div>
+  </div>
+
+  <!-- Leave Impact -->
+  <div id="rpt-vacation" style="display:none">
+    <div class="grid-2 mb-20">
+      <div class="card"><div class="card-header"><div class="card-title">Leave Hours by Team</div></div><div class="chart-container-lg"><canvas id="rptVac1"></canvas></div></div>
+      <div class="card"><div class="card-header"><div class="card-title">Leave Type Distribution</div></div><div class="chart-container-lg"><canvas id="rptVac2"></canvas></div></div>
+    </div>
+    <div class="card"><div class="card-header"><div class="card-title">Capacity Impact Summary</div></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Team</th><th>Gross Capacity</th><th>Leave Hrs Lost</th><th>Impact %</th><th>Net Capacity</th><th>Utilized</th><th>Adj Util %</th></tr></thead>
+        <tbody id="rpt-vac-table"></tbody>
+      </table></div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════ PAGE: CUSTOM REPORTS ════════════════════════ -->
+<div class="page" id="page-custom-reports">
+  <div class="section-header">
+    <div><div class="section-title">Custom Reports</div><div class="section-sub">Build, save and run your own tailored reports</div></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-outline btn-sm" onclick="exportToCSV()">Export CSV</button>
+      <button class="btn btn-primary btn-sm" onclick="openSaveReportModal()">💾 Save Report</button>
+    </div>
+  </div>
+
+  <!-- Saved Reports Shelf -->
+  <div class="card mb-20">
+    <div class="card-header"><div class="card-title">📂 Saved Reports</div><button class="btn btn-outline btn-xs" onclick="openSaveReportModal()">+ New</button></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap" id="saved-reports-shelf">
+      <div class="field-chip active" onclick="loadSavedReport('security-monthly')">🔒 Security Monthly</div>
+      <div class="field-chip" onclick="loadSavedReport('cloud-utilization')">☁️ Cloud Utilization</div>
+      <div class="field-chip" onclick="loadSavedReport('incident-breakdown')">🚨 Incident Breakdown</div>
+      <div class="field-chip" onclick="loadSavedReport('top-contributors')">🏆 Top Contributors</div>
+      <div class="field-chip" onclick="loadSavedReport('overdue-activities')">⏰ Overdue Activities</div>
+      <div class="field-chip" onclick="loadSavedReport('leave-impact')">🏖 Leave Impact Q1</div>
+    </div>
+  </div>
+
+  <!-- Builder -->
+  <div class="report-builder">
+    <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px">⚙️ Report Builder</div>
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">Select filters, group-by, metrics and chart type to build a custom view</div>
+
+    <div class="form-grid-3" style="margin-bottom:14px">
+      <div class="form-group">
+        <label>Report Type</label>
+        <select id="cr-type" onchange="buildCustomReport()">
+          <option value="utilization">Team Utilization</option>
+          <option value="member-hours">Member Hours</option>
+          <option value="activity-summary">Activity Summary</option>
+          <option value="incident-analysis">Incident Analysis</option>
+          <option value="category-breakdown">Category Breakdown</option>
+          <option value="cross-team">Cross-Team Comparison</option>
+          <option value="leave-capacity">Leave & Capacity</option>
+          <option value="project-progress">Project Progress</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Filter: Team</label>
+        <select id="cr-team" onchange="buildCustomReport()">
+          <option value="all">All Teams</option>
+          <option>Network</option><option>Security</option><option>Compute</option>
+          <option>Cloud</option><option>Storage</option><option>Database</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Filter: Activity Type</label>
+        <select id="cr-act-type" onchange="buildCustomReport()">
+          <option value="all">All Types</option>
+          <option>Project</option><option>Incident</option><option>Change</option>
+          <option>BAU</option><option>Training</option><option>Meeting</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Group By</label>
+        <select id="cr-groupby" onchange="buildCustomReport()">
+          <option value="team">Team</option>
+          <option value="member">Member</option>
+          <option value="category">Category</option>
+          <option value="type">Activity Type</option>
+          <option value="status">Status</option>
+          <option value="priority">Priority</option>
+          <option value="week">Week</option>
+          <option value="month">Month</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Chart Type</label>
+        <select id="cr-chart" onchange="buildCustomReport()">
+          <option value="bar">Bar Chart</option>
+          <option value="horizontalBar">Horizontal Bar</option>
+          <option value="line">Line Chart</option>
+          <option value="doughnut">Doughnut</option>
+          <option value="pie">Pie Chart</option>
+          <option value="radar">Radar</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Date Range</label>
+        <select id="cr-date" onchange="buildCustomReport()">
+          <option>March 2025</option>
+          <option>Q1 2025</option>
+          <option>Last 3 Months</option>
+          <option>Last 6 Months</option>
+          <option>Year 2025</option>
+        </select>
+      </div>
+    </div>
+
+    <div style="margin-bottom:10px;font-size:12px;font-weight:700;color:var(--text-muted);letter-spacing:.5px">INCLUDE METRICS:</div>
+    <div class="report-field-picker" id="metric-chips">
+      <div class="field-chip active" onclick="toggleChip(this)">Hours Logged</div>
+      <div class="field-chip active" onclick="toggleChip(this)">Utilization %</div>
+      <div class="field-chip" onclick="toggleChip(this)">Estimated Hours</div>
+      <div class="field-chip" onclick="toggleChip(this)">Activity Count</div>
+      <div class="field-chip" onclick="toggleChip(this)">Leave Hours</div>
+      <div class="field-chip" onclick="toggleChip(this)">Net Capacity</div>
+      <div class="field-chip" onclick="toggleChip(this)">Completion %</div>
+      <div class="field-chip" onclick="toggleChip(this)">Blocked Count</div>
+      <div class="field-chip" onclick="toggleChip(this)">Avg Hrs/Activity</div>
+      <div class="field-chip" onclick="toggleChip(this)">Member Count</div>
+    </div>
+  </div>
+
+  <!-- Preview area -->
+  <div class="report-preview-area">
+    <div id="custom-report-header" style="margin-bottom:16px">
+      <div style="font-size:16px;font-weight:800;color:var(--text)" id="cr-report-title">Team Utilization — All Teams</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-top:2px" id="cr-report-sub">Grouped by Team · March 2025</div>
+    </div>
+
+    <div class="grid-2 mb-20">
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:16px">
+        <div class="chart-container-lg"><canvas id="customChart"></canvas></div>
+      </div>
+      <div>
+        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:14px">
+          <div style="font-size:12px;font-weight:700;color:var(--text-muted);margin-bottom:10px;letter-spacing:.5px;text-transform:uppercase">Key Insights</div>
+          <div id="cr-insights"></div>
+        </div>
+        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:16px">
+          <div style="font-size:12px;font-weight:700;color:var(--text-muted);margin-bottom:10px;letter-spacing:.5px;text-transform:uppercase">Summary Stats</div>
+          <div id="cr-summary-stats"></div>
+        </div>
+      </div>
+    </div>
+
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">
+      <div class="table-wrap"><table>
+        <thead id="cr-table-head"></thead>
+        <tbody id="cr-table-body"></tbody>
+      </table></div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════ PAGE: PLANNING ════════════════════════ -->
+<div class="page" id="page-planning">
+  <div class="section-header">
+    <div><div class="section-title">Capacity Planning</div><div class="section-sub">Q2 2025 Forecast & Resource Allocation</div></div>
+  </div>
+  <div class="grid-2 mb-20">
+    <div class="card"><div class="card-header"><div class="card-title">Q2 Forecast — Utilization %</div></div><div class="chart-container"><canvas id="forecastChart"></canvas></div></div>
+    <div class="card">
+      <div class="card-header"><div class="card-title">Allocation Recommendations</div></div>
+      <div class="insight-card alert"><div class="insight-icon">🔴</div><div><div class="insight-title">Security — Over-Utilized (91%)</div><div class="insight-desc">Running at critical capacity for 2 consecutive months. Redistribute 2 activities or hire 0.5 FTE for Q2.</div></div></div>
+      <div class="insight-card warn"><div class="insight-icon">🟡</div><div><div class="insight-title">Cloud — Near Capacity (88%)</div><div class="insight-desc">3 pending projects queued for Q2. Evaluate prioritization before April intake.</div></div></div>
+      <div class="insight-card good"><div class="insight-icon">🟢</div><div><div class="insight-title">Storage — Has Headroom (65%)</div><div class="insight-desc">Can absorb 2–3 additional projects in Q2 without additional hiring.</div></div></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header"><div class="card-title">Q2 Bandwidth Planning Table</div><span style="font-size:12px;color:var(--text-muted)">Apr – Jun 2025</span></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Team</th><th>Apr Cap</th><th>Apr Planned</th><th>Apr Gap</th><th>May Cap</th><th>May Planned</th><th>May Gap</th><th>Jun Cap</th><th>Jun Planned</th><th>Jun Gap</th></tr></thead>
+      <tbody id="planning-table"></tbody>
+    </table></div>
+  </div>
+</div>
+
+<!-- ════════════════════════ PAGE: SETTINGS ════════════════════════ -->
+<div class="page" id="page-settings">
+  <div class="section-header"><div><div class="section-title">Settings</div><div class="section-sub">Configure fields, categories and integrations</div></div></div>
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab(this,'s-fields')">Custom Fields</div>
+    <div class="tab" onclick="switchTab(this,'s-categories')">Types & Categories</div>
+    <div class="tab" onclick="switchTab(this,'s-sharepoint')">SharePoint</div>
+    <div class="tab" onclick="switchTab(this,'s-powerbi')">Power BI</div>
+  </div>
+  <div id="s-fields">
+    <div class="card">
+      <div class="card-header"><div class="card-title">Activity Custom Fields</div><button class="btn btn-primary btn-sm" onclick="openFieldModal()">+ Add Field</button></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Field Name</th><th>Type</th><th>Teams</th><th>Required</th><th>Options</th><th>Actions</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Priority Level</strong></td><td>Dropdown</td><td>All</td><td><span class="status-tag status-active">Yes</span></td><td>Critical, High, Medium, Low</td><td><button class="btn btn-outline btn-xs">Edit</button></td></tr>
+          <tr><td><strong>JIRA Ticket</strong></td><td>Text</td><td>All</td><td><span class="status-tag status-done">No</span></td><td>—</td><td><button class="btn btn-outline btn-xs">Edit</button></td></tr>
+          <tr><td><strong>VLAN ID</strong></td><td>Number</td><td>Network</td><td><span class="status-tag status-done">No</span></td><td>—</td><td><button class="btn btn-outline btn-xs">Edit</button></td></tr>
+          <tr><td><strong>CVE Reference</strong></td><td>Text</td><td>Security</td><td><span class="status-tag status-done">No</span></td><td>—</td><td><button class="btn btn-outline btn-xs">Edit</button></td></tr>
+          <tr><td><strong>Cloud Provider</strong></td><td>Dropdown</td><td>Cloud</td><td><span class="status-tag status-active">Yes</span></td><td>AWS, Azure, GCP, OCI</td><td><button class="btn btn-outline btn-xs">Edit</button></td></tr>
+        </tbody>
+      </table></div>
+    </div>
+  </div>
+  <div id="s-categories" style="display:none">
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-header"><div class="card-title">Activity Types</div></div>
+        <div id="types-list" style="margin-bottom:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px"><span>📦 Project</span><button class="btn btn-outline btn-xs">×</button></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px"><span>🚨 Incident</span><button class="btn btn-outline btn-xs">×</button></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px"><span>🔄 Change</span><button class="btn btn-outline btn-xs">×</button></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px"><span>⚙️ BAU</span><button class="btn btn-outline btn-xs">×</button></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px"><span>📚 Training</span><button class="btn btn-outline btn-xs">×</button></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;font-size:13px"><span>💬 Meeting</span><button class="btn btn-outline btn-xs">×</button></div>
+        </div>
+        <div style="display:flex;gap:8px"><input type="text" placeholder="New type..." style="flex:1"><button class="btn btn-primary btn-sm">Add</button></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">Activity Categories</div></div>
+        <div id="cats-list" style="margin-bottom:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px"><span>Infrastructure Build</span><button class="btn btn-outline btn-xs">×</button></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px"><span>Maintenance</span><button class="btn btn-outline btn-xs">×</button></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px"><span>Security &amp; Compliance</span><button class="btn btn-outline btn-xs">×</button></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px"><span>Automation &amp; Scripting</span><button class="btn btn-outline btn-xs">×</button></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px"><span>Monitoring &amp; Alerting</span><button class="btn btn-outline btn-xs">×</button></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;font-size:13px"><span>Documentation</span><button class="btn btn-outline btn-xs">×</button></div>
+        </div>
+        <div style="display:flex;gap:8px"><input type="text" placeholder="New category..." style="flex:1"><button class="btn btn-primary btn-sm">Add</button></div>
+      </div>
+    </div>
+  </div>
+  <div id="s-sharepoint" style="display:none">
+    <div class="card" style="max-width:600px">
+      <div class="card-header"><div class="card-title">SharePoint Online Configuration</div></div>
+      <div class="form-grid">
+        <div class="form-group full"><label>SharePoint Site URL</label><input value="https://yourorg.sharepoint.com/sites/ISMS"></div>
+        <div class="form-group"><label>Client ID</label><input placeholder="Azure App Registration GUID"></div>
+        <div class="form-group"><label>Tenant ID</label><input placeholder="Azure Tenant GUID"></div>
+        <div class="form-group"><label>Activities List</label><input value="ISMSActivities"></div>
+        <div class="form-group"><label>Time Logs List</label><input value="ISMSTimeLogs"></div>
+        <div class="form-group"><label>Members List</label><input value="ISMSMembers"></div>
+      </div>
+      <div style="margin-top:16px"><button class="btn btn-primary" onclick="showToast('SharePoint config saved','success')">Save Configuration</button></div>
+    </div>
+  </div>
+  <div id="s-powerbi" style="display:none">
+    <div class="card" style="max-width:600px">
+      <div class="card-header"><div class="card-title">Power BI Embed Configuration</div></div>
+      <div class="form-grid">
+        <div class="form-group full"><label>Workspace ID</label><input placeholder="Power BI Workspace GUID"></div>
+        <div class="form-group full"><label>Report ID — Utilization</label><input placeholder="Report GUID"></div>
+        <div class="form-group full"><label>Report ID — Capacity</label><input placeholder="Report GUID"></div>
+        <div class="form-group full"><label>Embed Token</label><input placeholder="eyJ0eXAi..."></div>
+      </div>
+      <div style="margin-top:16px"><button class="btn btn-success" onclick="showToast('Power BI config saved','success')">Save &amp; Test</button></div>
+    </div>
+  </div>
+</div>
+
+  </div><!-- /content -->
+</main>
+
+<!-- ══════════════════════════════ MODALS ══════════════════════════════ -->
+
+<!-- New Activity -->
+<div class="modal-overlay" id="modal-activity">
+  <div class="modal">
+    <div class="modal-title">New Activity</div>
+    <div class="form-grid">
+      <div class="form-group full"><label>Activity Name *</label><input id="act-name" placeholder="e.g. Firewall Policy Review"></div>
+      <div class="form-group"><label>Functional Team *</label><select id="act-team"><option>Network</option><option>Security</option><option>Compute</option><option>Cloud</option><option>Storage</option><option>Database</option></select></div>
+      <div class="form-group"><label>Assigned To</label><select id="act-assignee"><option>Alex Chen</option><option>Maria Santos</option><option>James Park</option><option>Priya Nair</option><option>David Kim</option><option>Lisa Johnson</option></select></div>
+      <div class="form-group"><label>Activity Type *</label><select id="act-type"><option>Project</option><option>Incident</option><option>Change</option><option>BAU</option><option>Training</option><option>Meeting</option></select></div>
+      <div class="form-group"><label>Category *</label><select id="act-cat"><option>Infrastructure Build</option><option>Maintenance</option><option>Security &amp; Compliance</option><option>Automation &amp; Scripting</option><option>Monitoring &amp; Alerting</option><option>Documentation</option></select></div>
+      <div class="form-group"><label>Priority</label><select id="act-priority"><option>Critical</option><option>High</option><option selected>Medium</option><option>Low</option></select></div>
+      <div class="form-group"><label>Status</label><select id="act-status"><option>Active</option><option>Pending</option><option>Done</option><option>Blocked</option></select></div>
+      <div class="form-group"><label>Start Date</label><input type="date" id="act-start"></div>
+      <div class="form-group"><label>Due Date</label><input type="date" id="act-due"></div>
+      <div class="form-group"><label>Estimated Hours</label><input type="number" id="act-est-hrs" placeholder="40"></div>
+      <div class="form-group"><label>JIRA / Ticket Ref</label><input id="act-jira" placeholder="INFRA-1234"></div>
+      <div class="form-group full"><label>Description</label><textarea id="act-desc" placeholder="Describe the activity..."></textarea></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-activity')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveActivity()">Save Activity</button>
+    </div>
+  </div>
+</div>
+
+<!-- Log Time -->
+<div class="modal-overlay" id="modal-time">
+  <div class="modal">
+    <div class="modal-title">Log Time</div>
+    <div class="form-grid">
+      <div class="form-group"><label>Date *</label><input type="date" id="tl-date"></div>
+      <div class="form-group"><label>Team Member *</label><select id="tl-member"><option>Alex Chen</option><option>Maria Santos</option><option>James Park</option><option>Priya Nair</option><option>David Kim</option><option>Lisa Johnson</option><option>Tom Wilson</option><option>Emma Davis</option></select></div>
+      <div class="form-group full"><label>Activity *</label><select id="tl-activity"><option>Firewall Policy Review</option><option>Network Segmentation — DC Migration</option><option>AWS Landing Zone Setup</option><option>SQL Server Upgrade</option><option>SAN Performance Tuning</option><option>Incident Response — P1 Outage</option></select></div>
+      <div class="form-group"><label>Activity Type</label><select id="tl-type"><option>Project</option><option>Incident</option><option>Change</option><option>BAU</option><option>Training</option><option>Meeting</option></select></div>
+      <div class="form-group"><label>Category</label><select id="tl-cat"><option>Infrastructure Build</option><option>Maintenance</option><option>Security &amp; Compliance</option><option>Automation &amp; Scripting</option><option>Monitoring &amp; Alerting</option><option>Documentation</option></select></div>
+      <div class="form-group"><label>Hours Spent *</label><input type="number" id="tl-hours" placeholder="4" step="0.5" min="0.5" max="24"></div>
+      <div class="form-group full"><label>Notes</label><textarea id="tl-notes" placeholder="What did you accomplish?"></textarea></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-time')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveTimeLog()">Save Time Entry</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Member -->
+<div class="modal-overlay" id="modal-member">
+  <div class="modal">
+    <div class="modal-title">Add Team Member</div>
+    <div class="form-grid">
+      <div class="form-group"><label>First Name *</label><input id="mb-first"></div>
+      <div class="form-group"><label>Last Name *</label><input id="mb-last"></div>
+      <div class="form-group full"><label>Email</label><input type="email" id="mb-email"></div>
+      <div class="form-group"><label>Team *</label><select id="mb-team"><option>Network</option><option>Security</option><option>Compute</option><option>Cloud</option><option>Storage</option><option>Database</option></select></div>
+      <div class="form-group"><label>Job Title</label><input id="mb-title"></div>
+      <div class="form-group"><label>Role</label><select id="mb-role"><option>Engineer</option><option>Senior Engineer</option><option>Lead</option><option>Manager</option></select></div>
+      <div class="form-group"><label>Monthly Bandwidth (hrs)</label><input type="number" id="mb-bw" value="160"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-member')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveMember()">Add Member</button>
+    </div>
+  </div>
+</div>
+
+<!-- Vacation -->
+<div class="modal-overlay" id="modal-vacation">
+  <div class="modal">
+    <div class="modal-title">Add Leave Entry</div>
+    <div class="form-grid">
+      <div class="form-group"><label>Member</label><select id="vac-member"><option>Alex Chen</option><option>Maria Santos</option><option>James Park</option><option>Priya Nair</option><option>David Kim</option><option>Lisa Johnson</option></select></div>
+      <div class="form-group"><label>Leave Type</label><select id="vac-type"><option>Annual Leave</option><option>Sick Leave</option><option>Public Holiday</option><option>Training</option><option>Conference</option></select></div>
+      <div class="form-group"><label>From Date</label><input type="date" id="vac-from"></div>
+      <div class="form-group"><label>To Date</label><input type="date" id="vac-to"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-vacation')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveVacation()">Save Leave</button>
+    </div>
+  </div>
+</div>
+
+<!-- Save Report -->
+<div class="modal-overlay" id="modal-save-report">
+  <div class="modal">
+    <div class="modal-title">Save Custom Report</div>
+    <div class="form-grid">
+      <div class="form-group full"><label>Report Name *</label><input id="sr-name" placeholder="e.g. Security Q2 Review"></div>
+      <div class="form-group full"><label>Description</label><textarea id="sr-desc" placeholder="What does this report show?" style="min-height:60px"></textarea></div>
+      <div class="form-group"><label>Emoji Icon</label><input id="sr-icon" value="📊" style="width:70px"></div>
+      <div class="form-group"><label>Share With</label><select><option>Only Me</option><option>My Team</option><option>All Managers</option><option>Everyone</option></select></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-save-report')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveCustomReport()">Save Report</button>
+    </div>
+  </div>
+</div>
+
+<!-- Custom Field -->
+<div class="modal-overlay" id="modal-field">
+  <div class="modal">
+    <div class="modal-title">Add Custom Field</div>
+    <div class="form-grid">
+      <div class="form-group full"><label>Field Name *</label><input placeholder="e.g. Approval Ticket"></div>
+      <div class="form-group"><label>Field Type *</label><select><option>Text</option><option>Number</option><option>Dropdown</option><option>Date</option><option>Checkbox</option><option>Multi-select</option></select></div>
+      <div class="form-group"><label>Applicable Teams</label><select><option>All Teams</option><option>Network</option><option>Security</option><option>Compute</option><option>Cloud</option><option>Storage</option><option>Database</option></select></div>
+      <div class="form-group full"><label>Options (comma-separated, for Dropdown)</label><input placeholder="Option A, Option B, Option C"></div>
+      <div class="form-group"><label>Required?</label><select><option>No</option><option>Yes</option></select></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-field')">Cancel</button>
+      <button class="btn btn-primary" onclick="closeModal('modal-field');showToast('Custom field added!','success')">Save Field</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════ SCRIPTS ══════════════════════════════ -->
+<script>
+// ── DATA ──
+const TEAMS = [
+  {name:'Network',  emoji:'🌐',lead:'Alex Chen',   color:'#0891b2',hc:3,bw:160},
+  {name:'Security', emoji:'🔒',lead:'Maria Santos', color:'#dc2626',hc:4,bw:160},
+  {name:'Compute',  emoji:'⚙️',lead:'James Park',  color:'#d97706',hc:4,bw:160},
+  {name:'Cloud',    emoji:'☁️',lead:'Priya Nair',  color:'#7c3aed',hc:4,bw:160},
+  {name:'Storage',  emoji:'💾',lead:'David Kim',   color:'#059669',hc:3,bw:160},
+  {name:'Database', emoji:'🗄️',lead:'Lisa Johnson',color:'#ea580c',hc:3,bw:160},
+];
+const CAPACITY = [
+  {team:'Network', hc:3,avail:400,vac:48,util:328},
+  {team:'Security',hc:4,avail:600,vac:32,util:546},
+  {team:'Compute', hc:4,avail:600,vac:8, util:444},
+  {team:'Cloud',   hc:4,avail:600,vac:8, util:528},
+  {team:'Storage', hc:3,avail:400,vac:0, util:260},
+  {team:'Database',hc:3,avail:400,vac:0, util:316},
+];
+let ACTIVITIES = [
+  {id:'ACT-001',name:'Firewall Policy Review',           team:'Security',assignee:'Maria Santos',type:'Change',  cat:'Security & Compliance',   hrs:18,est:24,priority:'High',    status:'Active', jira:'SEC-210',date:'2025-03-10'},
+  {id:'ACT-002',name:'Network Segmentation — DC Migrate',team:'Network', assignee:'Alex Chen',   type:'Project', cat:'Infrastructure Build',     hrs:42,est:80,priority:'Critical',status:'Active', jira:'NET-087',date:'2025-03-01'},
+  {id:'ACT-003',name:'AWS Landing Zone Setup',           team:'Cloud',   assignee:'Priya Nair',  type:'Project', cat:'Infrastructure Build',     hrs:56,est:60,priority:'High',    status:'Active', jira:'CLD-045',date:'2025-02-20'},
+  {id:'ACT-004',name:'SQL Server Upgrade to 2022',       team:'Database',assignee:'Lisa Johnson', type:'Change',  cat:'Maintenance',              hrs:12,est:16,priority:'Medium',  status:'Pending',jira:'DB-334', date:'2025-03-12'},
+  {id:'ACT-005',name:'SAN Performance Tuning',           team:'Storage', assignee:'David Kim',   type:'BAU',     cat:'Monitoring & Alerting',    hrs:8, est:8, priority:'Low',     status:'Done',   jira:'STR-112',date:'2025-03-05'},
+  {id:'ACT-006',name:'Incident Response — P1 Outage',    team:'Compute', assignee:'James Park',  type:'Incident',cat:'Maintenance',              hrs:14,est:14,priority:'Critical',status:'Done',   jira:'INC-891',date:'2025-03-08'},
+  {id:'ACT-007',name:'Zero Trust Network Access POC',    team:'Security',assignee:'Maria Santos',type:'Project', cat:'Security & Compliance',   hrs:28,est:40,priority:'High',    status:'Active', jira:'SEC-215',date:'2025-03-03'},
+  {id:'ACT-008',name:'Kubernetes Cluster Upgrade',       team:'Compute', assignee:'James Park',  type:'Change',  cat:'Maintenance',              hrs:6, est:12,priority:'High',    status:'Pending',jira:'CMP-229',date:'2025-03-14'},
+  {id:'ACT-009',name:'Azure DevOps Pipeline Setup',      team:'Cloud',   assignee:'Priya Nair',  type:'Project', cat:'Automation & Scripting',  hrs:22,est:30,priority:'Medium',  status:'Active', jira:'CLD-048',date:'2025-03-06'},
+  {id:'ACT-010',name:'BGP Route Optimization',           team:'Network', assignee:'Alex Chen',   type:'BAU',     cat:'Infrastructure Build',     hrs:10,est:10,priority:'Medium',  status:'Blocked',jira:'NET-092',date:'2025-03-11'},
+];
+let TIME_LOGS = [
+  {date:'2025-03-14',member:'Maria Santos',activity:'Firewall Policy Review',           type:'Change',  cat:'Security & Compliance', hrs:4,notes:'Reviewed ingress rules for DMZ'},
+  {date:'2025-03-14',member:'Alex Chen',   activity:'Network Segmentation',             type:'Project', cat:'Infrastructure Build',  hrs:6,notes:'VLAN tagging config'},
+  {date:'2025-03-13',member:'Priya Nair',  activity:'AWS Landing Zone Setup',           type:'Project', cat:'Infrastructure Build',  hrs:8,notes:'SCP policies and account vending'},
+  {date:'2025-03-13',member:'James Park',  activity:'Kubernetes Cluster Upgrade',       type:'Change',  cat:'Maintenance',           hrs:3,notes:'Pre-upgrade validation tests'},
+  {date:'2025-03-12',member:'Lisa Johnson',activity:'SQL Server Upgrade to 2022',       type:'Change',  cat:'Maintenance',           hrs:4,notes:'Compatibility assessment'},
+  {date:'2025-03-12',member:'David Kim',   activity:'SAN Performance Tuning',           type:'BAU',     cat:'Monitoring & Alerting', hrs:4,notes:'Baseline perf metrics'},
+  {date:'2025-03-11',member:'Maria Santos',activity:'Zero Trust Network Access POC',   type:'Project', cat:'Security & Compliance', hrs:6,notes:'IdP integration'},
+  {date:'2025-03-11',member:'Priya Nair',  activity:'Azure DevOps Pipeline Setup',      type:'Project', cat:'Automation & Scripting',hrs:5,notes:'CI/CD template creation'},
+];
+let MEMBERS = [
+  {first:'Alex',  last:'Chen',   team:'Network',  title:'Network Engineer',    role:'Lead',           bw:160,email:'alex.chen@co.com',   hrs:82},
+  {first:'Maria', last:'Santos', team:'Security', title:'Security Engineer',   role:'Lead',           bw:160,email:'maria.s@co.com',      hrs:96},
+  {first:'James', last:'Park',   team:'Compute',  title:'Systems Engineer',    role:'Lead',           bw:160,email:'james.p@co.com',      hrs:74},
+  {first:'Priya', last:'Nair',   team:'Cloud',    title:'Cloud Architect',     role:'Lead',           bw:160,email:'priya.n@co.com',      hrs:121},
+  {first:'David', last:'Kim',    team:'Storage',  title:'Storage Engineer',    role:'Lead',           bw:160,email:'david.k@co.com',      hrs:68},
+  {first:'Lisa',  last:'Johnson',team:'Database', title:'DBA',                 role:'Lead',           bw:160,email:'lisa.j@co.com',       hrs:88},
+  {first:'Tom',   last:'Wilson', team:'Network',  title:'Network Engineer',    role:'Engineer',       bw:160,email:'tom.w@co.com',        hrs:78},
+  {first:'Emma',  last:'Davis',  team:'Security', title:'Security Analyst',    role:'Senior Engineer',bw:160,email:'emma.d@co.com',       hrs:102},
+  {first:'Mike',  last:'Brown',  team:'Compute',  title:'Virtualization Eng.', role:'Engineer',       bw:160,email:'mike.b@co.com',       hrs:64},
+  {first:'Aisha', last:'Malik',  team:'Cloud',    title:'Cloud Engineer',      role:'Senior Engineer',bw:160,email:'aisha.m@co.com',      hrs:98},
+];
+const VACATIONS = [
+  {member:'Tom Wilson', team:'Network', from:'2025-03-17',to:'2025-03-21',days:5,hrs:40,type:'Annual Leave'},
+  {member:'Emma Davis', team:'Security',from:'2025-03-24',to:'2025-03-26',days:3,hrs:24,type:'Annual Leave'},
+  {member:'Mike Brown', team:'Compute', from:'2025-03-10',to:'2025-03-10',days:1,hrs:8, type:'Sick Leave'},
+  {member:'Aisha Malik',team:'Cloud',   from:'2025-03-20',to:'2025-03-20',days:1,hrs:8, type:'Public Holiday'},
+];
+let customChartInstance = null;
+const chartInstances = {};
+
+// ── NAVIGATION ──
+function showPage(id) {
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  const pageEl = document.getElementById('page-'+id);
+  if(pageEl) pageEl.classList.add('active');
+  const titles = {dashboard:'Dashboard',activities:'Activities',timelog:'Time Log',teams:'Team Management',members:'Members',bandwidth:'Bandwidth & Capacity',reports:'Standard Reports','custom-reports':'Custom Reports',planning:'Capacity Planning',settings:'Settings'};
+  const t = titles[id]||id;
+  document.getElementById('page-title').textContent = t;
+  document.getElementById('breadcrumb-current').textContent = t;
+  const navMatch = document.querySelector('.nav-item[data-page="'+id+'"]');
+  if(navMatch) navMatch.classList.add('active');
+  if(id==='reports') setTimeout(initReportCharts,60);
+  if(id==='custom-reports') setTimeout(()=>buildCustomReport(),60);
+}
+
+// ── MODALS ──
+function openAddModal()       { document.getElementById('modal-activity').classList.add('open'); }
+function openTimeModal()      { document.getElementById('modal-time').classList.add('open'); }
+function openMemberModal()    { document.getElementById('modal-member').classList.add('open'); }
+function openVacationModal()  { document.getElementById('modal-vacation').classList.add('open'); }
+function openSaveReportModal(){ document.getElementById('modal-save-report').classList.add('open'); }
+function openFieldModal()     { document.getElementById('modal-field').classList.add('open'); }
+function closeModal(id)       { document.getElementById(id).classList.remove('open'); }
+document.querySelectorAll('.modal-overlay').forEach(o=>{
+  o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('open');});
+});
+
+// ── SAVES ──
+function saveActivity(){
+  const name=document.getElementById('act-name').value.trim();
+  if(!name){alert('Activity name is required');return;}
+  const id='ACT-'+String(ACTIVITIES.length+1).padStart(3,'0');
+  ACTIVITIES.unshift({id,name,team:document.getElementById('act-team').value,assignee:document.getElementById('act-assignee').value,type:document.getElementById('act-type').value,cat:document.getElementById('act-cat').value,priority:document.getElementById('act-priority').value,status:document.getElementById('act-status').value,hrs:0,est:parseInt(document.getElementById('act-est-hrs').value)||0,jira:document.getElementById('act-jira').value,date:document.getElementById('act-start').value||new Date().toISOString().slice(0,10)});
+  closeModal('modal-activity');renderActivities();renderRecentTable();showToast(id+' created!','success');
+}
+function saveTimeLog(){
+  const h=parseFloat(document.getElementById('tl-hours').value);
+  if(!h||h<=0){alert('Enter hours');return;}
+  TIME_LOGS.unshift({date:document.getElementById('tl-date').value||new Date().toISOString().slice(0,10),member:document.getElementById('tl-member').value,activity:document.getElementById('tl-activity').value,type:document.getElementById('tl-type').value,cat:document.getElementById('tl-cat').value,hrs:h,notes:document.getElementById('tl-notes').value});
+  closeModal('modal-time');renderTimeLogs();showToast(h+'h logged!','success');
+}
+function saveMember(){
+  const first=document.getElementById('mb-first').value.trim(),last=document.getElementById('mb-last').value.trim();
+  if(!first||!last){alert('Name required');return;}
+  MEMBERS.push({first,last,team:document.getElementById('mb-team').value,title:document.getElementById('mb-title').value,role:document.getElementById('mb-role').value,bw:parseInt(document.getElementById('mb-bw').value)||160,email:document.getElementById('mb-email').value,hrs:0});
+  closeModal('modal-member');renderMembers();showToast(first+' '+last+' added!','success');
+}
+function saveVacation(){
+  const from=document.getElementById('vac-from').value,to=document.getElementById('vac-to').value;
+  if(!from||!to){alert('Dates required');return;}
+  const days=Math.max(1,Math.round((new Date(to)-new Date(from))/86400000)+1);
+  const member=document.getElementById('vac-member').value;
+  VACATIONS.push({member,team:MEMBERS.find(m=>m.first+' '+m.last===member)?.team||'',from,to,days,hrs:days*8,type:document.getElementById('vac-type').value});
+  closeModal('modal-vacation');renderVacations();showToast('Leave entry saved!','success');
+}
+function saveCustomReport(){
+  const name=document.getElementById('sr-name').value.trim();
+  if(!name){alert('Name required');return;}
+  const icon=document.getElementById('sr-icon').value||'📊';
+  const chip=document.createElement('div');
+  chip.className='field-chip';chip.textContent=icon+' '+name;
+  chip.onclick=()=>showToast('Loading: '+name,'success');
+  document.getElementById('saved-reports-shelf').appendChild(chip);
+  closeModal('modal-save-report');showToast('"'+name+'" saved!','success');
+}
+
+// ── RENDERS ──
+const TC=t=>`<span class="team-tag tag-${t.toLowerCase()}">${t}</span>`;
+const SC=s=>{const m={Active:'status-active',Pending:'status-pending',Done:'status-done',Blocked:'status-blocked'};return`<span class="status-tag ${m[s]||''}">${s}</span>`;};
+const PC=p=>{const c={Critical:'#b91c1c',High:'#d97706',Medium:'#1a56db',Low:'#6b7280'};return`<span style="color:${c[p]||'#6b7280'};font-size:11px;font-weight:700">● ${p}</span>`;};
+
+function renderActivities(){
+  const tf=document.getElementById('filter-team')?.value,tyf=document.getElementById('filter-type')?.value,sf=document.getElementById('filter-status')?.value,pf=document.getElementById('filter-priority')?.value,q=(document.getElementById('filter-search')?.value||'').toLowerCase();
+  const tbody=document.getElementById('activities-table');if(!tbody)return;
+  const filtered=ACTIVITIES.filter(a=>(!tf||a.team===tf)&&(!tyf||a.type===tyf)&&(!sf||a.status===sf)&&(!pf||a.priority===pf)&&(!q||a.name.toLowerCase().includes(q)||a.id.toLowerCase().includes(q)));
+  tbody.innerHTML=filtered.map(a=>{
+    const pct=Math.min(100,Math.round(a.hrs/Math.max(a.est,1)*100));
+    const bc=pct>80?'#059669':pct>50?'#d97706':'#1a56db';
+    return`<tr><td><code style="font-size:11px;background:var(--surface2);padding:2px 6px;border-radius:4px;color:var(--text-muted)">${a.id}</code></td><td><strong>${a.name}</strong><br><span style="font-size:11px;color:var(--text-muted)">${a.jira}</span></td><td>${TC(a.team)}</td><td style="font-size:12px">${a.assignee}</td><td style="font-size:12px">${a.type}</td><td style="font-size:12px">${a.cat}</td><td><div style="font-size:12px;font-weight:600;margin-bottom:4px">${a.hrs}h / ${a.est}h</div><div class="progress-bar" style="width:80px"><div class="progress-fill" style="width:${pct}%;background:${bc}"></div></div></td><td>${PC(a.priority)}</td><td>${SC(a.status)}</td><td><button class="btn btn-outline btn-xs" onclick="showToast('Edit: ${a.id}','success')">Edit</button></td></tr>`;
+  }).join('');
+}
+function renderTimeLogs(){
+  const tbody=document.getElementById('timelog-table');if(!tbody)return;
+  tbody.innerHTML=TIME_LOGS.map(t=>`<tr><td style="font-size:12px">${t.date}</td><td><strong>${t.member}</strong></td><td style="font-size:12px">${t.activity}</td><td style="font-size:12px">${t.type}</td><td style="font-size:12px">${t.cat}</td><td><strong style="color:var(--primary)">${t.hrs}h</strong></td><td style="font-size:12px;color:var(--text-muted)">${t.notes}</td></tr>`).join('');
+}
+function renderMembers(){
+  const tf=document.getElementById('member-filter-team')?.value,q=(document.getElementById('member-search')?.value||'').toLowerCase();
+  const grid=document.getElementById('members-grid');if(!grid)return;
+  const tc={Network:'var(--network)',Security:'var(--security)',Compute:'var(--compute)',Cloud:'var(--cloud)',Storage:'var(--storage)',Database:'var(--database)'};
+  const filtered=MEMBERS.filter(m=>(!tf||m.team===tf)&&(!q||`${m.first} ${m.last}`.toLowerCase().includes(q)));
+  grid.innerHTML=filtered.map(m=>{
+    const util=Math.round(m.hrs/m.bw*100),c=tc[m.team]||'var(--primary)';
+    const uc=util>85?'#dc2626':util>65?'#d97706':'#059669';
+    return`<div class="member-card"><div class="member-avatar" style="background:${c}18;color:${c}">${m.first[0]}${m.last[0]}</div><div class="member-name">${m.first} ${m.last}</div><div class="member-title">${m.title} · ${TC(m.team)}</div><div class="member-stats"><div class="member-stat"><strong>${m.hrs}h</strong>Logged</div><div class="member-stat"><strong>${m.bw}h</strong>Capacity</div><div class="member-stat"><strong style="color:${uc}">${util}%</strong>Util.</div></div><div class="progress-bar" style="margin-top:10px"><div class="progress-fill" style="width:${Math.min(100,util)}%;background:${c}"></div></div></div>`;
+  }).join('');
+}
+function renderTeams(){
+  const grid=document.getElementById('teams-grid');if(!grid)return;
+  const tc={Network:'var(--network)',Security:'var(--security)',Compute:'var(--compute)',Cloud:'var(--cloud)',Storage:'var(--storage)',Database:'var(--database)'};
+  grid.innerHTML=TEAMS.map(t=>{
+    const cap=CAPACITY.find(c=>c.team===t.name)||{};
+    const net=(cap.avail||0)-(cap.vac||0);
+    const util=net?Math.round((cap.util||0)/net*100):0;
+    const c=tc[t.name];
+    const uc=util>85?'#dc2626':util>75?'#d97706':'#059669';
+    return`<div class="team-card" style="border-top:3px solid ${c}"><div style="display:flex;align-items:center;gap:10px;margin-bottom:14px"><div style="font-size:28px">${t.emoji}</div><div><div style="font-size:16px;font-weight:800;color:var(--text)">${t.name}</div><div style="font-size:12px;color:var(--text-muted)">Lead: ${t.lead}</div></div></div><div style="display:flex;gap:16px;margin-bottom:12px"><div class="member-stat"><strong style="font-size:18px;font-weight:800;color:var(--text)">${t.hc}</strong>Members</div><div class="member-stat"><strong style="font-size:18px;font-weight:800;color:var(--text)">${t.hc*t.bw}h</strong>Capacity</div><div class="member-stat"><strong style="font-size:18px;font-weight:800;color:${uc}">${util}%</strong>Utilized</div></div><div class="progress-bar"><div class="progress-fill" style="width:${util}%;background:${c}"></div></div><div style="display:flex;gap:8px;margin-top:12px"><button class="btn btn-outline btn-sm" style="flex:1" onclick="showPage('members')">Members</button><button class="btn btn-outline btn-sm" style="flex:1" onclick="showToast('Team config','success')">Configure</button></div></div>`;
+  }).join('');
+}
+function renderVacations(){
+  const tbody=document.getElementById('vacation-table');if(!tbody)return;
+  tbody.innerHTML=VACATIONS.map(v=>`<tr><td><strong>${v.member}</strong></td><td>${TC(v.team)}</td><td style="font-size:12px">${v.from}</td><td style="font-size:12px">${v.to}</td><td style="font-size:12px">${v.days}</td><td><strong style="color:var(--danger)">${v.hrs}h</strong></td><td style="font-size:12px">${v.type}</td></tr>`).join('');
+}
+function renderCapacity(){
+  const tbody=document.getElementById('capacity-table');if(!tbody)return;
+  tbody.innerHTML=CAPACITY.map(c=>{
+    const net=c.avail-c.vac,pct=Math.round(c.util/net*100);
+    const col=pct>85?'#dc2626':pct>75?'#d97706':'#059669';
+    return`<tr><td><strong>${c.team}</strong></td><td>${c.hc}</td><td>${c.avail}h</td><td style="color:var(--danger)">${c.vac}h</td><td><strong>${net}h</strong></td><td>${c.util}h</td><td><strong style="color:${col}">${pct}%</strong></td></tr>`;
+  }).join('');
+}
+function renderRecentTable(){
+  const tbody=document.getElementById('recent-table');if(!tbody)return;
+  tbody.innerHTML=ACTIVITIES.slice(0,7).map(a=>`<tr><td><strong>${a.name}</strong></td><td>${TC(a.team)}</td><td style="font-size:12px">${a.assignee}</td><td style="font-size:12px">${a.cat}</td><td><strong style="color:var(--primary)">${a.hrs}h</strong></td><td style="font-size:12px;color:var(--text-muted)">${a.date}</td><td>${SC(a.status)}</td></tr>`).join('');
+}
+function renderPlanningTable(){
+  const tbody=document.getElementById('planning-table');if(!tbody)return;
+  const data=[{t:'Network',ac:400,ap:380,mc:400,mp:390,jc:400,jp:360},{t:'Security',ac:600,ap:560,mc:600,mp:580,jc:600,jp:540},{t:'Compute',ac:600,ap:480,mc:600,mp:520,jc:600,jp:500},{t:'Cloud',ac:600,ap:590,mc:600,mp:600,jc:640,jp:580},{t:'Storage',ac:400,ap:280,mc:400,mp:300,jc:400,jp:320},{t:'Database',ac:400,ap:350,mc:400,mp:380,jc:400,jp:360}];
+  const gc=v=>v<20?'#dc2626':v<60?'#d97706':'#059669';
+  tbody.innerHTML=data.map(r=>`<tr><td><strong>${r.t}</strong></td><td>${r.ac}h</td><td>${r.ap}h</td><td style="color:${gc(r.ac-r.ap)};font-weight:700">${r.ac-r.ap}h</td><td>${r.mc}h</td><td>${r.mp}h</td><td style="color:${gc(r.mc-r.mp)};font-weight:700">${r.mc-r.mp}h</td><td>${r.jc}h</td><td>${r.jp}h</td><td style="color:${gc(r.jc-r.jp)};font-weight:700">${r.jc-r.jp}h</td></tr>`).join('');
+}
+
+// ── CHART HELPERS ──
+const LIGHT_DEFAULTS = {
+  responsive:true, maintainAspectRatio:false,
+  plugins:{legend:{labels:{color:'#374151',font:{size:11,family:'Plus Jakarta Sans'}}}},
+  scales:{x:{ticks:{color:'#6b7280',font:{size:11}},grid:{color:'rgba(209,213,219,0.5)'}},y:{ticks:{color:'#6b7280',font:{size:11}},grid:{color:'rgba(209,213,219,0.5)'}}}
+};
+function mkChart(id,config){
+  if(chartInstances[id])chartInstances[id].destroy();
+  chartInstances[id]=new Chart(document.getElementById(id),config);
+}
+
+function initDashboardCharts(){
+  mkChart('teamHoursChart',{type:'bar',data:{labels:TEAMS.map(t=>t.name),datasets:[{label:'Hours Logged',data:CAPACITY.map(c=>c.util),backgroundColor:TEAMS.map(t=>t.color+'33'),borderColor:TEAMS.map(t=>t.color),borderWidth:2,borderRadius:6},{label:'Net Capacity',data:CAPACITY.map(c=>c.avail-c.vac),backgroundColor:'transparent',borderColor:'rgba(107,114,128,0.3)',borderWidth:1.5,borderRadius:6,type:'bar'}]},options:{...LIGHT_DEFAULTS}});
+  mkChart('activityTypeChart',{type:'doughnut',data:{labels:['Project','Incident','Change','BAU','Training','Meeting'],datasets:[{data:[38,12,22,18,6,4],backgroundColor:['#1a56db','#dc2626','#d97706','#7c3aed','#059669','#ea580c'],borderWidth:2,borderColor:'#fff',hoverOffset:6}]},options:{responsive:true,maintainAspectRatio:false,cutout:'64%',plugins:{legend:{position:'right',labels:{color:'#374151',font:{size:11},padding:10}}}}});
+  mkChart('weeklyTrendChart',{type:'line',data:{labels:['W1','W2','W3','W4'],datasets:TEAMS.map(t=>({label:t.name,data:[Math.random()*100+40,Math.random()*100+40,Math.random()*100+40,Math.random()*100+40].map(v=>Math.round(v)),borderColor:t.color,backgroundColor:t.color+'18',borderWidth:2,pointRadius:3,tension:.4,fill:false}))},options:{...LIGHT_DEFAULTS}});
+  const ctx1=document.getElementById('myHoursChart');if(ctx1)mkChart('myHoursChart',{type:'bar',data:{labels:['Mar 1','Mar 3','Mar 5','Mar 7','Mar 10','Mar 12','Mar 14'],datasets:[{label:'Hours',data:[6,4,8,5,6,4,4],backgroundColor:'#1a56db22',borderColor:'#1a56db',borderWidth:2,borderRadius:4}]},options:{...LIGHT_DEFAULTS,plugins:{legend:{display:false}}}});
+  const ctx2=document.getElementById('timeCatChart');if(ctx2)mkChart('timeCatChart',{type:'pie',data:{labels:['Infra Build','Maintenance','Security','Automation','Monitoring','Docs'],datasets:[{data:[35,20,25,10,7,3],backgroundColor:['#1a56db','#d97706','#dc2626','#7c3aed','#059669','#6b7280'],borderWidth:2,borderColor:'#fff'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{color:'#374151',font:{size:11},padding:8}}}}});
+  const ctx3=document.getElementById('capacityChart');if(ctx3)mkChart('capacityChart',{type:'bar',data:{labels:CAPACITY.map(c=>c.team),datasets:[{label:'Net Capacity',data:CAPACITY.map(c=>c.avail-c.vac),backgroundColor:'#e5e7eb',borderColor:'#d1d5db',borderWidth:1,borderRadius:4},{label:'Utilized',data:CAPACITY.map(c=>c.util),backgroundColor:TEAMS.map(t=>t.color+'55'),borderColor:TEAMS.map(t=>t.color),borderWidth:2,borderRadius:4}]},options:{...LIGHT_DEFAULTS}});
+  const ctx4=document.getElementById('forecastChart');if(ctx4)mkChart('forecastChart',{type:'line',data:{labels:['Jan','Feb','Mar','Apr(F)','May(F)','Jun(F)'],datasets:TEAMS.map(t=>({label:t.name,data:[Math.random()*25+55,Math.random()*25+60,Math.random()*20+65,Math.random()*20+60,Math.random()*20+62,Math.random()*20+60].map(v=>Math.round(v)),borderColor:t.color,backgroundColor:t.color+'10',borderWidth:2,tension:.4,fill:false,pointRadius:3}))},options:{...LIGHT_DEFAULTS}});
+}
+
+function initReportCharts(){
+  mkChart('rptUtil1',{type:'bar',data:{labels:TEAMS.map(t=>t.name),datasets:[{label:'Utilization %',data:[82,91,74,88,65,79],backgroundColor:TEAMS.map(t=>t.color+'44'),borderColor:TEAMS.map(t=>t.color),borderWidth:2,borderRadius:6}]},options:{...LIGHT_DEFAULTS,scales:{...LIGHT_DEFAULTS.scales,y:{...LIGHT_DEFAULTS.scales.y,max:100}}}});
+  mkChart('rptUtil2',{type:'bar',data:{labels:TEAMS.map(t=>t.name),datasets:[{label:'Net Capacity',data:CAPACITY.map(c=>c.avail-c.vac),backgroundColor:'#f3f4f6',borderColor:'#d1d5db',borderWidth:1,borderRadius:4},{label:'Utilized',data:CAPACITY.map(c=>c.util),backgroundColor:TEAMS.map(t=>t.color+'55'),borderColor:TEAMS.map(t=>t.color),borderWidth:2,borderRadius:4}]},options:{...LIGHT_DEFAULTS}});
+  // util table
+  const rut=document.getElementById('rpt-util-table');if(rut)rut.innerHTML=CAPACITY.map(c=>{const net=c.avail-c.vac,pct=Math.round(c.util/net*100),t=TEAMS.find(t=>t.name===c.team);const col=pct>85?'#dc2626':pct>75?'#d97706':'#059669';const badge=pct>85?'<span class="status-tag status-blocked">High Risk</span>':pct>75?'<span class="status-tag status-pending">Monitor</span>':'<span class="status-tag status-active">Healthy</span>';return`<tr><td><strong>${c.team}</strong></td><td style="font-size:12px">${t?.lead}</td><td>${c.hc}</td><td>${c.avail}h</td><td style="color:var(--danger)">${c.vac}h</td><td><strong>${net}h</strong></td><td>${c.util}h</td><td><strong style="color:${col};font-size:14px">${pct}%</strong></td><td>${badge}</td></tr>`;}).join('');
+  mkChart('rptMember1',{type:'bar',data:{labels:MEMBERS.map(m=>m.first+' '+m.last[0]+'.'),datasets:[{label:'Hours Logged',data:MEMBERS.map(m=>m.hrs),backgroundColor:MEMBERS.map(m=>{const t=TEAMS.find(t=>t.name===m.team);return t?t.color+'44':'#1a56db44';}),borderColor:MEMBERS.map(m=>{const t=TEAMS.find(t=>t.name===m.team);return t?t.color:'#1a56db';}),borderWidth:2,borderRadius:5}]},options:{...LIGHT_DEFAULTS}});
+  mkChart('rptMember2',{type:'bar',data:{labels:MEMBERS.map(m=>m.first+' '+m.last[0]+'.'),datasets:[{label:'Utilization %',data:MEMBERS.map(m=>Math.round(m.hrs/m.bw*100)),backgroundColor:MEMBERS.map(m=>{const p=Math.round(m.hrs/m.bw*100);return p>85?'#dc262644':p>65?'#d9770644':'#05996944';}),borderColor:MEMBERS.map(m=>{const p=Math.round(m.hrs/m.bw*100);return p>85?'#dc2626':p>65?'#d97706':'#059669';}),borderWidth:2,borderRadius:5}]},options:{...LIGHT_DEFAULTS,scales:{...LIGHT_DEFAULTS.scales,y:{...LIGHT_DEFAULTS.scales.y,max:120}}}});
+  const rmt=document.getElementById('rpt-member-table');if(rmt)rmt.innerHTML=MEMBERS.map(m=>{const pct=Math.round(m.hrs/m.bw*100);const col=pct>85?'#dc2626':pct>65?'#d97706':'#059669';return`<tr><td><strong>${m.first} ${m.last}</strong></td><td>${TC(m.team)}</td><td style="font-size:12px">${m.role}</td><td>${m.bw}h</td><td style="color:var(--danger)">0h</td><td>${m.bw}h</td><td>${m.hrs}h</td><td><strong style="color:${col}">${pct}%</strong></td></tr>`;}).join('');
+  mkChart('rptAct1',{type:'doughnut',data:{labels:['Project','Incident','Change','BAU','Training','Meeting'],datasets:[{data:[950,280,520,420,140,90],backgroundColor:['#1a56db','#dc2626','#d97706','#7c3aed','#059669','#ea580c'],borderWidth:2,borderColor:'#fff',hoverOffset:8}]},options:{responsive:true,maintainAspectRatio:false,cutout:'60%',plugins:{legend:{position:'right',labels:{color:'#374151',font:{size:11},padding:10}}}}});
+  mkChart('rptAct2',{type:'bar',data:{labels:['Infra Build','Maintenance','Security','Automation','Monitoring','Docs'],datasets:[{label:'Hours',data:[780,420,380,240,160,80],backgroundColor:['#1a56db33','#d9770633','#dc262633','#7c3aed33','#05996933','#6b728033'],borderColor:['#1a56db','#d97706','#dc2626','#7c3aed','#059669','#6b7280'],borderWidth:2,borderRadius:6}]},options:{...LIGHT_DEFAULTS}});
+  const rat=document.getElementById('rpt-act-table');if(rat)rat.innerHTML=ACTIVITIES.slice(0,8).map(a=>{const pct=Math.min(100,Math.round(a.hrs/Math.max(a.est,1)*100));return`<tr><td><strong>${a.name}</strong></td><td>${TC(a.team)}</td><td style="font-size:12px">${a.type}</td><td><strong style="color:var(--primary)">${a.hrs}h</strong></td><td style="font-size:12px">${a.est}h</td><td><div class="progress-bar" style="width:80px;margin-bottom:2px"><div class="progress-fill" style="width:${pct}%;background:var(--primary)"></div></div><span style="font-size:11px;color:var(--text-muted)">${pct}%</span></td><td>${SC(a.status)}</td></tr>`;}).join('');
+  mkChart('rptTrend',{type:'line',data:{labels:['Oct','Nov','Dec','Jan','Feb','Mar'],datasets:TEAMS.map(t=>({label:t.name,data:[...Array(6)].map(()=>Math.round(Math.random()*25+60)),borderColor:t.color,backgroundColor:t.color+'18',borderWidth:2,tension:.4,fill:false,pointRadius:4}))},options:{...LIGHT_DEFAULTS}});
+  mkChart('rptTrend2',{type:'bar',data:{labels:['Oct','Nov','Dec','Jan','Feb','Mar'],datasets:TEAMS.map(t=>({label:t.name,data:[...Array(6)].map(()=>Math.round(Math.random()*150+280)),backgroundColor:t.color+'44',borderColor:t.color,borderWidth:1.5,borderRadius:3}))},options:{...LIGHT_DEFAULTS}});
+  mkChart('rptVac1',{type:'bar',data:{labels:TEAMS.map(t=>t.name),datasets:[{label:'Leave Hours',data:CAPACITY.map(c=>c.vac),backgroundColor:TEAMS.map(t=>t.color+'44'),borderColor:TEAMS.map(t=>t.color),borderWidth:2,borderRadius:6}]},options:{...LIGHT_DEFAULTS}});
+  mkChart('rptVac2',{type:'pie',data:{labels:['Annual Leave','Sick Leave','Public Holiday','Training','Conference'],datasets:[{data:[48,8,8,16,0],backgroundColor:['#1a56db','#dc2626','#d97706','#7c3aed','#059669'],borderWidth:2,borderColor:'#fff'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{color:'#374151',font:{size:11}}}}}});
+  const rvt=document.getElementById('rpt-vac-table');if(rvt)rvt.innerHTML=CAPACITY.map(c=>{const net=c.avail-c.vac,pct=Math.round(c.util/net*100),imp=c.vac?((c.vac/c.avail)*100).toFixed(1):0;return`<tr><td><strong>${c.team}</strong></td><td>${c.avail}h</td><td style="color:var(--danger);font-weight:600">${c.vac}h</td><td style="font-size:12px">${imp}%</td><td><strong>${net}h</strong></td><td>${c.util}h</td><td><strong style="color:${pct>85?'#dc2626':pct>75?'#d97706':'#059669'}">${pct}%</strong></td></tr>`;}).join('');
+}
+
+// ── CUSTOM REPORT BUILDER ──
+function toggleChip(el){el.classList.toggle('active');buildCustomReport();}
+
+function buildCustomReport(){
+  const type=document.getElementById('cr-type')?.value||'utilization';
+  const team=document.getElementById('cr-team')?.value||'all';
+  const groupby=document.getElementById('cr-groupby')?.value||'team';
+  const chartType=document.getElementById('cr-chart')?.value||'bar';
+  const dateRange=document.getElementById('cr-date')?.value||'March 2025';
+
+  const titles={utilization:'Team Utilization',  'member-hours':'Member Hours Analysis','activity-summary':'Activity Summary','incident-analysis':'Incident Analysis','category-breakdown':'Category Breakdown','cross-team':'Cross-Team Comparison','leave-capacity':'Leave & Capacity Impact','project-progress':'Project Progress Tracker'};
+  document.getElementById('cr-report-title').textContent=(titles[type]||type)+' — '+(team==='all'?'All Teams':team);
+  document.getElementById('cr-report-sub').textContent='Grouped by '+groupby+' · '+dateRange;
+
+  let labels=[], datasets=[], insights=[], summaryStats=[], tableHead='', tableRows=[];
+
+  if(type==='utilization'){
+    const filtered=team==='all'?CAPACITY:CAPACITY.filter(c=>c.team===team);
+    labels=filtered.map(c=>c.team);
+    const nets=filtered.map(c=>c.avail-c.vac), utils=filtered.map(c=>c.util), pcts=filtered.map(c=>Math.round(c.util/(c.avail-c.vac)*100));
+    if(chartType==='doughnut'||chartType==='pie'){
+      datasets=[{data:utils,backgroundColor:filtered.map(c=>TEAMS.find(t=>t.name===c.team)?.color+'55'),borderColor:filtered.map(c=>TEAMS.find(t=>t.name===c.team)?.color),borderWidth:2}];
+    } else {
+      datasets=[{label:'Utilized',data:utils,backgroundColor:filtered.map(c=>TEAMS.find(t=>t.name===c.team)?.color+'44'),borderColor:filtered.map(c=>TEAMS.find(t=>t.name===c.team)?.color),borderWidth:2,borderRadius:6},
+               {label:'Net Capacity',data:nets,backgroundColor:'rgba(209,213,219,0.5)',borderColor:'#d1d5db',borderWidth:1,borderRadius:6}];
+    }
+    const max=Math.max(...pcts), min=Math.min(...pcts), avg=Math.round(pcts.reduce((a,b)=>a+b,0)/pcts.length);
+    insights=[{t:'⚠',c:'alert',title:'Highest Utilization',desc:labels[pcts.indexOf(max)]+' at '+max+'% — consider redistribution'},{t:'✅',c:'good',title:'Best Available Capacity',desc:labels[pcts.indexOf(min)]+' at '+min+'% — can absorb more work'},{t:'📊',c:'info',title:'Group Average',desc:'Average utilization across selected teams: '+avg+'%'}];
+    summaryStats=[['Avg Utilization',avg+'%'],['Total Hours Logged',utils.reduce((a,b)=>a+b,0)+'h'],['Total Net Capacity',nets.reduce((a,b)=>a+b,0)+'h'],['Over 85% Teams',pcts.filter(p=>p>85).length]];
+    tableHead='<tr><th>Team</th><th>Net Capacity</th><th>Utilized</th><th>Utilization %</th><th>Status</th></tr>';
+    tableRows=filtered.map((c,i)=>{const p=pcts[i];const b=p>85?SC('Blocked'):p>75?SC('Pending'):SC('Active');return`<tr><td><strong>${c.team}</strong></td><td>${nets[i]}h</td><td>${utils[i]}h</td><td><strong style="color:${p>85?'#dc2626':p>75?'#d97706':'#059669'}">${p}%</strong></td><td>${b}</td></tr>`;});
+  }
+  else if(type==='member-hours'){
+    const filtered=team==='all'?MEMBERS:MEMBERS.filter(m=>m.team===team);
+    labels=filtered.map(m=>m.first+' '+m.last[0]+'.');
+    const hrs=filtered.map(m=>m.hrs),pcts=filtered.map(m=>Math.round(m.hrs/m.bw*100));
+    datasets=[{label:'Hours Logged',data:hrs,backgroundColor:filtered.map(m=>TEAMS.find(t=>t.name===m.team)?.color+'44'),borderColor:filtered.map(m=>TEAMS.find(t=>t.name===m.team)?.color),borderWidth:2,borderRadius:5}];
+    const topM=filtered[hrs.indexOf(Math.max(...hrs))];const lowM=filtered[hrs.indexOf(Math.min(...hrs))];
+    insights=[{t:'🏆',c:'good',title:'Top Contributor',desc:(topM?.first+' '+topM?.last)+' with '+Math.max(...hrs)+'h logged'},{t:'📉',c:'warn',title:'Lowest Hours',desc:(lowM?.first+' '+lowM?.last)+' with '+Math.min(...hrs)+'h — check workload balance'},{t:'👥',c:'info',title:'Team Size',desc:filtered.length+' members, avg '+Math.round(hrs.reduce((a,b)=>a+b,0)/hrs.length)+'h per person'}];
+    summaryStats=[['Total Hours',hrs.reduce((a,b)=>a+b,0)+'h'],['Avg per Member',Math.round(hrs.reduce((a,b)=>a+b,0)/hrs.length)+'h'],['Members Shown',filtered.length],['Avg Utilization',Math.round(pcts.reduce((a,b)=>a+b,0)/pcts.length)+'%']];
+    tableHead='<tr><th>Member</th><th>Team</th><th>Role</th><th>Hours</th><th>Capacity</th><th>Util %</th></tr>';
+    tableRows=filtered.map((m,i)=>`<tr><td><strong>${m.first} ${m.last}</strong></td><td>${TC(m.team)}</td><td style="font-size:12px">${m.role}</td><td><strong style="color:var(--primary)">${m.hrs}h</strong></td><td style="font-size:12px">${m.bw}h</td><td style="font-weight:700;color:${pcts[i]>85?'#dc2626':pcts[i]>65?'#d97706':'#059669'}">${pcts[i]}%</td></tr>`);
+  }
+  else if(type==='incident-analysis'){
+    const incidents=ACTIVITIES.filter(a=>a.type==='Incident'&&(team==='all'||a.team===team));
+    const byTeam={};incidents.forEach(a=>{byTeam[a.team]=(byTeam[a.team]||0)+a.hrs;});
+    labels=Object.keys(byTeam); const vals=labels.map(l=>byTeam[l]);
+    datasets=[{label:'Incident Hours',data:vals,backgroundColor:labels.map(l=>TEAMS.find(t=>t.name===l)?.color+'44'),borderColor:labels.map(l=>TEAMS.find(t=>t.name===l)?.color),borderWidth:2,borderRadius:6}];
+    insights=[{t:'🚨',c:'alert',title:'Total Incident Hours',desc:incidents.reduce((a,b)=>a+b.hrs,0)+'h spent on incidents this period'},{t:'🔍',c:'info',title:'Incident Count',desc:incidents.length+' incidents logged'},{t:'⏱',c:'warn',title:'Avg Incident Duration',desc:incidents.length?Math.round(incidents.reduce((a,b)=>a+b.hrs,0)/incidents.length)+'h per incident':'No data'}];
+    summaryStats=[['Total Incidents',incidents.length],['Total Hours',incidents.reduce((a,b)=>a+b.hrs,0)+'h'],['Avg Duration',incidents.length?Math.round(incidents.reduce((a,b)=>a+b.hrs,0)/incidents.length)+'h':'—'],['Teams Affected',Object.keys(byTeam).length]];
+    tableHead='<tr><th>Activity</th><th>Team</th><th>Priority</th><th>Hours</th><th>Status</th></tr>';
+    tableRows=incidents.map(a=>`<tr><td><strong>${a.name}</strong></td><td>${TC(a.team)}</td><td>${PC(a.priority)}</td><td><strong style="color:var(--danger)">${a.hrs}h</strong></td><td>${SC(a.status)}</td></tr>`);
+  }
+  else if(type==='category-breakdown'){
+    const cats={};ACTIVITIES.filter(a=>team==='all'||a.team===team).forEach(a=>{cats[a.cat]=(cats[a.cat]||0)+a.hrs;});
+    labels=Object.keys(cats);const vals=labels.map(l=>cats[l]);
+    const colors=['#1a56db','#d97706','#dc2626','#7c3aed','#059669','#ea580c'];
+    datasets=[{data:vals,backgroundColor:colors.map(c=>c+'55'),borderColor:colors,borderWidth:2,hoverOffset:6}];
+    insights=[{t:'📊',c:'info',title:'Top Category',desc:labels[vals.indexOf(Math.max(...vals))]+' with '+Math.max(...vals)+'h'},{t:'📋',c:'good',title:'Categories Tracked',desc:labels.length+' distinct categories used'},{t:'📉',c:'warn',title:'Least Focus',desc:labels[vals.indexOf(Math.min(...vals))]+' with '+Math.min(...vals)+'h'}];
+    summaryStats=[['Categories',labels.length],['Total Hours',vals.reduce((a,b)=>a+b,0)+'h'],['Most Hours',labels[vals.indexOf(Math.max(...vals))]],['Activities',ACTIVITIES.filter(a=>team==='all'||a.team===team).length]];
+    tableHead='<tr><th>Category</th><th>Hours</th><th>% of Total</th><th>Activity Count</th></tr>';
+    const total=vals.reduce((a,b)=>a+b,0);tableRows=labels.map((l,i)=>{const cnt=ACTIVITIES.filter(a=>a.cat===l&&(team==='all'||a.team===team)).length;return`<tr><td><strong>${l}</strong></td><td><strong style="color:var(--primary)">${vals[i]}h</strong></td><td>${Math.round(vals[i]/total*100)}%</td><td>${cnt}</td></tr>`;});
+  }
+  else if(type==='project-progress'){
+    const projs=ACTIVITIES.filter(a=>a.type==='Project'&&(team==='all'||a.team===team));
+    labels=projs.map(a=>a.name.slice(0,20)+'...');
+    datasets=[{label:'Logged',data:projs.map(a=>a.hrs),backgroundColor:'#1a56db33',borderColor:'#1a56db',borderWidth:2,borderRadius:4},{label:'Estimated',data:projs.map(a=>a.est),backgroundColor:'rgba(209,213,219,0.4)',borderColor:'#d1d5db',borderWidth:1.5,borderRadius:4}];
+    insights=[{t:'📦',c:'info',title:'Active Projects',desc:projs.filter(a=>a.status==='Active').length+' projects in progress'},{t:'✅',c:'good',title:'Completed',desc:projs.filter(a=>a.status==='Done').length+' projects completed this period'},{t:'⚠',c:'warn',title:'Behind Schedule',desc:projs.filter(a=>a.hrs>a.est).length+' projects over estimated hours'}];
+    summaryStats=[['Total Projects',projs.length],['Estimated Hrs',projs.reduce((a,b)=>a+b.est,0)+'h'],['Logged Hrs',projs.reduce((a,b)=>a+b.hrs,0)+'h'],['Over Budget',projs.filter(a=>a.hrs>a.est).length]];
+    tableHead='<tr><th>Project</th><th>Team</th><th>Logged Hrs</th><th>Est Hrs</th><th>Progress</th><th>Status</th></tr>';
+    tableRows=projs.map(a=>{const p=Math.min(100,Math.round(a.hrs/Math.max(a.est,1)*100));return`<tr><td><strong>${a.name}</strong></td><td>${TC(a.team)}</td><td><strong style="color:var(--primary)">${a.hrs}h</strong></td><td style="font-size:12px">${a.est}h</td><td><div class="progress-bar" style="width:80px;margin-bottom:2px"><div class="progress-fill" style="width:${p}%;background:${p>=100?'#dc2626':p>60?'#059669':'#1a56db'}"></div></div><span style="font-size:11px;color:var(--text-muted)">${p}%</span></td><td>${SC(a.status)}</td></tr>`;});
+  }
+  else { // cross-team fallback
+    labels=TEAMS.map(t=>t.name);
+    datasets=[{label:'Activities',data:TEAMS.map(t=>ACTIVITIES.filter(a=>a.team===t.name).length),backgroundColor:TEAMS.map(t=>t.color+'44'),borderColor:TEAMS.map(t=>t.color),borderWidth:2,borderRadius:6},{label:'Hours',data:CAPACITY.map(c=>c.util),backgroundColor:TEAMS.map(t=>t.color+'22'),borderColor:TEAMS.map(t=>t.color+'99'),borderWidth:1,borderRadius:4}];
+    insights=[{t:'🌐',c:'info',title:'Cross-Team View',desc:'Comparing activity count and hours across all teams'},{t:'🔒',c:'alert',title:'Security leads in hours',desc:'546h logged — highest across all teams'},{t:'💾',c:'good',title:'Storage has headroom',desc:'Only 260h utilized out of 400h net capacity'}];
+    summaryStats=[['Teams',TEAMS.length],['Total Activities',ACTIVITIES.length],['Total Hours',CAPACITY.reduce((a,b)=>a+b.util,0)+'h'],['Avg Team Util','78%']];
+    tableHead='<tr><th>Team</th><th>Lead</th><th>Activities</th><th>Hours</th><th>Utilization</th></tr>';
+    tableRows=TEAMS.map(t=>{const cap=CAPACITY.find(c=>c.team===t.name);const pct=cap?Math.round(cap.util/(cap.avail-cap.vac)*100):0;return`<tr><td>${TC(t.name)}</td><td style="font-size:12px">${t.lead}</td><td>${ACTIVITIES.filter(a=>a.team===t.name).length}</td><td><strong style="color:var(--primary)">${cap?.util||0}h</strong></td><td style="color:${pct>85?'#dc2626':pct>75?'#d97706':'#059669'};font-weight:700">${pct}%</td></tr>`;});
+  }
+
+  // Draw chart
+  if(customChartInstance){customChartInstance.destroy();customChartInstance=null;}
+  const ctx=document.getElementById('customChart');
+  if(ctx){
+    const isRound=chartType==='doughnut'||chartType==='pie';
+    const isRadar=chartType==='radar';
+    const cfg={type:chartType==='horizontalBar'?'bar':chartType,data:{labels,datasets},options:{...LIGHT_DEFAULTS,indexAxis:chartType==='horizontalBar'?'y':'x',cutout:isRound?'58%':undefined,plugins:{...LIGHT_DEFAULTS.plugins,legend:{labels:{color:'#374151',font:{size:11}}}}}};
+    if(isRound)delete cfg.options.scales;
+    if(isRadar){cfg.options.scales={r:{ticks:{color:'#6b7280'},grid:{color:'rgba(209,213,219,0.5)'},pointLabels:{color:'#374151',font:{size:11}}}};delete cfg.options.scales.x;delete cfg.options.scales.y;}
+    customChartInstance=new Chart(ctx,cfg);
+  }
+
+  // Insights
+  const iEl=document.getElementById('cr-insights');
+  if(iEl)iEl.innerHTML=insights.map(i=>`<div class="insight-card ${i.c||'info'}"><div class="insight-icon">${i.t}</div><div><div class="insight-title">${i.title}</div><div class="insight-desc">${i.desc}</div></div></div>`).join('');
+
+  // Summary stats
+  const ssEl=document.getElementById('cr-summary-stats');
+  if(ssEl)ssEl.innerHTML=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">`+summaryStats.map(([l,v])=>`<div><div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px">${l}</div><div style="font-size:18px;font-weight:800;color:var(--text)">${v}</div></div>`).join('')+'</div>';
+
+  // Table
+  const thEl=document.getElementById('cr-table-head');if(thEl)thEl.innerHTML=tableHead;
+  const tbEl=document.getElementById('cr-table-body');if(tbEl)tbEl.innerHTML=tableRows.join('');
+}
+
+function loadSavedReport(key){
+  document.querySelectorAll('#saved-reports-shelf .field-chip').forEach(c=>c.classList.remove('active'));
+  event.target.classList.add('active');
+  const maps={
+    'security-monthly':{type:'utilization',team:'Security',groupby:'team',chart:'bar'},
+    'cloud-utilization':{type:'utilization',team:'Cloud',groupby:'team',chart:'doughnut'},
+    'incident-breakdown':{type:'incident-analysis',team:'all',groupby:'type',chart:'bar'},
+    'top-contributors':{type:'member-hours',team:'all',groupby:'member',chart:'horizontalBar'},
+    'overdue-activities':{type:'project-progress',team:'all',groupby:'status',chart:'bar'},
+    'leave-impact':{type:'leave-capacity',team:'all',groupby:'team',chart:'bar'},
+  };
+  const cfg=maps[key];if(!cfg)return;
+  document.getElementById('cr-type').value=cfg.type;
+  document.getElementById('cr-team').value=cfg.team;
+  document.getElementById('cr-groupby').value=cfg.groupby;
+  document.getElementById('cr-chart').value=cfg.chart;
+  buildCustomReport();
+  showToast('Report loaded!','success');
+}
+
+// ── TABS ──
+function switchTab(el,sectionId){
+  el.closest('.tabs').querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  const siblings=['rpt-util','rpt-member','rpt-activity','rpt-trend','rpt-vacation','s-fields','s-categories','s-sharepoint','s-powerbi'];
+  siblings.forEach(id=>{const e=document.getElementById(id);if(e)e.style.display='none';});
+  const target=document.getElementById(sectionId);
+  if(target){target.style.display='block';if(['rpt-member','rpt-activity','rpt-trend','rpt-vacation'].includes(sectionId))setTimeout(initReportCharts,60);}
+}
+
+// ── EXPORT ──
+function exportToCSV(){
+  let csv='ID,Activity,Team,Assignee,Type,Category,Hours Logged,Estimated Hours,Priority,Status,Date\n';
+  ACTIVITIES.forEach(a=>{csv+=`${a.id},"${a.name}",${a.team},${a.assignee},${a.type},"${a.cat}",${a.hrs},${a.est},${a.priority},${a.status},${a.date}\n`;});
+  csv+='\n\nTIME LOG\nDate,Member,Activity,Type,Category,Hours,Notes\n';
+  TIME_LOGS.forEach(t=>{csv+=`${t.date},${t.member},"${t.activity}",${t.type},"${t.cat}",${t.hrs},"${t.notes}"\n`;});
+  csv+='\n\nCAPACITY\nTeam,Headcount,Available Hrs,Vacation Hrs,Net,Utilized,%\n';
+  CAPACITY.forEach(c=>{const net=c.avail-c.vac;csv+=`${c.team},${c.hc},${c.avail},${c.vac},${net},${c.util},${Math.round(c.util/net*100)}%\n`;});
+  const blob=new Blob([csv],{type:'text/csv'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download='ISMS_Export_March2025.csv';a.click();URL.revokeObjectURL(url);
+  showToast('Export downloaded!','success');
+}
+
+// ── TOAST ──
+function showToast(msg,type='success'){
+  const t=document.createElement('div');t.className='toast toast-'+type;
+  t.innerHTML=`<svg width="16" height="16" fill="none" stroke="${type==='success'?'#34d399':'#f87171'}" stroke-width="2.5" viewBox="0 0 24 24" style="flex-shrink:0">${type==='success'?'<path d="M20 6L9 17l-5-5"/>':'<circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/>'}</svg>${msg}`;
+  document.body.appendChild(t);setTimeout(()=>t.remove(),3000);
+}
+
+// ── REFRESH ──
+function refreshAll(){showToast('Data refreshed for selected period','success');}
+
+// ── INIT ──
+window.addEventListener('load',()=>{
+  renderActivities();renderTimeLogs();renderMembers();renderTeams();
+  renderVacations();renderCapacity();renderRecentTable();renderPlanningTable();
+  const today=new Date().toISOString().slice(0,10);
+  ['act-start','act-due','tl-date','vac-from','vac-to'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=today;});
+  setTimeout(initDashboardCharts,120);
+});
+</script>
+</body>
+</html>

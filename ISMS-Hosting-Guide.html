@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>ISMS Portal — Free Hosting Guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap"/>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --blue:#1a56db;--blue-dark:#1240a8;--blue-light:#eff6ff;
+    --green:#059669;--green-light:#f0fdf4;
+    --amber:#d97706;--amber-light:#fffbeb;
+    --red:#dc2626;--red-light:#fef2f2;
+    --purple:#7c3aed;--purple-light:#f5f3ff;
+    --slate:#0f172a;--slate-mid:#334155;--slate-light:#64748b;
+    --border:#e2e8f0;--bg:#f4f7fb;--white:#ffffff;
+    --mono:'DM Mono',monospace;--sans:'DM Sans',system-ui,sans-serif;
+  }
+  html{font-family:var(--sans);background:var(--bg);color:var(--slate);line-height:1.6;font-size:15px}
+  body{max-width:900px;margin:0 auto;padding:32px 24px 80px}
+
+  /* ── HERO ── */
+  .hero{background:linear-gradient(135deg,#0f172a 0%,#1a3a6e 60%,#0e4f8a 100%);
+    border-radius:20px;padding:40px 44px;margin-bottom:36px;color:#fff;position:relative;overflow:hidden}
+  .hero::before{content:"";position:absolute;top:-60px;right:-60px;width:280px;height:280px;
+    background:radial-gradient(circle,rgba(99,179,237,.15) 0%,transparent 70%);border-radius:50%}
+  .hero-badge{display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,.1);
+    border:1px solid rgba(255,255,255,.15);border-radius:20px;padding:4px 12px;
+    font-size:11px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;margin-bottom:16px;color:rgba(255,255,255,.8)}
+  .hero h1{font-size:32px;font-weight:800;letter-spacing:-.6px;margin-bottom:10px;line-height:1.2}
+  .hero p{font-size:15px;color:rgba(255,255,255,.7);max-width:560px;line-height:1.65}
+  .hero-chips{display:flex;gap:10px;margin-top:20px;flex-wrap:wrap}
+  .hero-chip{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.15);
+    border-radius:9px;padding:6px 14px;font-size:12px;font-weight:600;color:rgba(255,255,255,.85)}
+
+  /* ── RECOMMENDATION BOX ── */
+  .rec-box{background:#fff;border:1.5px solid var(--blue);border-radius:16px;
+    padding:24px 28px;margin-bottom:28px;display:flex;gap:20px;align-items:flex-start;
+    box-shadow:0 4px 20px rgba(26,86,219,.1)}
+  .rec-icon{font-size:32px;flex-shrink:0;line-height:1}
+  .rec-box h2{font-size:18px;font-weight:800;color:var(--slate);letter-spacing:-.3px;margin-bottom:6px}
+  .rec-box p{font-size:13.5px;color:var(--slate-mid);line-height:1.65;margin-bottom:10px}
+  .rec-badge{display:inline-block;background:var(--blue);color:#fff;font-size:11px;
+    font-weight:700;padding:3px 10px;border-radius:20px;letter-spacing:.3px}
+
+  /* ── PLATFORM CARDS ── */
+  .platforms{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:32px}
+  .platform-card{background:#fff;border:1.5px solid var(--border);border-radius:14px;
+    padding:20px;transition:all .18s;cursor:default}
+  .platform-card.best{border-color:var(--blue);box-shadow:0 4px 16px rgba(26,86,219,.1)}
+  .platform-card:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(15,23,42,.09)}
+  .pc-logo{font-size:26px;margin-bottom:10px}
+  .pc-name{font-size:15px;font-weight:800;color:var(--slate);letter-spacing:-.2px}
+  .pc-vendor{font-size:11px;color:var(--slate-light);margin-bottom:10px}
+  .pc-badge{display:inline-block;font-size:10px;font-weight:700;padding:2px 9px;
+    border-radius:20px;margin-bottom:12px;letter-spacing:.3px}
+  .pc-desc{font-size:12.5px;color:var(--slate-mid);line-height:1.6;margin-bottom:12px}
+  .pc-pros{list-style:none}
+  .pc-pros li{font-size:12px;color:#374151;padding:3px 0;display:flex;gap:7px;align-items:flex-start}
+  .pc-pros li::before{content:"✓";color:var(--green);font-weight:700;flex-shrink:0;margin-top:1px}
+  .pc-limit{margin-top:10px;font-size:11.5px;color:var(--slate-light);border-top:1px solid #f1f5f9;padding-top:10px}
+
+  /* ── SECTION HEADERS ── */
+  .section-header{display:flex;align-items:center;gap:12px;margin-bottom:18px;margin-top:36px}
+  .section-bar{width:4px;height:26px;border-radius:3px;background:linear-gradient(180deg,var(--blue),#0ea5e9);flex-shrink:0}
+  .section-header h2{font-size:20px;font-weight:800;color:var(--slate);letter-spacing:-.4px}
+  .section-header span{font-size:12px;color:var(--slate-light);background:#f1f5f9;
+    padding:3px 10px;border-radius:20px;font-weight:600}
+
+  /* ── STEP CARDS ── */
+  .steps{display:flex;flex-direction:column;gap:0}
+  .step{display:grid;grid-template-columns:44px 1fr;gap:0;position:relative}
+  .step:not(:last-child)::after{content:"";position:absolute;left:21px;top:50px;
+    width:2px;height:calc(100% - 20px);background:linear-gradient(180deg,#e2e8f0,transparent)}
+  .step-num{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;
+    justify-content:center;font-size:14px;font-weight:800;flex-shrink:0;
+    background:linear-gradient(135deg,var(--blue),#0ea5e9);color:#fff;
+    box-shadow:0 3px 10px rgba(26,86,219,.3);margin-top:2px}
+  .step-body{background:#fff;border:1px solid var(--border);border-radius:13px;
+    padding:18px 20px;margin-left:14px;margin-bottom:14px}
+  .step-title{font-size:14px;font-weight:700;color:var(--slate);margin-bottom:6px;letter-spacing:-.1px}
+  .step-desc{font-size:13px;color:var(--slate-mid);line-height:1.65;margin-bottom:10px}
+
+  /* ── CODE BLOCK ── */
+  pre{background:#0f172a;color:#e2e8f0;border-radius:10px;padding:16px 18px;
+    font-family:var(--mono);font-size:12.5px;line-height:1.7;overflow-x:auto;margin:10px 0}
+  .code-label{font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;
+    color:var(--slate-light);margin-bottom:6px;font-family:var(--mono)}
+  code{font-family:var(--mono);background:#f1f5f9;color:var(--blue-dark);
+    padding:2px 6px;border-radius:4px;font-size:12.5px}
+
+  /* ── CALLOUTS ── */
+  .callout{border-radius:11px;padding:14px 16px;margin:14px 0;display:flex;gap:10px;
+    font-size:13px;line-height:1.6;align-items:flex-start}
+  .callout-icon{font-size:17px;flex-shrink:0;margin-top:1px}
+  .callout.tip{background:#f0fdf4;border:1px solid #86efac;color:#166534}
+  .callout.warn{background:#fffbeb;border:1px solid #fde68a;color:#854d0e}
+  .callout.info{background:var(--blue-light);border:1px solid #bfdbfe;color:#1e40af}
+  .callout.pro{background:var(--purple-light);border:1px solid #c4b5fd;color:#4c1d95}
+
+  /* ── COMPARISON TABLE ── */
+  .cmp-table{width:100%;border-collapse:collapse;background:#fff;border-radius:14px;
+    overflow:hidden;box-shadow:0 1px 4px rgba(15,23,42,.06);margin-bottom:24px;font-size:13px}
+  .cmp-table th{background:#f8fafc;padding:12px 16px;text-align:left;font-size:10.5px;
+    font-weight:700;color:#94a3b8;letter-spacing:1px;text-transform:uppercase;
+    border-bottom:1px solid #e8edf5;font-family:var(--mono)}
+  .cmp-table td{padding:12px 16px;border-bottom:1px solid #f1f5f9;color:#374151;vertical-align:middle}
+  .cmp-table tr:last-child td{border-bottom:none}
+  .cmp-table tr:hover td{background:#f8fafc}
+  .tick{color:var(--green);font-weight:700}
+  .cross{color:#94a3b8}
+  .best-row td{background:#eff6ff !important}
+
+  /* ── FILE STRUCTURE ── */
+  .file-tree{background:#0f172a;border-radius:12px;padding:20px 22px;font-family:var(--mono);
+    font-size:12.5px;line-height:2;color:#94a3b8}
+  .file-tree .dir{color:#60a5fa;font-weight:600}
+  .file-tree .file{color:#a5f3fc}
+  .file-tree .comment{color:#4b5563;font-style:italic}
+
+  /* ── FOOTER ── */
+  .footer{margin-top:48px;padding-top:24px;border-top:1px solid #e2e8f0;
+    text-align:center;color:#94a3b8;font-size:12px}
+  .footer strong{color:var(--slate-light)}
+
+  @media(max-width:640px){
+    .platforms{grid-template-columns:1fr}
+    .hero{padding:28px 24px}
+    .hero h1{font-size:24px}
+  }
+</style>
+</head>
+<body>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="hero-badge">📦 Deployment Guide</div>
+  <h1>Host Your ISMS Portal for Free</h1>
+  <p>A complete guide to deploying your React-based ISMS portal online — no credit card required, live in under 15 minutes.</p>
+  <div class="hero-chips">
+    <div class="hero-chip">⚡ Vercel — Recommended</div>
+    <div class="hero-chip">🌐 Netlify</div>
+    <div class="hero-chip">🐙 GitHub Pages</div>
+  </div>
+</div>
+
+<!-- RECOMMENDATION -->
+<div class="rec-box">
+  <div class="rec-icon">🏆</div>
+  <div>
+    <h2>Our Recommendation: Vercel</h2>
+    <p>For a React app like ISMS, <strong>Vercel</strong> is the best free option in 2026. Zero-config React support, instant global CDN, automatic HTTPS, deploy previews, and a one-command CLI. The free Hobby tier covers everything you need — 100 GB bandwidth/month, unlimited deployments, and a custom domain.</p>
+    <span class="rec-badge">✓ Best Free Tier for React</span>
+  </div>
+</div>
+
+<!-- PLATFORM COMPARISON -->
+<div class="section-header">
+  <div class="section-bar"></div>
+  <h2>Free Hosting Options</h2>
+  <span>Compared</span>
+</div>
+
+<div class="platforms">
+  <div class="platform-card best">
+    <div class="pc-logo">▲</div>
+    <div class="pc-name">Vercel</div>
+    <div class="pc-vendor">vercel.com</div>
+    <div class="pc-badge" style="background:#eff6ff;color:#1a56db">⭐ Best Choice</div>
+    <div class="pc-desc">Built by the creators of Next.js. Zero-config React deployment with global edge network.</div>
+    <ul class="pc-pros">
+      <li>Zero config — detects React automatically</li>
+      <li>100 GB bandwidth / month free</li>
+      <li>Automatic HTTPS & custom domains</li>
+      <li>Deploy previews on every push</li>
+      <li>One-command CLI deploy</li>
+    </ul>
+    <div class="pc-limit">Free tier: 1 concurrent build, 100 deployments/day</div>
+  </div>
+
+  <div class="platform-card">
+    <div class="pc-logo">🌐</div>
+    <div class="pc-name">Netlify</div>
+    <div class="pc-vendor">netlify.com</div>
+    <div class="pc-badge" style="background:#f0fdf4;color:#059669">✓ Great Option</div>
+    <div class="pc-desc">Pioneer of the Jamstack. Excellent drag-and-drop deployment for quick sharing.</div>
+    <ul class="pc-pros">
+      <li>Drag-and-drop deploy of <code>dist/</code></li>
+      <li>100 GB bandwidth / month free</li>
+      <li>Free SSL & custom domains</li>
+      <li>Form handling & serverless</li>
+      <li>Deploy from GitHub in 2 clicks</li>
+    </ul>
+    <div class="pc-limit">Free tier: 300 build minutes/month, 1 concurrent build</div>
+  </div>
+
+  <div class="platform-card">
+    <div class="pc-logo">🐙</div>
+    <div class="pc-name">GitHub Pages</div>
+    <div class="pc-vendor">pages.github.com</div>
+    <div class="pc-badge" style="background:#f5f3ff;color:#6d28d9">For Devs</div>
+    <div class="pc-desc">Free static hosting from GitHub. Best if you're already using GitHub for version control.</div>
+    <ul class="pc-pros">
+      <li>Completely free for public repos</li>
+      <li>Integrated with GitHub Actions</li>
+      <li>Auto-deploy on git push</li>
+      <li>Custom domain support</li>
+      <li>No bandwidth limits stated</li>
+    </ul>
+    <div class="pc-limit">Requires public repo on free plan. Build step needed.</div>
+  </div>
+</div>
+
+<!-- COMPARISON TABLE -->
+<table class="cmp-table">
+  <thead>
+    <tr><th>Feature</th><th>Vercel</th><th>Netlify</th><th>GitHub Pages</th></tr>
+  </thead>
+  <tbody>
+    <tr class="best-row"><td><strong>React auto-detect</strong></td><td class="tick">✓ Yes</td><td class="tick">✓ Yes</td><td class="cross">Manual</td></tr>
+    <tr><td><strong>Free bandwidth</strong></td><td>100 GB/mo</td><td>100 GB/mo</td><td>Soft limit</td></tr>
+    <tr class="best-row"><td><strong>Custom domain</strong></td><td class="tick">✓ Free</td><td class="tick">✓ Free</td><td class="tick">✓ Free</td></tr>
+    <tr><td><strong>HTTPS / SSL</strong></td><td class="tick">✓ Auto</td><td class="tick">✓ Auto</td><td class="tick">✓ Auto</td></tr>
+    <tr class="best-row"><td><strong>Deploy time</strong></td><td>~30 sec</td><td>~45 sec</td><td>~2 min</td></tr>
+    <tr><td><strong>CLI available</strong></td><td class="tick">✓ Yes</td><td class="tick">✓ Yes</td><td class="cross">Via Actions</td></tr>
+    <tr class="best-row"><td><strong>Drag-and-drop</strong></td><td class="cross">No</td><td class="tick">✓ Yes</td><td class="cross">No</td></tr>
+    <tr><td><strong>SPA routing fix</strong></td><td class="tick">✓ Built-in</td><td>_redirects file</td><td>404.html trick</td></tr>
+  </tbody>
+</table>
+
+
+<!-- ══════════════════════ VERCEL GUIDE ══════════════════════ -->
+<div class="section-header">
+  <div class="section-bar"></div>
+  <h2>Option A — Deploy to Vercel</h2>
+  <span>Recommended · ~12 min</span>
+</div>
+
+<div class="callout info">
+  <span class="callout-icon">ℹ️</span>
+  <span>You need <strong>Node.js 18+</strong> installed. Check with <code>node -v</code>. Download from <strong>nodejs.org</strong> if needed.</span>
+</div>
+
+<div class="steps">
+
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-body">
+      <div class="step-title">Scaffold a new Vite + React project</div>
+      <div class="step-desc">Open your terminal and run these commands. Vite is the build tool that compiles your React JSX into deployable HTML/CSS/JS.</div>
+      <div class="code-label">Terminal</div>
+      <pre>npm create vite@latest isms-portal -- --template react
+cd isms-portal
+npm install</pre>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-body">
+      <div class="step-title">Replace the App file with your ISMS portal</div>
+      <div class="step-desc">Copy your downloaded <code>ISMS-portal.jsx</code> file into the project and update the entry point.</div>
+      <div class="code-label">File actions</div>
+      <pre><span style="color:#6ee7b7"># Copy ISMS-portal.jsx into src/</span>
+cp ~/Downloads/ISMS-portal.jsx src/App.jsx</pre>
+      <div class="step-desc" style="margin-top:10px">Then open <code>src/main.jsx</code> and make sure it looks like this:</div>
+      <div class="code-label">src/main.jsx</div>
+      <pre><span style="color:#93c5fd">import</span> React <span style="color:#93c5fd">from</span> <span style="color:#86efac">'react'</span>
+<span style="color:#93c5fd">import</span> ReactDOM <span style="color:#93c5fd">from</span> <span style="color:#86efac">'react-dom/client'</span>
+<span style="color:#93c5fd">import</span> App <span style="color:#93c5fd">from</span> <span style="color:#86efac">'./App.jsx'</span>
+
+ReactDOM.createRoot(document.getElementById(<span style="color:#86efac">'root'</span>)).render(
+  <span style="color:#f9a8d4">&lt;React.StrictMode&gt;</span>
+    <span style="color:#f9a8d4">&lt;App /&gt;</span>
+  <span style="color:#f9a8d4">&lt;/React.StrictMode&gt;</span>
+)</pre>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">3</div>
+    <div class="step-body">
+      <div class="step-title">Test locally</div>
+      <div class="step-desc">Run the development server and confirm everything looks correct at <code>http://localhost:5173</code> before deploying.</div>
+      <div class="code-label">Terminal</div>
+      <pre>npm run dev</pre>
+      <div class="callout tip" style="margin-top:8px">
+        <span class="callout-icon">✅</span>
+        <span>If the portal loads and all pages work — you're ready to deploy. Press <strong>Ctrl+C</strong> to stop the dev server.</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">4</div>
+    <div class="step-body">
+      <div class="step-title">Install Vercel CLI and deploy</div>
+      <div class="step-desc">Install the Vercel CLI globally, then run <code>vercel</code> from your project folder. It will walk you through login and deployment.</div>
+      <div class="code-label">Terminal</div>
+      <pre>npm install -g vercel
+vercel</pre>
+      <div class="step-desc" style="margin-top:10px">Answer the prompts:</div>
+      <pre><span style="color:#6ee7b7">? Set up and deploy?</span>          → Y
+<span style="color:#6ee7b7">? Which scope?</span>                  → Your username
+<span style="color:#6ee7b7">? Link to existing project?</span>     → N
+<span style="color:#6ee7b7">? Project name?</span>                 → isms-portal
+<span style="color:#6ee7b7">? Directory?</span>                    → ./  (press Enter)
+<span style="color:#6ee7b7">? Override build command?</span>       → N  (press Enter)
+<span style="color:#6ee7b7">? Override output dir?</span>          → N  (press Enter)</pre>
+      <div class="callout tip" style="margin-top:8px">
+        <span class="callout-icon">🚀</span>
+        <span>Vercel will print your live URL — something like <strong>https://isms-portal-xyz.vercel.app</strong>. That's your portal, live!</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">5</div>
+    <div class="step-body">
+      <div class="step-title">Fix the 404 on page refresh (SPA routing)</div>
+      <div class="step-desc">React Router apps need a redirect rule so that refreshing any page doesn't return a 404. Create a <code>vercel.json</code> file in the project root:</div>
+      <div class="code-label">vercel.json (project root)</div>
+      <pre>{
+  <span style="color:#93c5fd">"rewrites"</span>: [
+    { <span style="color:#93c5fd">"source"</span>: <span style="color:#86efac">"/(.*)"</span>, <span style="color:#93c5fd">"destination"</span>: <span style="color:#86efac">"/index.html"</span> }
+  ]
+}</pre>
+      <div class="step-desc" style="margin-top:8px">Then redeploy:</div>
+      <div class="code-label">Terminal</div>
+      <pre>vercel --prod</pre>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">6</div>
+    <div class="step-body">
+      <div class="step-title">(Optional) Add a custom domain</div>
+      <div class="step-desc">In the Vercel dashboard → your project → Settings → Domains — add any domain you own. Vercel auto-provisions SSL. For future updates, just run <code>vercel --prod</code> again from your project folder.</div>
+      <div class="callout pro" style="margin-top:8px">
+        <span class="callout-icon">💡</span>
+        <span><strong>Auto-deploy tip:</strong> Push your project to GitHub, link the repo in Vercel, and every <code>git push</code> will auto-deploy. Zero extra commands needed.</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+
+<!-- ══════════════════════ NETLIFY GUIDE ══════════════════════ -->
+<div class="section-header" style="margin-top:40px">
+  <div class="section-bar"></div>
+  <h2>Option B — Deploy to Netlify</h2>
+  <span>Easiest drag-and-drop · ~8 min</span>
+</div>
+
+<div class="steps">
+
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-body">
+      <div class="step-title">Build your project</div>
+      <div class="step-desc">Follow Steps 1–3 from the Vercel guide to scaffold and set up the project, then run the build command:</div>
+      <div class="code-label">Terminal</div>
+      <pre>npm run build</pre>
+      <div class="step-desc" style="margin-top:8px">This creates a <code>dist/</code> folder containing your compiled app ready for deployment.</div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-body">
+      <div class="step-title">Fix SPA routing before deploying</div>
+      <div class="step-desc">Create a <code>_redirects</code> file inside your <code>public/</code> folder (Vite copies it to <code>dist/</code> automatically):</div>
+      <div class="code-label">public/_redirects</div>
+      <pre>/*    /index.html   200</pre>
+      <div class="step-desc" style="margin-top:8px">Then rebuild:</div>
+      <pre>npm run build</pre>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">3</div>
+    <div class="step-body">
+      <div class="step-title">Drag and drop to deploy</div>
+      <div class="step-desc">Go to <strong>app.netlify.com</strong> → sign up free → scroll to the bottom of the dashboard where it says <em>"Want to deploy a new site without connecting to Git?"</em> → drag your entire <code>dist/</code> folder onto that zone.</div>
+      <div class="callout tip" style="margin-top:8px">
+        <span class="callout-icon">✅</span>
+        <span>Your site goes live instantly with a URL like <strong>https://graceful-swan-abc123.netlify.app</strong>. Rename it under Site settings → General.</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+
+<!-- ══════════════════════ GITHUB PAGES GUIDE ══════════════════════ -->
+<div class="section-header" style="margin-top:40px">
+  <div class="section-bar"></div>
+  <h2>Option C — GitHub Pages</h2>
+  <span>For developers · ~20 min</span>
+</div>
+
+<div class="steps">
+
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-body">
+      <div class="step-title">Configure Vite base path</div>
+      <div class="step-desc">Open <code>vite.config.js</code> and set the base path to match your GitHub repo name:</div>
+      <div class="code-label">vite.config.js</div>
+      <pre><span style="color:#93c5fd">import</span> { defineConfig } <span style="color:#93c5fd">from</span> <span style="color:#86efac">'vite'</span>
+<span style="color:#93c5fd">import</span> react <span style="color:#93c5fd">from</span> <span style="color:#86efac">'@vitejs/plugin-react'</span>
+
+<span style="color:#93c5fd">export default</span> defineConfig({
+  plugins: [react()],
+  base: <span style="color:#86efac">'/isms-portal/'</span>  <span style="color:#6ee7b7">// ← your GitHub repo name</span>
+})</pre>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-body">
+      <div class="step-title">Install gh-pages and configure package.json</div>
+      <div class="code-label">Terminal</div>
+      <pre>npm install --save-dev gh-pages</pre>
+      <div class="step-desc" style="margin-top:8px">Add these to <code>package.json</code>:</div>
+      <div class="code-label">package.json (add these lines)</div>
+      <pre>{
+  <span style="color:#93c5fd">"homepage"</span>: <span style="color:#86efac">"https://YOUR-USERNAME.github.io/isms-portal"</span>,
+  <span style="color:#93c5fd">"scripts"</span>: {
+    <span style="color:#93c5fd">"predeploy"</span>: <span style="color:#86efac">"npm run build"</span>,
+    <span style="color:#93c5fd">"deploy"</span>: <span style="color:#86efac">"gh-pages -d dist"</span>
+  }
+}</pre>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">3</div>
+    <div class="step-body">
+      <div class="step-title">Push to GitHub and deploy</div>
+      <div class="code-label">Terminal</div>
+      <pre><span style="color:#6ee7b7"># Create repo on github.com first, then:</span>
+git init
+git add .
+git commit -m "Initial ISMS portal"
+git remote add origin https://github.com/YOUR-USERNAME/isms-portal.git
+git push -u origin main
+
+<span style="color:#6ee7b7"># Deploy to GitHub Pages</span>
+npm run deploy</pre>
+      <div class="step-desc" style="margin-top:8px">Your portal will be live at <code>https://YOUR-USERNAME.github.io/isms-portal</code> within 2–3 minutes.</div>
+    </div>
+  </div>
+
+</div>
+
+
+<!-- ══════════════════════ FOLDER STRUCTURE ══════════════════════ -->
+<div class="section-header" style="margin-top:40px">
+  <div class="section-bar"></div>
+  <h2>Final Project Structure</h2>
+</div>
+
+<div class="file-tree">
+<span class="dir">isms-portal/</span>
+├── <span class="dir">public/</span>
+│   └── <span class="file">_redirects</span>          <span class="comment"># Netlify routing fix</span>
+├── <span class="dir">src/</span>
+│   ├── <span class="file">App.jsx</span>             <span class="comment"># ← Your ISMS-portal.jsx goes here</span>
+│   └── <span class="file">main.jsx</span>            <span class="comment"># React entry point (keep default)</span>
+├── <span class="dir">dist/</span>                   <span class="comment"># Built output — deploy this folder</span>
+│   ├── <span class="file">index.html</span>
+│   └── <span class="dir">assets/</span>
+├── <span class="file">vercel.json</span>             <span class="comment"># Vercel SPA routing fix</span>
+├── <span class="file">vite.config.js</span>
+└── <span class="file">package.json</span>
+</div>
+
+
+<!-- ══════════════════════ QUICK REFERENCE ══════════════════════ -->
+<div class="section-header" style="margin-top:40px">
+  <div class="section-bar"></div>
+  <h2>Quick Reference</h2>
+</div>
+
+<table class="cmp-table">
+  <thead>
+    <tr><th>Task</th><th>Command / Action</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Run locally</td><td><code>npm run dev</code></td></tr>
+    <tr><td>Build for production</td><td><code>npm run build</code></td></tr>
+    <tr><td>Deploy to Vercel</td><td><code>vercel --prod</code></td></tr>
+    <tr><td>Deploy to Netlify</td><td>Drag <code>dist/</code> to app.netlify.com</td></tr>
+    <tr><td>Deploy to GitHub Pages</td><td><code>npm run deploy</code></td></tr>
+    <tr><td>Update after code changes</td><td>Re-run deploy command for your platform</td></tr>
+    <tr><td>Node.js version needed</td><td>18 or above (<code>node -v</code> to check)</td></tr>
+  </tbody>
+</table>
+
+<div class="callout warn">
+  <span class="callout-icon">⚠️</span>
+  <span><strong>Internal use note:</strong> The ISMS portal stores data in React state only (no backend). Data resets on page refresh. For persistent data in production, you would need to add a backend or connect to a database. For now it's ideal for demos, evaluation, and internal showcasing.</span>
+</div>
+
+<div class="footer">
+  <strong>ISMS Portal Hosting Guide</strong> · Generated March 2026 · Works with Vite + React 18+
+</div>
+
+</body>
+</html>

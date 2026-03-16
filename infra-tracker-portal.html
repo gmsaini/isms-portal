@@ -1,0 +1,1853 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>InfraTrack — Infrastructure Activity Management Portal</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0a0e1a;
+    --surface: #111827;
+    --surface2: #1a2235;
+    --surface3: #222d42;
+    --border: #2a3a52;
+    --accent: #00d4ff;
+    --accent2: #7c3aed;
+    --accent3: #10b981;
+    --accent4: #f59e0b;
+    --danger: #ef4444;
+    --text: #e2e8f0;
+    --text-muted: #64748b;
+    --text-dim: #94a3b8;
+    --network: #00d4ff;
+    --security: #ef4444;
+    --compute: #f59e0b;
+    --cloud: #7c3aed;
+    --storage: #10b981;
+    --database: #f97316;
+    --radius: 12px;
+    --radius-sm: 8px;
+    --shadow: 0 4px 24px rgba(0,0,0,0.4);
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    position: fixed; left: 0; top: 0; bottom: 0;
+    width: 260px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    z-index: 100;
+    transition: transform .3s ease;
+  }
+  .sidebar-logo {
+    padding: 28px 24px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  .sidebar-logo .logo-mark {
+    font-family: 'Syne', sans-serif;
+    font-size: 22px; font-weight: 800;
+    color: var(--accent);
+    letter-spacing: -0.5px;
+  }
+  .sidebar-logo .logo-sub {
+    font-size: 11px; color: var(--text-muted);
+    letter-spacing: 1.5px; text-transform: uppercase;
+    margin-top: 2px;
+  }
+  .nav-section { padding: 16px 12px 8px; }
+  .nav-label {
+    font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
+    color: var(--text-muted); padding: 0 12px; margin-bottom: 6px;
+  }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; border-radius: var(--radius-sm);
+    cursor: pointer; transition: all .15s;
+    font-size: 14px; font-weight: 400;
+    color: var(--text-dim);
+    user-select: none;
+  }
+  .nav-item:hover { background: var(--surface2); color: var(--text); }
+  .nav-item.active { background: rgba(0,212,255,0.1); color: var(--accent); font-weight: 500; }
+  .nav-item .icon { width: 18px; height: 18px; opacity: .7; flex-shrink: 0; }
+  .nav-item.active .icon { opacity: 1; }
+  .sidebar-bottom {
+    margin-top: auto; padding: 16px;
+    border-top: 1px solid var(--border);
+  }
+  .user-chip {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; border-radius: var(--radius-sm);
+    background: var(--surface2);
+  }
+  .user-avatar {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent2), var(--accent));
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 700; color: #fff;
+  }
+  .user-info .name { font-size: 13px; font-weight: 500; }
+  .user-info .role { font-size: 11px; color: var(--text-muted); }
+
+  /* ── Main layout ── */
+  .main { margin-left: 260px; min-height: 100vh; }
+  .topbar {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(10,14,26,0.95);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 32px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .topbar-title { font-family: 'Syne', sans-serif; font-size: 20px; font-weight: 700; }
+  .topbar-actions { display: flex; gap: 10px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 8px 16px; border-radius: var(--radius-sm);
+    font-size: 13px; font-weight: 500; cursor: pointer;
+    border: none; transition: all .15s; font-family: inherit;
+  }
+  .btn-primary { background: var(--accent); color: #000; }
+  .btn-primary:hover { background: #00b8e6; }
+  .btn-outline {
+    background: transparent; color: var(--text-dim);
+    border: 1px solid var(--border);
+  }
+  .btn-outline:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-success { background: var(--accent3); color: #fff; }
+  .btn-success:hover { background: #0ea571; }
+  .btn-danger { background: var(--danger); color: #fff; }
+  .content { padding: 32px; }
+
+  /* ── Pages ── */
+  .page { display: none; animation: fadeIn .2s ease; }
+  .page.active { display: block; }
+  @keyframes fadeIn { from { opacity:0; transform: translateY(6px); } to { opacity:1; transform: none; } }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+  }
+  .card-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 15px; font-weight: 700;
+    margin-bottom: 16px; color: var(--text);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+
+  /* ── Stat cards ── */
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px,1fr)); gap: 16px; margin-bottom: 24px; }
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    position: relative; overflow: hidden;
+  }
+  .stat-card::before {
+    content: ''; position: absolute;
+    top: 0; left: 0; right: 0; height: 3px;
+  }
+  .stat-card.c1::before { background: var(--accent); }
+  .stat-card.c2::before { background: var(--accent2); }
+  .stat-card.c3::before { background: var(--accent3); }
+  .stat-card.c4::before { background: var(--accent4); }
+  .stat-card.c5::before { background: var(--danger); }
+  .stat-card.c6::before { background: var(--database); }
+  .stat-label { font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px; }
+  .stat-value { font-family: 'Syne', sans-serif; font-size: 32px; font-weight: 800; line-height: 1; }
+  .stat-sub { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
+  .stat-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; padding: 2px 8px; border-radius: 20px;
+    margin-top: 8px;
+  }
+  .badge-up { background: rgba(16,185,129,0.15); color: var(--accent3); }
+  .badge-down { background: rgba(239,68,68,0.15); color: var(--danger); }
+  .badge-neutral { background: rgba(100,116,139,0.15); color: var(--text-muted); }
+
+  /* ── Grid helpers ── */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
+  .mb-24 { margin-bottom: 24px; }
+  .mb-16 { margin-bottom: 16px; }
+
+  /* ── Tables ── */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th {
+    text-align: left; padding: 10px 14px;
+    font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase;
+    color: var(--text-muted); border-bottom: 1px solid var(--border);
+    font-weight: 500; white-space: nowrap;
+  }
+  tbody tr { border-bottom: 1px solid rgba(42,58,82,0.5); transition: background .1s; }
+  tbody tr:hover { background: var(--surface2); }
+  tbody td { padding: 12px 14px; color: var(--text-dim); vertical-align: middle; }
+  tbody td strong { color: var(--text); }
+
+  /* ── Team color tags ── */
+  .team-tag {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 10px; border-radius: 20px;
+    font-size: 11px; font-weight: 600; letter-spacing: .3px;
+  }
+  .tag-network { background: rgba(0,212,255,0.12); color: var(--network); }
+  .tag-security { background: rgba(239,68,68,0.12); color: var(--security); }
+  .tag-compute { background: rgba(245,158,11,0.12); color: var(--compute); }
+  .tag-cloud { background: rgba(124,58,237,0.12); color: var(--cloud); }
+  .tag-storage { background: rgba(16,185,129,0.12); color: var(--storage); }
+  .tag-database { background: rgba(249,115,22,0.12); color: var(--database); }
+
+  /* ── Status tags ── */
+  .status-tag {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 10px; border-radius: 20px;
+    font-size: 11px; font-weight: 500;
+  }
+  .status-active { background: rgba(16,185,129,0.12); color: var(--accent3); }
+  .status-pending { background: rgba(245,158,11,0.12); color: var(--accent4); }
+  .status-done { background: rgba(100,116,139,0.12); color: var(--text-muted); }
+  .status-blocked { background: rgba(239,68,68,0.12); color: var(--danger); }
+
+  /* ── Progress bars ── */
+  .progress-bar {
+    height: 6px; background: var(--surface3);
+    border-radius: 3px; overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%; border-radius: 3px;
+    transition: width .5s ease;
+  }
+
+  /* ── Forms ── */
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .form-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+  .form-group { display: flex; flex-direction: column; gap: 6px; }
+  .form-group.full { grid-column: 1 / -1; }
+  label { font-size: 12px; color: var(--text-muted); letter-spacing: .5px; font-weight: 500; }
+  input, select, textarea {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 10px 12px;
+    color: var(--text); font-family: inherit; font-size: 13px;
+    transition: border-color .15s;
+    outline: none;
+  }
+  input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+  textarea { resize: vertical; min-height: 80px; }
+  select option { background: var(--surface2); }
+
+  /* ── Modal ── */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.7); backdrop-filter: blur(4px);
+    z-index: 1000; align-items: center; justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 32px; width: 620px;
+    max-width: 95vw; max-height: 90vh;
+    overflow-y: auto;
+    animation: slideUp .25s ease;
+  }
+  @keyframes slideUp {
+    from { opacity:0; transform: translateY(20px); }
+    to { opacity:1; transform: none; }
+  }
+  .modal-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 18px; font-weight: 700;
+    margin-bottom: 24px;
+  }
+  .modal-footer {
+    display: flex; justify-content: flex-end; gap: 10px;
+    margin-top: 24px; padding-top: 20px;
+    border-top: 1px solid var(--border);
+  }
+
+  /* ── Tabs ── */
+  .tabs { display: flex; gap: 4px; margin-bottom: 24px; border-bottom: 1px solid var(--border); }
+  .tab {
+    padding: 10px 18px; cursor: pointer; font-size: 13px;
+    color: var(--text-muted); border-bottom: 2px solid transparent;
+    margin-bottom: -1px; transition: all .15s; font-weight: 500;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* ── Chart containers ── */
+  .chart-container { position: relative; height: 260px; }
+  .chart-container-sm { position: relative; height: 200px; }
+  .chart-container-lg { position: relative; height: 340px; }
+
+  /* ── Utilization meter ── */
+  .util-meter { margin-bottom: 14px; }
+  .util-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 13px; }
+  .util-name { font-weight: 500; }
+  .util-pct { font-size: 12px; color: var(--text-muted); }
+
+  /* ── Member cards ── */
+  .member-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px,1fr)); gap: 16px; }
+  .member-card {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 18px;
+    transition: border-color .2s;
+  }
+  .member-card:hover { border-color: var(--accent); }
+  .member-avatar {
+    width: 44px; height: 44px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; font-weight: 700; margin-bottom: 10px;
+  }
+  .member-name { font-weight: 600; font-size: 14px; margin-bottom: 2px; }
+  .member-title { font-size: 12px; color: var(--text-muted); margin-bottom: 10px; }
+  .member-stats { display: flex; gap: 12px; }
+  .member-stat { font-size: 11px; color: var(--text-muted); }
+  .member-stat strong { display: block; font-size: 18px; font-weight: 700; color: var(--text); line-height: 1.2; }
+
+  /* ── Notification dot ── */
+  .notif-dot {
+    display: inline-block; width: 7px; height: 7px;
+    border-radius: 50%; background: var(--accent); margin-left: 6px;
+  }
+
+  /* ── Section header ── */
+  .section-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 20px;
+  }
+  .section-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 24px; font-weight: 800;
+  }
+  .section-sub { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
+
+  /* ── Empty state ── */
+  .empty-state {
+    text-align: center; padding: 48px 24px;
+    color: var(--text-muted);
+  }
+  .empty-state svg { opacity: .3; margin-bottom: 12px; }
+  .empty-state p { font-size: 14px; }
+
+  /* ── Responsive ── */
+  @media(max-width:900px) {
+    .sidebar { transform: translateX(-260px); }
+    .main { margin-left: 0; }
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+    .form-grid, .form-grid-3 { grid-template-columns: 1fr; }
+  }
+
+  /* ── Scrollbar ── */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* ── Toast ── */
+  .toast {
+    position: fixed; bottom: 24px; right: 24px;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-left: 3px solid var(--accent3);
+    border-radius: var(--radius-sm); padding: 14px 20px;
+    font-size: 13px; z-index: 2000;
+    animation: toastIn .3s ease; min-width: 280px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  @keyframes toastIn { from { opacity:0; transform: translateY(10px); } to { opacity:1; transform: none; } }
+
+  /* ── Header accent line ── */
+  .accent-line { height: 3px; width: 40px; background: var(--accent); border-radius: 2px; margin-bottom: 16px; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════ SIDEBAR ═══════════════════════ -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <div class="logo-mark">InfraTrack</div>
+    <div class="logo-sub">Infrastructure Portal</div>
+  </div>
+
+  <div class="nav-section">
+    <div class="nav-label">Overview</div>
+    <div class="nav-item active" onclick="showPage('dashboard')">
+      <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      Dashboard
+    </div>
+    <div class="nav-item" onclick="showPage('activities')">
+      <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+      Activities
+    </div>
+    <div class="nav-item" onclick="showPage('timelog')">
+      <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+      Time Log
+      <span class="notif-dot"></span>
+    </div>
+  </div>
+
+  <div class="nav-section">
+    <div class="nav-label">Teams</div>
+    <div class="nav-item" onclick="showPage('teams')">
+      <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+      Team Management
+    </div>
+    <div class="nav-item" onclick="showPage('members')">
+      <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      Members
+    </div>
+    <div class="nav-item" onclick="showPage('bandwidth')">
+      <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
+      Bandwidth & Capacity
+    </div>
+  </div>
+
+  <div class="nav-section">
+    <div class="nav-label">Analytics</div>
+    <div class="nav-item" onclick="showPage('reports')">
+      <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+      Reports
+    </div>
+    <div class="nav-item" onclick="showPage('planning')">
+      <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+      Capacity Planning
+    </div>
+  </div>
+
+  <div class="nav-section">
+    <div class="nav-label">Config</div>
+    <div class="nav-item" onclick="showPage('settings')">
+      <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+      Settings
+    </div>
+  </div>
+
+  <div class="sidebar-bottom">
+    <div class="user-chip">
+      <div class="user-avatar">SA</div>
+      <div class="user-info">
+        <div class="name">Sarah Admin</div>
+        <div class="role">Infra Manager</div>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<!-- ═══════════════════════ MAIN ═══════════════════════ -->
+<main class="main">
+  <div class="topbar">
+    <div class="topbar-title" id="page-title">Dashboard</div>
+    <div class="topbar-actions">
+      <button class="btn btn-outline" onclick="exportToExcel()">
+        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+        Export Excel
+      </button>
+      <button class="btn btn-primary" onclick="openAddModal()">
+        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        New Activity
+      </button>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <!-- ═══ PAGE: DASHBOARD ═══ -->
+    <div class="page active" id="page-dashboard">
+      <div class="section-header">
+        <div>
+          <div class="section-title">Operations Overview</div>
+          <div class="section-sub">March 2025 · Infrastructure Group</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <select style="font-size:12px;padding:6px 10px;" onchange="updateDashboard(this.value)">
+            <option>March 2025</option>
+            <option>February 2025</option>
+            <option>January 2025</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Stats row -->
+      <div class="stats-grid">
+        <div class="stat-card c1">
+          <div class="stat-label">Total Activities</div>
+          <div class="stat-value" style="color:var(--accent)">124</div>
+          <div class="stat-badge badge-up">↑ 12 this week</div>
+        </div>
+        <div class="stat-card c2">
+          <div class="stat-label">Hours Logged</div>
+          <div class="stat-value" style="color:var(--accent2)">2,847</div>
+          <div class="stat-badge badge-up">↑ 8% vs last month</div>
+        </div>
+        <div class="stat-card c3">
+          <div class="stat-label">Team Utilization</div>
+          <div class="stat-value" style="color:var(--accent3)">78%</div>
+          <div class="stat-badge badge-up">↑ 3% vs plan</div>
+        </div>
+        <div class="stat-card c4">
+          <div class="stat-label">Active Teams</div>
+          <div class="stat-value" style="color:var(--accent4)">6</div>
+          <div class="stat-badge badge-neutral">All functional</div>
+        </div>
+        <div class="stat-card c5">
+          <div class="stat-label">On Vacation</div>
+          <div class="stat-value" style="color:var(--danger)">4</div>
+          <div class="stat-badge badge-neutral">This week</div>
+        </div>
+        <div class="stat-card c6">
+          <div class="stat-label">Open Activities</div>
+          <div class="stat-value" style="color:var(--database)">38</div>
+          <div class="stat-badge badge-down">↓ 5 blocked</div>
+        </div>
+      </div>
+
+      <!-- Charts row 1 -->
+      <div class="grid-2 mb-24">
+        <div class="card">
+          <div class="card-title">Hours by Team — March 2025</div>
+          <div class="chart-container">
+            <canvas id="teamHoursChart"></canvas>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Team Utilization %</div>
+          <div style="padding-top:8px;">
+            <div class="util-meter">
+              <div class="util-header"><span class="util-name">🌐 Network</span><span class="util-pct">82% · 328/400h</span></div>
+              <div class="progress-bar"><div class="progress-fill" style="width:82%;background:var(--network)"></div></div>
+            </div>
+            <div class="util-meter">
+              <div class="util-header"><span class="util-name">🔒 Security</span><span class="util-pct">91% · 546/600h</span></div>
+              <div class="progress-bar"><div class="progress-fill" style="width:91%;background:var(--security)"></div></div>
+            </div>
+            <div class="util-meter">
+              <div class="util-header"><span class="util-name">⚙️ Compute</span><span class="util-pct">74% · 444/600h</span></div>
+              <div class="progress-bar"><div class="progress-fill" style="width:74%;background:var(--compute)"></div></div>
+            </div>
+            <div class="util-meter">
+              <div class="util-header"><span class="util-name">☁️ Cloud</span><span class="util-pct">88% · 528/600h</span></div>
+              <div class="progress-bar"><div class="progress-fill" style="width:88%;background:var(--cloud)"></div></div>
+            </div>
+            <div class="util-meter">
+              <div class="util-header"><span class="util-name">💾 Storage</span><span class="util-pct">65% · 260/400h</span></div>
+              <div class="progress-bar"><div class="progress-fill" style="width:65%;background:var(--storage)"></div></div>
+            </div>
+            <div class="util-meter">
+              <div class="util-header"><span class="util-name">🗄️ Database</span><span class="util-pct">79% · 316/400h</span></div>
+              <div class="progress-bar"><div class="progress-fill" style="width:79%;background:var(--database)"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Charts row 2 -->
+      <div class="grid-2 mb-24">
+        <div class="card">
+          <div class="card-title">Activity Type Breakdown</div>
+          <div class="chart-container">
+            <canvas id="activityTypeChart"></canvas>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Weekly Hours Trend</div>
+          <div class="chart-container">
+            <canvas id="weeklyTrendChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recent activities table -->
+      <div class="card">
+        <div class="card-title">
+          Recent Activity Log
+          <button class="btn btn-outline" style="font-size:12px;padding:5px 12px;" onclick="showPage('activities')">View All →</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Activity</th><th>Team</th><th>Member</th><th>Category</th><th>Hours</th><th>Date</th><th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="recent-table">
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ PAGE: ACTIVITIES ═══ -->
+    <div class="page" id="page-activities">
+      <div class="section-header">
+        <div>
+          <div class="section-title">Activities</div>
+          <div class="section-sub">All functional team activities</div>
+        </div>
+        <button class="btn btn-primary" onclick="openAddModal()">+ New Activity</button>
+      </div>
+
+      <!-- Filters -->
+      <div class="card mb-24" style="padding:16px 20px;">
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
+          <select style="font-size:13px;" id="filter-team" onchange="renderActivities()">
+            <option value="">All Teams</option>
+            <option>Network</option><option>Security</option><option>Compute</option>
+            <option>Cloud</option><option>Storage</option><option>Database</option>
+          </select>
+          <select style="font-size:13px;" id="filter-type" onchange="renderActivities()">
+            <option value="">All Types</option>
+            <option>Project</option><option>Incident</option><option>Change</option>
+            <option>BAU</option><option>Training</option><option>Meeting</option>
+          </select>
+          <select style="font-size:13px;" id="filter-status" onchange="renderActivities()">
+            <option value="">All Status</option>
+            <option>Active</option><option>Pending</option><option>Done</option><option>Blocked</option>
+          </select>
+          <input type="text" placeholder="Search activities..." style="flex:1;min-width:180px;font-size:13px;" id="filter-search" oninput="renderActivities()">
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th><th>Activity Name</th><th>Team</th><th>Assigned To</th><th>Type</th><th>Category</th><th>Hours</th><th>Priority</th><th>Status</th><th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="activities-table"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ PAGE: TIME LOG ═══ -->
+    <div class="page" id="page-timelog">
+      <div class="section-header">
+        <div>
+          <div class="section-title">Time Log</div>
+          <div class="section-sub">Track hours spent per activity</div>
+        </div>
+        <button class="btn btn-primary" onclick="openTimeModal()">+ Log Time</button>
+      </div>
+
+      <div class="grid-2 mb-24">
+        <div class="card">
+          <div class="card-title">My Hours This Month</div>
+          <div class="chart-container-sm"><canvas id="myHoursChart"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Time by Category</div>
+          <div class="chart-container-sm"><canvas id="timeCatChart"></canvas></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Time Log Entries</div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Date</th><th>Team Member</th><th>Activity</th><th>Type</th><th>Category</th><th>Hours</th><th>Notes</th></tr>
+            </thead>
+            <tbody id="timelog-table"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ PAGE: TEAMS ═══ -->
+    <div class="page" id="page-teams">
+      <div class="section-header">
+        <div>
+          <div class="section-title">Team Management</div>
+          <div class="section-sub">Manage functional teams and leads</div>
+        </div>
+        <button class="btn btn-primary" onclick="openTeamModal()">+ Add Team</button>
+      </div>
+
+      <div class="grid-3 mb-24" id="teams-grid"></div>
+    </div>
+
+    <!-- ═══ PAGE: MEMBERS ═══ -->
+    <div class="page" id="page-members">
+      <div class="section-header">
+        <div>
+          <div class="section-title">Team Members</div>
+          <div class="section-sub">All infrastructure group members</div>
+        </div>
+        <button class="btn btn-primary" onclick="openMemberModal()">+ Add Member</button>
+      </div>
+
+      <div class="card mb-24" style="padding:16px 20px;">
+        <div style="display:flex;gap:12px;flex-wrap:wrap;">
+          <select style="font-size:13px;" id="member-filter-team" onchange="renderMembers()">
+            <option value="">All Teams</option>
+            <option>Network</option><option>Security</option><option>Compute</option>
+            <option>Cloud</option><option>Storage</option><option>Database</option>
+          </select>
+          <input type="text" placeholder="Search members..." style="flex:1;min-width:180px;font-size:13px;" id="member-search" oninput="renderMembers()">
+        </div>
+      </div>
+
+      <div class="member-grid" id="members-grid"></div>
+    </div>
+
+    <!-- ═══ PAGE: BANDWIDTH ═══ -->
+    <div class="page" id="page-bandwidth">
+      <div class="section-header">
+        <div>
+          <div class="section-title">Bandwidth & Capacity</div>
+          <div class="section-sub">Team capacity, availability and vacation tracking</div>
+        </div>
+      </div>
+
+      <div class="grid-2 mb-24">
+        <div class="card">
+          <div class="card-title">Capacity Summary — March 2025</div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Team</th><th>Members</th><th>Available Hrs</th><th>Vacation Hrs</th><th>Net Capacity</th><th>Utilized</th><th>%</th></tr></thead>
+              <tbody id="capacity-table"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Capacity vs Utilization</div>
+          <div class="chart-container"><canvas id="capacityChart"></canvas></div>
+        </div>
+      </div>
+
+      <div class="card mb-24">
+        <div class="card-title">Vacation / Leave Calendar — March 2025</div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Member</th><th>Team</th><th>From</th><th>To</th><th>Days</th><th>Hours Impact</th><th>Type</th></tr></thead>
+            <tbody id="vacation-table"></tbody>
+          </table>
+        </div>
+        <div style="margin-top:14px;">
+          <button class="btn btn-outline" onclick="openVacationModal()">+ Add Leave Entry</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ PAGE: REPORTS ═══ -->
+    <div class="page" id="page-reports">
+      <div class="section-header">
+        <div>
+          <div class="section-title">Reports & Analytics</div>
+          <div class="section-sub">Utilization, activity, and capacity insights</div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-outline" onclick="exportToExcel()">Export Excel</button>
+          <button class="btn btn-success">Open in Power BI</button>
+        </div>
+      </div>
+
+      <div class="tabs">
+        <div class="tab active" onclick="switchTab(this,'report-util')">Team Utilization</div>
+        <div class="tab" onclick="switchTab(this,'report-member')">Per Member</div>
+        <div class="tab" onclick="switchTab(this,'report-activity')">Activity Wise</div>
+        <div class="tab" onclick="switchTab(this,'report-trend')">Trend Analysis</div>
+      </div>
+
+      <!-- Utilization Report -->
+      <div id="report-util">
+        <div class="grid-2 mb-24">
+          <div class="card">
+            <div class="card-title">Team Utilization — March 2025</div>
+            <div class="chart-container-lg"><canvas id="rptUtil1"></canvas></div>
+          </div>
+          <div class="card">
+            <div class="card-title">Utilization vs Capacity (Hours)</div>
+            <div class="chart-container-lg"><canvas id="rptUtil2"></canvas></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Utilization Detail Table</div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Team</th><th>Lead</th><th>Headcount</th><th>Available Hrs</th><th>Vacation Hrs</th><th>Net Capacity</th><th>Logged Hrs</th><th>Utilization %</th><th>Trend</th></tr></thead>
+              <tbody id="rpt-util-table"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Member Report -->
+      <div id="report-member" style="display:none;">
+        <div class="grid-2 mb-24">
+          <div class="card">
+            <div class="card-title">Hours per Member</div>
+            <div class="chart-container-lg"><canvas id="rptMember1"></canvas></div>
+          </div>
+          <div class="card">
+            <div class="card-title">Individual Utilization %</div>
+            <div class="chart-container-lg"><canvas id="rptMember2"></canvas></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Activity Report -->
+      <div id="report-activity" style="display:none;">
+        <div class="grid-2 mb-24">
+          <div class="card">
+            <div class="card-title">Hours by Activity Type</div>
+            <div class="chart-container-lg"><canvas id="rptAct1"></canvas></div>
+          </div>
+          <div class="card">
+            <div class="card-title">Hours by Category</div>
+            <div class="chart-container-lg"><canvas id="rptAct2"></canvas></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Trend Report -->
+      <div id="report-trend" style="display:none;">
+        <div class="card mb-24">
+          <div class="card-title">6-Month Utilization Trend by Team</div>
+          <div class="chart-container-lg"><canvas id="rptTrend"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Monthly Hours Comparison</div>
+          <div class="chart-container-lg"><canvas id="rptTrend2"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ PAGE: PLANNING ═══ -->
+    <div class="page" id="page-planning">
+      <div class="section-header">
+        <div>
+          <div class="section-title">Capacity Planning</div>
+          <div class="section-sub">Forecast and allocate team bandwidth</div>
+        </div>
+      </div>
+      <div class="grid-2 mb-24">
+        <div class="card">
+          <div class="card-title">Q2 2025 Forecast</div>
+          <div class="chart-container"><canvas id="forecastChart"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Allocation Recommendations</div>
+          <div style="padding-top:8px;">
+            <div style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:8px;padding:14px;margin-bottom:12px;">
+              <div style="font-size:12px;font-weight:600;color:var(--danger);margin-bottom:4px;">⚠ Security Team — Over-utilized</div>
+              <div style="font-size:12px;color:var(--text-muted)">Running at 91% for 2 consecutive months. Consider redistributing 2 activities or adding 0.5 FTE.</div>
+            </div>
+            <div style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:8px;padding:14px;margin-bottom:12px;">
+              <div style="font-size:12px;font-weight:600;color:var(--accent4);margin-bottom:4px;">⚡ Cloud Team — Near Capacity</div>
+              <div style="font-size:12px;color:var(--text-muted)">At 88% utilization with 3 pending projects queued. Plan ahead for April.</div>
+            </div>
+            <div style="background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.2);border-radius:8px;padding:14px;">
+              <div style="font-size:12px;font-weight:600;color:var(--accent3);margin-bottom:4px;">✓ Storage Team — Has Capacity</div>
+              <div style="font-size:12px;color:var(--text-muted)">Running at 65%. Can absorb 2–3 additional projects in Q2 without hiring.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Team Bandwidth Planning Table</div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Team</th><th>Apr Capacity</th><th>Apr Planned</th><th>Apr Gap</th><th>May Capacity</th><th>May Planned</th><th>May Gap</th><th>Jun Capacity</th><th>Jun Planned</th><th>Jun Gap</th></tr></thead>
+            <tbody id="planning-table"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ PAGE: SETTINGS ═══ -->
+    <div class="page" id="page-settings">
+      <div class="section-header">
+        <div>
+          <div class="section-title">Settings & Configuration</div>
+          <div class="section-sub">Customize fields, teams, and system preferences</div>
+        </div>
+      </div>
+
+      <div class="tabs">
+        <div class="tab active" onclick="switchTab(this,'s-fields')">Custom Fields</div>
+        <div class="tab" onclick="switchTab(this,'s-categories')">Categories & Types</div>
+        <div class="tab" onclick="switchTab(this,'s-sharepoint')">SharePoint Config</div>
+        <div class="tab" onclick="switchTab(this,'s-powerbi')">Power BI</div>
+      </div>
+
+      <div id="s-fields">
+        <div class="card mb-24">
+          <div class="card-title">Activity Custom Fields</div>
+          <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">Define custom fields that appear when creating or editing activities. Each field can be team-specific or global.</div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Field Name</th><th>Type</th><th>Teams</th><th>Required</th><th>Options</th><th>Actions</th></tr></thead>
+              <tbody>
+                <tr><td><strong>Priority Level</strong></td><td>Dropdown</td><td>All</td><td><span class="status-tag status-active">Yes</span></td><td>Critical, High, Medium, Low</td><td><button class="btn btn-outline" style="padding:3px 8px;font-size:11px;">Edit</button></td></tr>
+                <tr><td><strong>JIRA Ticket</strong></td><td>Text</td><td>All</td><td><span class="status-tag status-done">No</span></td><td>—</td><td><button class="btn btn-outline" style="padding:3px 8px;font-size:11px;">Edit</button></td></tr>
+                <tr><td><strong>VLAN ID</strong></td><td>Number</td><td>Network</td><td><span class="status-tag status-done">No</span></td><td>—</td><td><button class="btn btn-outline" style="padding:3px 8px;font-size:11px;">Edit</button></td></tr>
+                <tr><td><strong>CVE Reference</strong></td><td>Text</td><td>Security</td><td><span class="status-tag status-done">No</span></td><td>—</td><td><button class="btn btn-outline" style="padding:3px 8px;font-size:11px;">Edit</button></td></tr>
+                <tr><td><strong>Cloud Provider</strong></td><td>Dropdown</td><td>Cloud</td><td><span class="status-tag status-active">Yes</span></td><td>AWS, Azure, GCP, OCI</td><td><button class="btn btn-outline" style="padding:3px 8px;font-size:11px;">Edit</button></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div style="margin-top:14px;"><button class="btn btn-primary" onclick="openFieldModal()">+ Add Custom Field</button></div>
+        </div>
+      </div>
+
+      <div id="s-categories" style="display:none;">
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-title">Activity Types</div>
+            <div id="types-list">
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;"><span>📦 Project</span><button class="btn btn-outline" style="padding:2px 8px;font-size:11px;">×</button></div>
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;"><span>🚨 Incident</span><button class="btn btn-outline" style="padding:2px 8px;font-size:11px;">×</button></div>
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;"><span>🔄 Change</span><button class="btn btn-outline" style="padding:2px 8px;font-size:11px;">×</button></div>
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;"><span>⚙️ BAU</span><button class="btn btn-outline" style="padding:2px 8px;font-size:11px;">×</button></div>
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;"><span>📚 Training</span><button class="btn btn-outline" style="padding:2px 8px;font-size:11px;">×</button></div>
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;font-size:13px;"><span>💬 Meeting</span><button class="btn btn-outline" style="padding:2px 8px;font-size:11px;">×</button></div>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:12px;">
+              <input type="text" placeholder="New type..." style="flex:1;font-size:13px;">
+              <button class="btn btn-primary">Add</button>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title">Activity Categories</div>
+            <div id="cats-list">
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;"><span>Infrastructure Build</span><button class="btn btn-outline" style="padding:2px 8px;font-size:11px;">×</button></div>
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;"><span>Maintenance</span><button class="btn btn-outline" style="padding:2px 8px;font-size:11px;">×</button></div>
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;"><span>Security & Compliance</span><button class="btn btn-outline" style="padding:2px 8px;font-size:11px;">×</button></div>
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;"><span>Automation & Scripting</span><button class="btn btn-outline" style="padding:2px 8px;font-size:11px;">×</button></div>
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;"><span>Monitoring & Alerting</span><button class="btn btn-outline" style="padding:2px 8px;font-size:11px;">×</button></div>
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;font-size:13px;"><span>Documentation</span><button class="btn btn-outline" style="padding:2px 8px;font-size:11px;">×</button></div>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:12px;">
+              <input type="text" placeholder="New category..." style="flex:1;font-size:13px;">
+              <button class="btn btn-primary">Add</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="s-sharepoint" style="display:none;">
+        <div class="card">
+          <div class="card-title">SharePoint Online Configuration</div>
+          <div style="display:grid;gap:16px;max-width:600px;">
+            <div class="form-group">
+              <label>SharePoint Site URL</label>
+              <input type="text" value="https://yourorg.sharepoint.com/sites/InfraTrack" placeholder="https://...">
+            </div>
+            <div class="form-group">
+              <label>Client ID (Azure App Registration)</label>
+              <input type="text" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+            </div>
+            <div class="form-group">
+              <label>Tenant ID</label>
+              <input type="text" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+            </div>
+            <div class="form-group">
+              <label>List: Activities</label>
+              <input type="text" value="InfraActivities">
+            </div>
+            <div class="form-group">
+              <label>List: Time Logs</label>
+              <input type="text" value="InfraTimeLogs">
+            </div>
+            <div class="form-group">
+              <label>List: Team Members</label>
+              <input type="text" value="InfraMembers">
+            </div>
+            <button class="btn btn-primary" style="width:fit-content;" onclick="showToast('SharePoint settings saved!')">Save Configuration</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="s-powerbi" style="display:none;">
+        <div class="card">
+          <div class="card-title">Power BI Embed Configuration</div>
+          <div style="display:grid;gap:16px;max-width:600px;">
+            <div class="form-group">
+              <label>Workspace ID</label>
+              <input type="text" placeholder="Power BI Workspace GUID">
+            </div>
+            <div class="form-group">
+              <label>Report ID — Utilization Dashboard</label>
+              <input type="text" placeholder="Report GUID">
+            </div>
+            <div class="form-group">
+              <label>Report ID — Capacity Planning</label>
+              <input type="text" placeholder="Report GUID">
+            </div>
+            <div class="form-group">
+              <label>Embed Token (Service Principal)</label>
+              <input type="text" placeholder="eyJ0eXAiOiJKV1Q...">
+            </div>
+            <div style="background:rgba(0,212,255,0.07);border:1px solid rgba(0,212,255,0.2);border-radius:8px;padding:14px;font-size:12px;color:var(--text-muted);">
+              <strong style="color:var(--accent);">Power BI Setup Guide:</strong><br><br>
+              1. Register an Azure AD App with Power BI API permissions<br>
+              2. Add app as Power BI workspace member (Viewer+)<br>
+              3. Use Service Principal or Master User auth method<br>
+              4. The SharePoint lists feed into Power BI via Power Query connector<br>
+              5. Refresh schedule: Set to daily or real-time streaming
+            </div>
+            <button class="btn btn-success" style="width:fit-content;" onclick="showToast('Power BI settings saved!')">Save & Test Connection</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /content -->
+</main>
+
+<!-- ═══════════════════════ MODALS ═══════════════════════ -->
+
+<!-- Add Activity Modal -->
+<div class="modal-overlay" id="modal-activity">
+  <div class="modal">
+    <div class="modal-title">New Activity</div>
+    <div class="form-grid">
+      <div class="form-group full">
+        <label>Activity Name *</label>
+        <input type="text" id="act-name" placeholder="e.g. Firewall Policy Review">
+      </div>
+      <div class="form-group">
+        <label>Functional Team *</label>
+        <select id="act-team">
+          <option>Network</option><option>Security</option><option>Compute</option>
+          <option>Cloud</option><option>Storage</option><option>Database</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Assigned To</label>
+        <select id="act-assignee">
+          <option>Alex Chen</option><option>Maria Santos</option><option>James Park</option>
+          <option>Priya Nair</option><option>David Kim</option><option>Lisa Johnson</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Activity Type *</label>
+        <select id="act-type">
+          <option>Project</option><option>Incident</option><option>Change</option>
+          <option>BAU</option><option>Training</option><option>Meeting</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Category *</label>
+        <select id="act-cat">
+          <option>Infrastructure Build</option><option>Maintenance</option>
+          <option>Security & Compliance</option><option>Automation & Scripting</option>
+          <option>Monitoring & Alerting</option><option>Documentation</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Priority</label>
+        <select id="act-priority">
+          <option>Critical</option><option>High</option><option selected>Medium</option><option>Low</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Status</label>
+        <select id="act-status">
+          <option>Active</option><option>Pending</option><option>Done</option><option>Blocked</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Start Date</label>
+        <input type="date" id="act-start">
+      </div>
+      <div class="form-group">
+        <label>Due Date</label>
+        <input type="date" id="act-due">
+      </div>
+      <div class="form-group">
+        <label>Estimated Hours</label>
+        <input type="number" id="act-est-hrs" placeholder="40">
+      </div>
+      <div class="form-group">
+        <label>JIRA / Ticket Ref</label>
+        <input type="text" id="act-jira" placeholder="INFRA-1234">
+      </div>
+      <div class="form-group full">
+        <label>Description</label>
+        <textarea id="act-desc" placeholder="Describe the activity..."></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-activity')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveActivity()">Save Activity</button>
+    </div>
+  </div>
+</div>
+
+<!-- Log Time Modal -->
+<div class="modal-overlay" id="modal-time">
+  <div class="modal">
+    <div class="modal-title">Log Time</div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Date *</label>
+        <input type="date" id="tl-date">
+      </div>
+      <div class="form-group">
+        <label>Team Member *</label>
+        <select id="tl-member">
+          <option>Alex Chen</option><option>Maria Santos</option><option>James Park</option>
+          <option>Priya Nair</option><option>David Kim</option><option>Lisa Johnson</option>
+          <option>Tom Wilson</option><option>Emma Davis</option>
+        </select>
+      </div>
+      <div class="form-group full">
+        <label>Activity *</label>
+        <select id="tl-activity">
+          <option>Firewall Policy Review</option>
+          <option>Network Segmentation — DC Migration</option>
+          <option>AWS Landing Zone Setup</option>
+          <option>SQL Server Upgrade</option>
+          <option>SAN Performance Tuning</option>
+          <option>Incident Response — P1 Outage</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Activity Type</label>
+        <select id="tl-type">
+          <option>Project</option><option>Incident</option><option>Change</option>
+          <option>BAU</option><option>Training</option><option>Meeting</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Category</label>
+        <select id="tl-cat">
+          <option>Infrastructure Build</option><option>Maintenance</option>
+          <option>Security & Compliance</option><option>Automation & Scripting</option>
+          <option>Monitoring & Alerting</option><option>Documentation</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Hours Spent *</label>
+        <input type="number" id="tl-hours" placeholder="4" step="0.5" min="0.5" max="24">
+      </div>
+      <div class="form-group full">
+        <label>Notes</label>
+        <textarea id="tl-notes" placeholder="What did you accomplish?"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-time')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveTimeLog()">Save Time Entry</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Member Modal -->
+<div class="modal-overlay" id="modal-member">
+  <div class="modal">
+    <div class="modal-title">Add Team Member</div>
+    <div class="form-grid">
+      <div class="form-group"><label>First Name *</label><input type="text" id="mb-first"></div>
+      <div class="form-group"><label>Last Name *</label><input type="text" id="mb-last"></div>
+      <div class="form-group full"><label>Email</label><input type="email" id="mb-email"></div>
+      <div class="form-group">
+        <label>Team *</label>
+        <select id="mb-team">
+          <option>Network</option><option>Security</option><option>Compute</option>
+          <option>Cloud</option><option>Storage</option><option>Database</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Job Title</label><input type="text" id="mb-title"></div>
+      <div class="form-group">
+        <label>Role</label>
+        <select id="mb-role">
+          <option>Engineer</option><option>Senior Engineer</option><option>Lead</option><option>Manager</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Monthly Bandwidth (hrs)</label><input type="number" id="mb-bw" value="160"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-member')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveMember()">Add Member</button>
+    </div>
+  </div>
+</div>
+
+<!-- Vacation Modal -->
+<div class="modal-overlay" id="modal-vacation">
+  <div class="modal">
+    <div class="modal-title">Add Leave Entry</div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Member</label>
+        <select id="vac-member">
+          <option>Alex Chen</option><option>Maria Santos</option><option>James Park</option>
+          <option>Priya Nair</option><option>David Kim</option><option>Lisa Johnson</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Leave Type</label>
+        <select id="vac-type">
+          <option>Annual Leave</option><option>Sick Leave</option><option>Public Holiday</option><option>Training</option><option>Conference</option>
+        </select>
+      </div>
+      <div class="form-group"><label>From Date</label><input type="date" id="vac-from"></div>
+      <div class="form-group"><label>To Date</label><input type="date" id="vac-to"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-vacation')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveVacation()">Save Leave</button>
+    </div>
+  </div>
+</div>
+
+<!-- Field Modal -->
+<div class="modal-overlay" id="modal-field">
+  <div class="modal">
+    <div class="modal-title">Add Custom Field</div>
+    <div class="form-grid">
+      <div class="form-group full"><label>Field Name *</label><input type="text" placeholder="e.g. Approval Ticket"></div>
+      <div class="form-group">
+        <label>Field Type *</label>
+        <select>
+          <option>Text</option><option>Number</option><option>Dropdown</option>
+          <option>Date</option><option>Checkbox</option><option>Multi-select</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Applicable Teams</label>
+        <select>
+          <option>All Teams</option><option>Network</option><option>Security</option>
+          <option>Compute</option><option>Cloud</option><option>Storage</option><option>Database</option>
+        </select>
+      </div>
+      <div class="form-group full"><label>Options (for Dropdown/Multi-select, comma-separated)</label><input type="text" placeholder="Option A, Option B, Option C"></div>
+      <div class="form-group"><label>Required Field?</label><select><option>No</option><option>Yes</option></select></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-field')">Cancel</button>
+      <button class="btn btn-primary" onclick="closeModal('modal-field');showToast('Custom field added!')">Save Field</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════ JAVASCRIPT ═══════════════════════ -->
+<script>
+// ── DATA ──
+const TEAMS = [
+  { name:'Network',  emoji:'🌐', lead:'Alex Chen',   color:'#00d4ff', headcount:3, bwPerPerson:160 },
+  { name:'Security', emoji:'🔒', lead:'Maria Santos', color:'#ef4444', headcount:4, bwPerPerson:160 },
+  { name:'Compute',  emoji:'⚙️', lead:'James Park',  color:'#f59e0b', headcount:4, bwPerPerson:160 },
+  { name:'Cloud',    emoji:'☁️', lead:'Priya Nair',  color:'#7c3aed', headcount:4, bwPerPerson:160 },
+  { name:'Storage',  emoji:'💾', lead:'David Kim',   color:'#10b981', headcount:3, bwPerPerson:160 },
+  { name:'Database', emoji:'🗄️', lead:'Lisa Johnson',color:'#f97316', headcount:3, bwPerPerson:160 },
+];
+
+const ACTIVITIES = [
+  { id:'ACT-001', name:'Firewall Policy Review', team:'Security', assignee:'Maria Santos', type:'Change', cat:'Security & Compliance', hours:18, est:24, priority:'High', status:'Active', jira:'SEC-210', date:'2025-03-10' },
+  { id:'ACT-002', name:'Network Segmentation — DC Migration', team:'Network', assignee:'Alex Chen', type:'Project', cat:'Infrastructure Build', hours:42, est:80, priority:'Critical', status:'Active', jira:'NET-087', date:'2025-03-01' },
+  { id:'ACT-003', name:'AWS Landing Zone Setup', team:'Cloud', assignee:'Priya Nair', type:'Project', cat:'Infrastructure Build', hours:56, est:60, priority:'High', status:'Active', jira:'CLD-045', date:'2025-02-20' },
+  { id:'ACT-004', name:'SQL Server Upgrade to 2022', team:'Database', assignee:'Lisa Johnson', type:'Change', cat:'Maintenance', hours:12, est:16, priority:'Medium', status:'Pending', jira:'DB-334', date:'2025-03-12' },
+  { id:'ACT-005', name:'SAN Performance Tuning', team:'Storage', assignee:'David Kim', type:'BAU', cat:'Monitoring & Alerting', hours:8, est:8, priority:'Low', status:'Done', jira:'STR-112', date:'2025-03-05' },
+  { id:'ACT-006', name:'Incident Response — P1 Outage', team:'Compute', assignee:'James Park', type:'Incident', cat:'Maintenance', hours:14, est:14, priority:'Critical', status:'Done', jira:'INC-891', date:'2025-03-08' },
+  { id:'ACT-007', name:'Zero Trust Network Access POC', team:'Security', assignee:'Maria Santos', type:'Project', cat:'Security & Compliance', hours:28, est:40, priority:'High', status:'Active', jira:'SEC-215', date:'2025-03-03' },
+  { id:'ACT-008', name:'Kubernetes Cluster Upgrade', team:'Compute', assignee:'James Park', type:'Change', cat:'Maintenance', hours:6, est:12, priority:'High', status:'Pending', jira:'CMP-229', date:'2025-03-14' },
+  { id:'ACT-009', name:'Azure DevOps Pipeline Setup', team:'Cloud', assignee:'Priya Nair', type:'Project', cat:'Automation & Scripting', hours:22, est:30, priority:'Medium', status:'Active', jira:'CLD-048', date:'2025-03-06' },
+  { id:'ACT-010', name:'BGP Route Optimization', team:'Network', assignee:'Alex Chen', type:'BAU', cat:'Infrastructure Build', hours:10, est:10, priority:'Medium', status:'Blocked', jira:'NET-092', date:'2025-03-11' },
+];
+
+const TIME_LOGS = [
+  { date:'2025-03-14', member:'Maria Santos', activity:'Firewall Policy Review', type:'Change', cat:'Security & Compliance', hours:4, notes:'Reviewed ingress rules for DMZ' },
+  { date:'2025-03-14', member:'Alex Chen', activity:'Network Segmentation — DC Migration', type:'Project', cat:'Infrastructure Build', hours:6, notes:'VLAN tagging configuration' },
+  { date:'2025-03-13', member:'Priya Nair', activity:'AWS Landing Zone Setup', type:'Project', cat:'Infrastructure Build', hours:8, notes:'SCP policies and account vending' },
+  { date:'2025-03-13', member:'James Park', activity:'Kubernetes Cluster Upgrade', type:'Change', cat:'Maintenance', hours:3, notes:'Pre-upgrade validation tests' },
+  { date:'2025-03-12', member:'Lisa Johnson', activity:'SQL Server Upgrade to 2022', type:'Change', cat:'Maintenance', hours:4, notes:'Compatibility assessment' },
+  { date:'2025-03-12', member:'David Kim', activity:'SAN Performance Tuning', type:'BAU', cat:'Monitoring & Alerting', hours:4, notes:'Baseline performance metrics' },
+  { date:'2025-03-11', member:'Maria Santos', activity:'Zero Trust Network Access POC', type:'Project', cat:'Security & Compliance', hours:6, notes:'Identity provider integration' },
+  { date:'2025-03-11', member:'Priya Nair', activity:'Azure DevOps Pipeline Setup', type:'Project', cat:'Automation & Scripting', hours:5, notes:'CI/CD template creation' },
+];
+
+const MEMBERS = [
+  { first:'Alex', last:'Chen', team:'Network', title:'Network Engineer', role:'Lead', bw:160, email:'alex.chen@company.com', hours:82 },
+  { first:'Maria', last:'Santos', team:'Security', title:'Security Engineer', role:'Lead', bw:160, email:'maria.santos@company.com', hours:96 },
+  { first:'James', last:'Park', team:'Compute', title:'Systems Engineer', role:'Lead', bw:160, email:'james.park@company.com', hours:74 },
+  { first:'Priya', last:'Nair', team:'Cloud', title:'Cloud Architect', role:'Lead', bw:160, email:'priya.nair@company.com', hours:121 },
+  { first:'David', last:'Kim', team:'Storage', title:'Storage Engineer', role:'Lead', bw:160, email:'david.kim@company.com', hours:68 },
+  { first:'Lisa', last:'Johnson', team:'Database', title:'DBA', role:'Lead', bw:160, email:'lisa.johnson@company.com', hours:88 },
+  { first:'Tom', last:'Wilson', team:'Network', title:'Network Engineer', role:'Engineer', bw:160, email:'tom.wilson@company.com', hours:78 },
+  { first:'Emma', last:'Davis', team:'Security', title:'Security Analyst', role:'Senior Engineer', bw:160, email:'emma.davis@company.com', hours:102 },
+  { first:'Mike', last:'Brown', team:'Compute', title:'Virtualization Eng.', role:'Engineer', bw:160, email:'mike.brown@company.com', hours:64 },
+  { first:'Aisha', last:'Malik', team:'Cloud', title:'Cloud Engineer', role:'Senior Engineer', bw:160, email:'aisha.malik@company.com', hours:98 },
+];
+
+const VACATIONS = [
+  { member:'Tom Wilson', team:'Network', from:'2025-03-17', to:'2025-03-21', days:5, hrs:40, type:'Annual Leave' },
+  { member:'Emma Davis', team:'Security', from:'2025-03-24', to:'2025-03-26', days:3, hrs:24, type:'Annual Leave' },
+  { member:'Mike Brown', team:'Compute', from:'2025-03-10', to:'2025-03-10', days:1, hrs:8, type:'Sick Leave' },
+  { member:'Aisha Malik', team:'Cloud', from:'2025-03-20', to:'2025-03-20', days:1, hrs:8, type:'Public Holiday' },
+];
+
+const CAPACITY = [
+  { team:'Network',  headcount:3, avail:400, vacation:48, utilized:328 },
+  { team:'Security', headcount:4, avail:600, vacation:32, utilized:546 },
+  { team:'Compute',  headcount:4, avail:600, vacation:8,  utilized:444 },
+  { team:'Cloud',    headcount:4, avail:600, vacation:8,  utilized:528 },
+  { team:'Storage',  headcount:3, avail:400, vacation:0,  utilized:260 },
+  { team:'Database', headcount:3, avail:400, vacation:0,  utilized:316 },
+];
+
+// ── NAVIGATION ──
+function showPage(id) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('page-' + id).classList.add('active');
+  const titles = { dashboard:'Dashboard', activities:'Activities', timelog:'Time Log', teams:'Team Management', members:'Members', bandwidth:'Bandwidth & Capacity', reports:'Reports & Analytics', planning:'Capacity Planning', settings:'Settings & Configuration' };
+  document.getElementById('page-title').textContent = titles[id] || id;
+  // Activate nav item
+  document.querySelectorAll('.nav-item').forEach(el => {
+    if(el.getAttribute('onclick') && el.getAttribute('onclick').includes(id)) el.classList.add('active');
+  });
+  if(id === 'reports') { setTimeout(initReportCharts, 50); }
+}
+
+// ── MODALS ──
+function openAddModal() { document.getElementById('modal-activity').classList.add('open'); }
+function openTimeModal() { document.getElementById('modal-time').classList.add('open'); }
+function openMemberModal() { document.getElementById('modal-member').classList.add('open'); }
+function openVacationModal() { document.getElementById('modal-vacation').classList.add('open'); }
+function openTeamModal() { showToast('Team customization coming soon — manage via Settings.'); }
+function openFieldModal() { document.getElementById('modal-field').classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+// Close modal on overlay click
+document.querySelectorAll('.modal-overlay').forEach(o => {
+  o.addEventListener('click', e => { if(e.target === o) o.classList.remove('open'); });
+});
+
+// ── SAVE ACTIONS ──
+function saveActivity() {
+  const name = document.getElementById('act-name').value.trim();
+  if(!name) { alert('Activity name is required'); return; }
+  const id = 'ACT-' + String(ACTIVITIES.length + 1).padStart(3,'0');
+  ACTIVITIES.unshift({
+    id, name,
+    team: document.getElementById('act-team').value,
+    assignee: document.getElementById('act-assignee').value,
+    type: document.getElementById('act-type').value,
+    cat: document.getElementById('act-cat').value,
+    priority: document.getElementById('act-priority').value,
+    status: document.getElementById('act-status').value,
+    hours: 0, est: parseInt(document.getElementById('act-est-hrs').value)||0,
+    jira: document.getElementById('act-jira').value,
+    date: document.getElementById('act-start').value || new Date().toISOString().slice(0,10)
+  });
+  closeModal('modal-activity');
+  renderActivities();
+  showToast('Activity ' + id + ' created!');
+}
+
+function saveTimeLog() {
+  const hrs = parseFloat(document.getElementById('tl-hours').value);
+  if(!hrs || hrs <= 0) { alert('Please enter hours'); return; }
+  TIME_LOGS.unshift({
+    date: document.getElementById('tl-date').value || new Date().toISOString().slice(0,10),
+    member: document.getElementById('tl-member').value,
+    activity: document.getElementById('tl-activity').value,
+    type: document.getElementById('tl-type').value,
+    cat: document.getElementById('tl-cat').value,
+    hours: hrs,
+    notes: document.getElementById('tl-notes').value
+  });
+  closeModal('modal-time');
+  renderTimeLogs();
+  showToast(`${hrs}h logged for ${document.getElementById('tl-member').value}`);
+}
+
+function saveMember() {
+  const first = document.getElementById('mb-first').value.trim();
+  const last = document.getElementById('mb-last').value.trim();
+  if(!first || !last) { alert('Name required'); return; }
+  MEMBERS.push({ first, last, team: document.getElementById('mb-team').value, title: document.getElementById('mb-title').value, role: document.getElementById('mb-role').value, bw: parseInt(document.getElementById('mb-bw').value)||160, email: document.getElementById('mb-email').value, hours: 0 });
+  closeModal('modal-member');
+  renderMembers();
+  showToast(`${first} ${last} added!`);
+}
+
+function saveVacation() {
+  const member = document.getElementById('vac-member').value;
+  const from = document.getElementById('vac-from').value;
+  const to = document.getElementById('vac-to').value;
+  if(!from || !to) { alert('Dates required'); return; }
+  const days = Math.max(1, Math.round((new Date(to)-new Date(from))/(86400000))+1);
+  VACATIONS.push({ member, team: MEMBERS.find(m=>m.first+' '+m.last===member)?.team||'', from, to, days, hrs: days*8, type: document.getElementById('vac-type').value });
+  closeModal('modal-vacation');
+  renderVacations();
+  showToast('Leave entry saved!');
+}
+
+// ── RENDERS ──
+function teamTagHtml(team) {
+  return `<span class="team-tag tag-${team.toLowerCase()}">${team}</span>`;
+}
+
+function statusTagHtml(status) {
+  const cls = { Active:'status-active', Pending:'status-pending', Done:'status-done', Blocked:'status-blocked' };
+  return `<span class="status-tag ${cls[status]||''}">${status}</span>`;
+}
+
+function priorityColor(p) {
+  return { Critical:'var(--danger)', High:'var(--accent4)', Medium:'var(--accent)', Low:'var(--text-muted)' }[p] || 'var(--text-muted)';
+}
+
+function renderActivities() {
+  const teamF = document.getElementById('filter-team')?.value;
+  const typeF = document.getElementById('filter-type')?.value;
+  const statusF = document.getElementById('filter-status')?.value;
+  const searchF = (document.getElementById('filter-search')?.value||'').toLowerCase();
+  const tbody = document.getElementById('activities-table');
+  if(!tbody) return;
+  const filtered = ACTIVITIES.filter(a =>
+    (!teamF || a.team === teamF) &&
+    (!typeF || a.type === typeF) &&
+    (!statusF || a.status === statusF) &&
+    (!searchF || a.name.toLowerCase().includes(searchF) || a.id.toLowerCase().includes(searchF))
+  );
+  tbody.innerHTML = filtered.map(a => `
+    <tr>
+      <td><code style="font-size:11px;color:var(--text-muted)">${a.id}</code></td>
+      <td><strong>${a.name}</strong><br><span style="font-size:11px;color:var(--text-muted)">${a.jira}</span></td>
+      <td>${teamTagHtml(a.team)}</td>
+      <td style="font-size:12px;">${a.assignee}</td>
+      <td style="font-size:12px;">${a.type}</td>
+      <td style="font-size:12px;">${a.cat}</td>
+      <td>
+        <div style="font-size:13px;font-weight:600;">${a.hours}h <span style="font-size:11px;color:var(--text-muted)">/ ${a.est}h</span></div>
+        <div class="progress-bar" style="width:80px;margin-top:4px;"><div class="progress-fill" style="width:${Math.min(100,Math.round(a.hours/Math.max(a.est,1)*100))}%;background:var(--accent)"></div></div>
+      </td>
+      <td><span style="color:${priorityColor(a.priority)};font-size:12px;font-weight:600;">● ${a.priority}</span></td>
+      <td>${statusTagHtml(a.status)}</td>
+      <td><button class="btn btn-outline" style="padding:3px 10px;font-size:11px;" onclick="showToast('Edit coming soon')">Edit</button></td>
+    </tr>`).join('');
+}
+
+function renderTimeLogs() {
+  const tbody = document.getElementById('timelog-table');
+  if(!tbody) return;
+  tbody.innerHTML = TIME_LOGS.map(t => `
+    <tr>
+      <td style="font-size:12px;">${t.date}</td>
+      <td><strong>${t.member}</strong></td>
+      <td style="font-size:12px;">${t.activity}</td>
+      <td style="font-size:12px;">${t.type}</td>
+      <td style="font-size:12px;">${t.cat}</td>
+      <td><strong style="color:var(--accent)">${t.hours}h</strong></td>
+      <td style="font-size:12px;color:var(--text-muted)">${t.notes}</td>
+    </tr>`).join('');
+}
+
+function renderMembers() {
+  const teamF = document.getElementById('member-filter-team')?.value;
+  const searchF = (document.getElementById('member-search')?.value||'').toLowerCase();
+  const grid = document.getElementById('members-grid');
+  if(!grid) return;
+  const teamColors = { Network:'var(--network)', Security:'var(--security)', Compute:'var(--compute)', Cloud:'var(--cloud)', Storage:'var(--storage)', Database:'var(--database)' };
+  const filtered = MEMBERS.filter(m =>
+    (!teamF || m.team === teamF) &&
+    (!searchF || `${m.first} ${m.last}`.toLowerCase().includes(searchF))
+  );
+  grid.innerHTML = filtered.map(m => {
+    const util = Math.round(m.hours / m.bw * 100);
+    const c = teamColors[m.team] || 'var(--accent)';
+    return `<div class="member-card">
+      <div class="member-avatar" style="background:${c}22;color:${c}">${m.first[0]}${m.last[0]}</div>
+      <div class="member-name">${m.first} ${m.last}</div>
+      <div class="member-title">${m.title} · ${teamTagHtml(m.team)}</div>
+      <div class="member-stats">
+        <div class="member-stat"><strong>${m.hours}h</strong>Logged</div>
+        <div class="member-stat"><strong>${m.bw}h</strong>Capacity</div>
+        <div class="member-stat"><strong style="color:${util>85?'var(--danger)':util>65?'var(--accent4)':'var(--accent3)'}">${util}%</strong>Util.</div>
+      </div>
+      <div class="progress-bar" style="margin-top:10px;"><div class="progress-fill" style="width:${Math.min(100,util)}%;background:${c}"></div></div>
+    </div>`;
+  }).join('');
+}
+
+function renderTeams() {
+  const grid = document.getElementById('teams-grid');
+  if(!grid) return;
+  const teamColors = { Network:'var(--network)', Security:'var(--security)', Compute:'var(--compute)', Cloud:'var(--cloud)', Storage:'var(--storage)', Database:'var(--database)' };
+  grid.innerHTML = TEAMS.map(t => {
+    const cap = CAPACITY.find(c=>c.team===t.name) || {};
+    const util = cap.utilized && cap.avail ? Math.round(cap.utilized/cap.avail*100) : 0;
+    const c = teamColors[t.name];
+    return `<div class="card" style="border-top:3px solid ${c}">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+        <div style="font-size:26px">${t.emoji}</div>
+        <div>
+          <div style="font-family:Syne;font-size:16px;font-weight:700;">${t.name}</div>
+          <div style="font-size:12px;color:var(--text-muted)">Lead: ${t.lead}</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:16px;margin-bottom:14px;">
+        <div class="member-stat"><strong style="font-size:20px;font-weight:700;color:var(--text)">${t.headcount}</strong>Members</div>
+        <div class="member-stat"><strong style="font-size:20px;font-weight:700;color:var(--text)">${t.headcount*t.bwPerPerson}h</strong>Capacity</div>
+        <div class="member-stat"><strong style="font-size:20px;font-weight:700;color:${c}">${util}%</strong>Utilized</div>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" style="width:${util}%;background:${c}"></div></div>
+      <div style="display:flex;gap:8px;margin-top:14px;">
+        <button class="btn btn-outline" style="font-size:12px;padding:5px 12px;flex:1" onclick="showPage('members')">Members</button>
+        <button class="btn btn-outline" style="font-size:12px;padding:5px 12px;flex:1" onclick="showToast('Team settings opening...')">Configure</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderVacations() {
+  const tbody = document.getElementById('vacation-table');
+  if(!tbody) return;
+  tbody.innerHTML = VACATIONS.map(v => `
+    <tr>
+      <td><strong>${v.member}</strong></td>
+      <td>${teamTagHtml(v.team)}</td>
+      <td style="font-size:12px">${v.from}</td>
+      <td style="font-size:12px">${v.to}</td>
+      <td style="font-size:12px">${v.days}</td>
+      <td><strong style="color:var(--danger)">${v.hrs}h</strong></td>
+      <td style="font-size:12px">${v.type}</td>
+    </tr>`).join('');
+}
+
+function renderCapacity() {
+  const tbody = document.getElementById('capacity-table');
+  if(!tbody) return;
+  tbody.innerHTML = CAPACITY.map(c => {
+    const net = c.avail - c.vacation;
+    const pct = Math.round(c.utilized/net*100);
+    const color = pct > 85 ? 'var(--danger)' : pct > 75 ? 'var(--accent4)' : 'var(--accent3)';
+    return `<tr>
+      <td><strong>${c.team}</strong></td>
+      <td>${c.headcount}</td>
+      <td>${c.avail}h</td>
+      <td style="color:var(--danger)">${c.vacation}h</td>
+      <td><strong>${net}h</strong></td>
+      <td>${c.utilized}h</td>
+      <td><strong style="color:${color}">${pct}%</strong></td>
+    </tr>`;
+  }).join('');
+}
+
+function renderRecentTable() {
+  const tbody = document.getElementById('recent-table');
+  if(!tbody) return;
+  tbody.innerHTML = ACTIVITIES.slice(0,8).map(a => `
+    <tr>
+      <td><strong>${a.name}</strong></td>
+      <td>${teamTagHtml(a.team)}</td>
+      <td style="font-size:12px">${a.assignee}</td>
+      <td style="font-size:12px">${a.cat}</td>
+      <td><strong style="color:var(--accent)">${a.hours}h</strong></td>
+      <td style="font-size:12px;color:var(--text-muted)">${a.date}</td>
+      <td>${statusTagHtml(a.status)}</td>
+    </tr>`).join('');
+}
+
+function renderPlanningTable() {
+  const tbody = document.getElementById('planning-table');
+  if(!tbody) return;
+  const data = [
+    { team:'Network',  ap:400,pp:380, mp:400,mp2:390, jp:400,jp2:360 },
+    { team:'Security', ap:600,pp:560, mp:600,mp2:580, jp:600,jp2:540 },
+    { team:'Compute',  ap:600,pp:480, mp:600,mp2:520, jp:600,jp2:500 },
+    { team:'Cloud',    ap:600,pp:590, mp:600,mp2:600, jp:640,jp2:580 },
+    { team:'Storage',  ap:400,pp:280, mp:400,mp2:300, jp:400,jp2:320 },
+    { team:'Database', ap:400,pp:350, mp:400,mp2:380, jp:400,jp2:360 },
+  ];
+  tbody.innerHTML = data.map(r => {
+    const g1 = r.ap-r.pp, g2 = r.mp-r.mp2, g3 = r.jp-r.jp2;
+    const gc = v => v < 20 ? 'var(--danger)' : v < 60 ? 'var(--accent4)' : 'var(--accent3)';
+    return `<tr>
+      <td><strong>${r.team}</strong></td>
+      <td>${r.ap}h</td><td>${r.pp}h</td><td style="color:${gc(g1)};font-weight:600">${g1}h</td>
+      <td>${r.mp}h</td><td>${r.mp2}h</td><td style="color:${gc(g2)};font-weight:600">${g2}h</td>
+      <td>${r.jp}h</td><td>${r.jp2}h</td><td style="color:${gc(g3)};font-weight:600">${g3}h</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── CHARTS ──
+let chartInstances = {};
+
+function destroyChart(id) {
+  if(chartInstances[id]) { chartInstances[id].destroy(); delete chartInstances[id]; }
+}
+
+function initDashboardCharts() {
+  const defaults = { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ labels:{ color:'#94a3b8', font:{ size:11 } } } }, scales:{ x:{ ticks:{ color:'#64748b', font:{ size:11 } }, grid:{ color:'rgba(42,58,82,0.5)' } }, y:{ ticks:{ color:'#64748b', font:{ size:11 } }, grid:{ color:'rgba(42,58,82,0.5)' } } } };
+
+  // Team hours bar
+  destroyChart('teamHoursChart');
+  chartInstances['teamHoursChart'] = new Chart(document.getElementById('teamHoursChart'), {
+    type:'bar',
+    data: {
+      labels: TEAMS.map(t=>t.name),
+      datasets: [
+        { label:'Hours Logged', data:[328,546,444,528,260,316], backgroundColor: TEAMS.map(t=>t.color+'99'), borderColor: TEAMS.map(t=>t.color), borderWidth:2, borderRadius:6 },
+        { label:'Capacity', data:[400,600,600,600,400,400], backgroundColor:'transparent', borderColor:'rgba(255,255,255,0.15)', borderWidth:1.5, borderRadius:6 }
+      ]
+    },
+    options: { ...defaults, plugins:{ ...defaults.plugins, tooltip:{ callbacks:{ label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y}h` } } } }
+  });
+
+  // Activity type doughnut
+  destroyChart('activityTypeChart');
+  chartInstances['activityTypeChart'] = new Chart(document.getElementById('activityTypeChart'), {
+    type:'doughnut',
+    data: {
+      labels:['Project','Incident','Change','BAU','Training','Meeting'],
+      datasets:[{ data:[38,12,22,18,6,4], backgroundColor:['#00d4ff','#ef4444','#f59e0b','#7c3aed','#10b981','#f97316'], borderWidth:0, hoverOffset:6 }]
+    },
+    options: { responsive:true, maintainAspectRatio:false, cutout:'65%', plugins:{ legend:{ position:'right', labels:{ color:'#94a3b8', font:{ size:11 }, padding:12 } } } }
+  });
+
+  // Weekly trend line
+  destroyChart('weeklyTrendChart');
+  chartInstances['weeklyTrendChart'] = new Chart(document.getElementById('weeklyTrendChart'), {
+    type:'line',
+    data: {
+      labels:['W1','W2','W3','W4'],
+      datasets: TEAMS.map(t => ({
+        label:t.name,
+        data: [Math.random()*100+40,Math.random()*100+40,Math.random()*100+40,Math.random()*100+40].map(v=>Math.round(v)),
+        borderColor: t.color, backgroundColor: t.color+'22',
+        borderWidth:2, pointRadius:3, tension:.4, fill:false
+      }))
+    },
+    options: defaults
+  });
+
+  // My hours (time log page)
+  destroyChart('myHoursChart');
+  const ctx2 = document.getElementById('myHoursChart');
+  if(ctx2) chartInstances['myHoursChart'] = new Chart(ctx2, {
+    type:'bar',
+    data: { labels:['Mar 1','Mar 3','Mar 5','Mar 7','Mar 10','Mar 12','Mar 14'], datasets:[{ label:'Hours', data:[6,4,8,5,6,4,4], backgroundColor:'#00d4ff88', borderColor:'#00d4ff', borderWidth:2, borderRadius:4 }] },
+    options: { ...defaults, plugins:{ legend:{ display:false } } }
+  });
+
+  // Time by category (timelog page)
+  destroyChart('timeCatChart');
+  const ctx3 = document.getElementById('timeCatChart');
+  if(ctx3) chartInstances['timeCatChart'] = new Chart(ctx3, {
+    type:'pie',
+    data: { labels:['Infra Build','Maintenance','Security','Automation','Monitoring','Docs'], datasets:[{ data:[35,20,25,10,7,3], backgroundColor:['#00d4ff','#f59e0b','#ef4444','#7c3aed','#10b981','#64748b'], borderWidth:0 }] },
+    options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'right', labels:{ color:'#94a3b8', font:{size:11}, padding:8 } } } }
+  });
+
+  // Capacity chart (bandwidth page)
+  destroyChart('capacityChart');
+  const ctx4 = document.getElementById('capacityChart');
+  if(ctx4) chartInstances['capacityChart'] = new Chart(ctx4, {
+    type:'bar',
+    data: {
+      labels: CAPACITY.map(c=>c.team),
+      datasets:[
+        { label:'Net Capacity', data: CAPACITY.map(c=>c.avail-c.vacation), backgroundColor:'#2a3a5288', borderColor:'#2a3a52', borderWidth:1, borderRadius:4 },
+        { label:'Utilized', data: CAPACITY.map(c=>c.utilized), backgroundColor: CAPACITY.map(c=>c.team==='Security'?'#ef444488':c.team==='Cloud'?'#7c3aed88':'#00d4ff88'), borderColor: CAPACITY.map(c=>c.team==='Security'?'#ef4444':c.team==='Cloud'?'#7c3aed':'#00d4ff'), borderWidth:2, borderRadius:4 }
+      ]
+    },
+    options: { ...defaults, plugins:{ ...defaults.plugins } }
+  });
+
+  // Forecast chart
+  destroyChart('forecastChart');
+  const ctx5 = document.getElementById('forecastChart');
+  if(ctx5) chartInstances['forecastChart'] = new Chart(ctx5, {
+    type:'line',
+    data: {
+      labels:['Jan','Feb','Mar','Apr (F)','May (F)','Jun (F)'],
+      datasets: TEAMS.map(t=>({
+        label:t.name, data: [Math.random()*30+55,Math.random()*30+60,Math.random()*20+65,Math.random()*20+60,Math.random()*20+62,Math.random()*20+60].map(v=>Math.round(v)),
+        borderColor:t.color, backgroundColor:t.color+'11', borderWidth:2, tension:.4, fill:false, pointRadius:3,
+        borderDash: t.name==='Network' ? [] : []
+      }))
+    },
+    options: defaults
+  });
+}
+
+function initReportCharts() {
+  const defaults = { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ labels:{ color:'#94a3b8', font:{ size:11 } } } }, scales:{ x:{ ticks:{ color:'#64748b', font:{ size:11 } }, grid:{ color:'rgba(42,58,82,0.5)' } }, y:{ ticks:{ color:'#64748b', font:{ size:11 } }, grid:{ color:'rgba(42,58,82,0.5)' } } } };
+
+  destroyChart('rptUtil1');
+  chartInstances['rptUtil1'] = new Chart(document.getElementById('rptUtil1'), {
+    type:'bar', data:{ labels:TEAMS.map(t=>t.name), datasets:[{ label:'Utilization %', data:[82,91,74,88,65,79], backgroundColor: TEAMS.map(t=>t.color+'88'), borderColor:TEAMS.map(t=>t.color), borderWidth:2, borderRadius:6 }] },
+    options:{ ...defaults, scales:{...defaults.scales, y:{...defaults.scales.y, max:100}}, plugins:{...defaults.plugins, annotation:{}} }
+  });
+
+  destroyChart('rptUtil2');
+  chartInstances['rptUtil2'] = new Chart(document.getElementById('rptUtil2'), {
+    type:'bar', data:{
+      labels:TEAMS.map(t=>t.name),
+      datasets:[
+        { label:'Net Capacity', data:CAPACITY.map(c=>c.avail-c.vacation), backgroundColor:'#1a223555', borderColor:'#2a3a52', borderWidth:1, borderRadius:4 },
+        { label:'Utilized', data:CAPACITY.map(c=>c.utilized), backgroundColor:TEAMS.map(t=>t.color+'99'), borderColor:TEAMS.map(t=>t.color), borderWidth:2, borderRadius:4 }
+      ]
+    },
+    options:defaults
+  });
+
+  destroyChart('rptMember1');
+  chartInstances['rptMember1'] = new Chart(document.getElementById('rptMember1'), {
+    type:'bar', data:{
+      labels: MEMBERS.map(m=>`${m.first} ${m.last[0]}.`),
+      datasets:[{ label:'Hours Logged', data:MEMBERS.map(m=>m.hours), backgroundColor:MEMBERS.map(m=>{ const t=TEAMS.find(tt=>tt.name===m.team); return t?t.color+'88':'#00d4ff88'; }), borderColor:MEMBERS.map(m=>{ const t=TEAMS.find(tt=>tt.name===m.team); return t?t.color:'#00d4ff'; }), borderWidth:2, borderRadius:5 }]
+    },
+    options:defaults
+  });
+
+  destroyChart('rptMember2');
+  chartInstances['rptMember2'] = new Chart(document.getElementById('rptMember2'), {
+    type:'bar', data:{
+      labels:MEMBERS.map(m=>`${m.first} ${m.last[0]}.`),
+      datasets:[{ label:'Utilization %', data:MEMBERS.map(m=>Math.round(m.hours/m.bw*100)), backgroundColor:MEMBERS.map(m=>{ const pct=Math.round(m.hours/m.bw*100); return pct>85?'#ef444488':pct>65?'#f59e0b88':'#10b98188'; }), borderWidth:2, borderRadius:5 }]
+    },
+    options:{...defaults, scales:{...defaults.scales, y:{...defaults.scales.y, max:120}}}
+  });
+
+  destroyChart('rptAct1');
+  chartInstances['rptAct1'] = new Chart(document.getElementById('rptAct1'), {
+    type:'doughnut', data:{
+      labels:['Project','Incident','Change','BAU','Training','Meeting'],
+      datasets:[{ data:[950,280,520,420,140,90], backgroundColor:['#00d4ff','#ef4444','#f59e0b','#7c3aed','#10b981','#f97316'], borderWidth:0, hoverOffset:8 }]
+    },
+    options:{responsive:true, maintainAspectRatio:false, cutout:'60%', plugins:{legend:{position:'right',labels:{color:'#94a3b8',font:{size:11},padding:12}}}}
+  });
+
+  destroyChart('rptAct2');
+  chartInstances['rptAct2'] = new Chart(document.getElementById('rptAct2'), {
+    type:'bar', data:{
+      labels:['Infra Build','Maintenance','Security','Automation','Monitoring','Docs'],
+      datasets:[{ label:'Hours', data:[780,420,380,240,160,80], backgroundColor:['#00d4ff88','#f59e0b88','#ef444488','#7c3aed88','#10b98188','#64748b88'], borderColor:['#00d4ff','#f59e0b','#ef4444','#7c3aed','#10b981','#64748b'], borderWidth:2, borderRadius:6 }]
+    },
+    options:defaults
+  });
+
+  destroyChart('rptTrend');
+  chartInstances['rptTrend'] = new Chart(document.getElementById('rptTrend'), {
+    type:'line', data:{
+      labels:['Oct','Nov','Dec','Jan','Feb','Mar'],
+      datasets:TEAMS.map(t=>({ label:t.name, data:[Math.random()*25+60,Math.random()*25+62,Math.random()*20+65,Math.random()*20+68,Math.random()*15+70,Math.random()*15+72].map(v=>Math.round(v)), borderColor:t.color, backgroundColor:t.color+'22', borderWidth:2, tension:.4, fill:false, pointRadius:4, pointHoverRadius:6 }))
+    },
+    options:defaults
+  });
+
+  destroyChart('rptTrend2');
+  chartInstances['rptTrend2'] = new Chart(document.getElementById('rptTrend2'), {
+    type:'bar', data:{
+      labels:['Oct','Nov','Dec','Jan','Feb','Mar'],
+      datasets:TEAMS.map(t=>({ label:t.name, data:[Math.random()*150+300,Math.random()*150+320,Math.random()*150+340,Math.random()*100+360,Math.random()*100+380,Math.random()*80+390].map(v=>Math.round(v)), backgroundColor:t.color+'66', borderColor:t.color, borderWidth:1.5, borderRadius:3 }))
+    },
+    options:{...defaults, scales:{...defaults.scales}, plugins:{...defaults.plugins}}
+  });
+
+  const rptUtilTable = document.getElementById('rpt-util-table');
+  if(rptUtilTable) {
+    rptUtilTable.innerHTML = CAPACITY.map(c => {
+      const net=c.avail-c.vacation; const pct=Math.round(c.utilized/net*100);
+      const trend = pct > 80 ? '↑ High' : pct > 60 ? '→ Normal' : '↓ Low';
+      const tc = pct>80?'var(--danger)':pct>60?'var(--accent4)':'var(--accent3)';
+      const team = TEAMS.find(t=>t.name===c.team);
+      return `<tr>
+        <td><strong>${c.team}</strong></td>
+        <td style="font-size:12px">${team?.lead}</td>
+        <td>${c.headcount}</td>
+        <td>${c.avail}h</td>
+        <td style="color:var(--danger)">${c.vacation}h</td>
+        <td><strong>${net}h</strong></td>
+        <td>${c.utilized}h</td>
+        <td><strong style="color:${tc};font-size:15px">${pct}%</strong></td>
+        <td style="color:${tc};font-size:12px;font-weight:600">${trend}</td>
+      </tr>`;
+    }).join('');
+  }
+}
+
+// ── TABS ──
+function switchTab(el, sectionId) {
+  el.closest('.tabs').querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  // find siblings
+  const siblings = ['report-util','report-member','report-activity','report-trend','s-fields','s-categories','s-sharepoint','s-powerbi'];
+  siblings.forEach(id => { const el2=document.getElementById(id); if(el2) el2.style.display='none'; });
+  const target = document.getElementById(sectionId);
+  if(target) {
+    target.style.display='block';
+    if(['report-member','report-activity','report-trend'].includes(sectionId)) setTimeout(initReportCharts,50);
+  }
+}
+
+// ── EXPORT ──
+function exportToExcel() {
+  let csv = 'ID,Activity,Team,Assignee,Type,Category,Hours Logged,Estimated Hours,Priority,Status,Date\n';
+  ACTIVITIES.forEach(a => {
+    csv += `${a.id},"${a.name}",${a.team},${a.assignee},${a.type},"${a.cat}",${a.hours},${a.est},${a.priority},${a.status},${a.date}\n`;
+  });
+  csv += '\n\nTIME LOG\nDate,Member,Activity,Type,Category,Hours,Notes\n';
+  TIME_LOGS.forEach(t => {
+    csv += `${t.date},${t.member},"${t.activity}",${t.type},"${t.cat}",${t.hours},"${t.notes}"\n`;
+  });
+  csv += '\n\nTEAM CAPACITY\nTeam,Headcount,Available Hrs,Vacation Hrs,Net Capacity,Utilized Hrs,Utilization %\n';
+  CAPACITY.forEach(c => {
+    const net=c.avail-c.vacation;
+    csv += `${c.team},${c.headcount},${c.avail},${c.vacation},${net},${c.utilized},${Math.round(c.utilized/net*100)}%\n`;
+  });
+  const blob = new Blob([csv], {type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href=url; a.download='InfraTrack_Export_March2025.csv';
+  a.click(); URL.revokeObjectURL(url);
+  showToast('Export downloaded!');
+}
+
+// ── TOAST ──
+function showToast(msg) {
+  const t = document.createElement('div');
+  t.className='toast';
+  t.innerHTML = `<svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="color:var(--accent3);flex-shrink:0"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>${msg}`;
+  document.body.appendChild(t);
+  setTimeout(()=>t.remove(), 3000);
+}
+
+// ── INIT ──
+window.addEventListener('load', () => {
+  renderActivities();
+  renderTimeLogs();
+  renderMembers();
+  renderTeams();
+  renderVacations();
+  renderCapacity();
+  renderRecentTable();
+  renderPlanningTable();
+  setTimeout(initDashboardCharts, 100);
+  // Set today's date in date inputs
+  const today = new Date().toISOString().slice(0,10);
+  ['act-start','act-due','tl-date','vac-from','vac-to'].forEach(id => {
+    const el = document.getElementById(id);
+    if(el) el.value = today;
+  });
+});
+</script>
+</body>
+</html>
