@@ -1565,7 +1565,7 @@ function PortalApp({initialUser, allUsersInit}) {
         {/* Header */}
         <div style={{marginBottom:20}}>
           <div style={{fontSize:22,fontWeight:800,color:"var(--text-1)",letterSpacing:-.5}}>
-            Good day, {user.name.split(" ")[0]} 👋
+            Good Day, {user.name.split(" ")[0]} 👋
           </div>
           <div style={{fontSize:12.5,color:"var(--text-3)",marginTop:4,fontFamily:"var(--font-mono)"}}>
             {isAdmin?"ISMS Administrator — All Teams":user.team+" Team Manager"} · March 2025
