@@ -6729,6 +6729,20 @@ function PortalApp({initialUser, allUsersInit}) {
     const members   = isAdmin ? allUsers.filter(u=>u.team) : allUsers.filter(u=>u.team===(user.team||''));
     const totalMins = dashLogs.reduce((s,l)=>s+l.mins,0);
     const avgUtil   = Math.round(dashCap.reduce((s,c)=>{const n=c.availMins-c.vacMins;return s+(c.utilMins/n*100)},0)/Math.max(dashCap.length,1));
+    const openTeamDrill = (teamName) => {
+      const cap = LIVE_CAPACITY.find(c=>c.team===teamName);
+      const net = cap ? cap.availMins-cap.vacMins : 0;
+      const tLogs = logs.filter(l=>l.team===teamName);
+      const tTotal = tLogs.reduce((s,l)=>s+l.mins,0);
+      const rows = allUsers.filter(u=>u.team===teamName).map(u=>{
+        const ul = tLogs.filter(l=>l.userId===u.id);
+        const mins = ul.reduce((s,l)=>s+l.mins,0);
+        return {id:u.id, name:u.name, level:u.level||"-", role:u.role||"", mins:mins, entries:ul.length,
+                acts:new Set(ul.map(l=>l.actId)).size, share:tTotal?Math.round(mins/tTotal*100):0};
+      }).sort((x,y)=>y.mins-x.mins);
+      setDashDrill({type:"team", label:teamName+" Team - Capacity Details", data:rows,
+        summary:{net:net, used:cap?cap.utilMins:tTotal, leave:cap?cap.vacMins:0, hc:cap?cap.hc:rows.length, team:teamName}});
+    };
 
     // == SVG Chart helpers ==================================
     // == Beautiful horizontal bar chart ==============================
@@ -7125,10 +7139,10 @@ function PortalApp({initialUser, allUsersInit}) {
             </div>
             <ColumnChart
               height={150}
-              onClick={()=>goPage("bandwidth")}
+              onClick={(d)=>{ if(d && d.team) openTeamDrill(d.team); else goPage("bandwidth"); }}
               data={dashCap.map(c=>{
                 const net=c.availMins-c.vacMins, pct=Math.round(c.utilMins/net*100);
-                return {label:c.team.slice(0,3), val:pct, color:uCol(pct)};
+                return {label:c.team.slice(0,3), team:c.team, val:pct, color:uCol(pct)};
               })}
             />
             <div style={{display:"flex",justifyContent:"center",gap:16,marginTop:8}}>
@@ -7687,7 +7701,7 @@ function PortalApp({initialUser, allUsersInit}) {
                 {dashCap.map(c=>{
                   const net=c.availMins-c.vacMins, pct=Math.round(c.utilMins/net*100), tm=teams.find(t=>t.name===c.team);
                   return (
-                    <tr key={c.team} className="trow-hover">
+                    <tr key={c.team} className="trow-hover" onClick={()=>openTeamDrill(c.team)} style={{cursor:"pointer"}} title="Click for team details">
                       <TD><div style={{display:"flex",alignItems:"center",gap:5}}><span style={{width:8,height:8,borderRadius:"50%",background:tCol(c.team),display:"inline-block",flexShrink:0}}/><strong style={{fontSize:12}}>{tm?.emoji} {c.team}</strong></div></TD>
                       <TD s={{fontSize:11,color:"var(--text-3)"}}>{tm?.lead}</TD>
                       <TD s={{textAlign:"center"}}>{c.hc}</TD>
@@ -16279,6 +16293,47 @@ function PortalApp({initialUser, allUsersInit}) {
             <div style={{overflowY:"auto",flex:1}}>
               {dashDrill.data.length===0
                 ? <div style={{textAlign:"center",padding:60,color:"var(--text-4)",fontSize:14}}>No records found.</div>
+                : dashDrill.type==="team"
+                  ? (
+                    <div>
+                      <div style={{display:"flex",gap:12,flexWrap:"wrap",padding:"16px 20px",borderBottom:"1px solid var(--border)"}}>
+                        {[["Headcount",dashDrill.summary.hc],["Net capacity",fmtM(dashDrill.summary.net)],["Utilised",fmtM(dashDrill.summary.used)],["Leave",dashDrill.summary.leave?fmtM(dashDrill.summary.leave):"-"],["Util %",(dashDrill.summary.net?Math.round(dashDrill.summary.used/dashDrill.summary.net*100):0)+"%"]].map(kv=>(
+                          <div key={kv[0]} style={{flex:"1 1 110px",background:"var(--surface-2)",borderRadius:10,padding:"10px 14px"}}>
+                            <div style={{fontSize:10,color:"var(--text-4)",fontFamily:"var(--font-mono)",textTransform:"uppercase"}}>{kv[0]}</div>
+                            <div style={{fontSize:18,fontWeight:800,color:"var(--text-1)"}}>{kv[1]}</div>
+                          </div>
+                        ))}
+                      </div>
+                      <table style={{width:"100%",borderCollapse:"collapse",fontSize:12.5,fontFamily:"var(--font-sans)"}}>
+                        <thead style={{background:"var(--surface-2)"}}>
+                          <tr>
+                            {["Member","Level","Hours logged","Entries","Activities","Share of team"].map(h=>(
+                              <th key={h} style={{padding:"10px 12px",textAlign:"left",fontSize:10,fontWeight:700,color:"var(--text-4)",textTransform:"uppercase",letterSpacing:.8,whiteSpace:"nowrap",borderBottom:"2px solid var(--border)",fontFamily:"var(--font-mono)"}}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {dashDrill.data.map(m=>(
+                            <tr key={m.id} className="trow-hover" style={{borderBottom:"1px solid var(--surface-3)",cursor:"pointer"}}
+                              onClick={()=>setDashDrill({type:"logs",label:m.name+" - All Time Entries",data:logs.filter(l=>l.userId===m.id)})}>
+                              <td style={{padding:"10px 12px",fontWeight:700,color:"var(--text-1)"}}>{m.name}</td>
+                              <td style={{padding:"10px 12px"}}>{m.level}</td>
+                              <td style={{padding:"10px 12px",fontWeight:800,color:"var(--brand)",fontFamily:"var(--font-mono)"}}>{fmtM(m.mins)}</td>
+                              <td style={{padding:"10px 12px"}}>{m.entries}</td>
+                              <td style={{padding:"10px 12px"}}>{m.acts}</td>
+                              <td style={{padding:"10px 12px"}}>
+                                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                                  <div style={{width:60,height:5,background:"var(--surface-3)",borderRadius:3,overflow:"hidden"}}><div style={{height:"100%",width:Math.min(100,m.share)+"%",background:"var(--brand)"}}/></div>
+                                  <span style={{fontSize:11}}>{m.share}%</span>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <div style={{padding:"10px 20px",fontSize:11,color:"var(--text-4)"}}>Click a member to see their time entries.</div>
+                    </div>
+                  )
                 : dashDrill.type==="acts"
                   ? (
                     <table style={{width:"100%",borderCollapse:"collapse",fontSize:12.5,fontFamily:"var(--font-sans)"}}>
