@@ -13,7 +13,7 @@ const _fontLink = (() => {
       :root {
         --brand:       #2457d6;
         --brand-deep:  #1e47b0;
-        --brand-light: #eff6ff;
+        --brand-light: #eef3ff;
         --brand-glow:  rgba(37,99,235,.22);
         --accent:      #06b6d4;
         --surface:     #ffffff;
@@ -25,7 +25,7 @@ const _fontLink = (() => {
         --text-2:      #334155;
         --text-3:      #64748b;
         --text-4:      #94a3b8;
-        --sidebar-bg:  #0e1626;
+        --sidebar-bg:  #ffffff;
         --sidebar-w:   240px;
         --radius-sm:   5px;
         --radius-md:   8px;
@@ -40,7 +40,7 @@ const _fontLink = (() => {
       }
       *, *::before, *::after { box-sizing: border-box; }
       html, body, #root { height: 100%; margin: 0; }
-      body { font-family: var(--font-sans); background: #f5f6f9; color: var(--text-1); -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+      body { font-family: var(--font-sans); background: #f8f9fc; color: var(--text-1); -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
       ::-webkit-scrollbar { width: 5px; height: 5px; }
       ::-webkit-scrollbar-track { background: transparent; }
       ::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 10px; }
@@ -105,13 +105,13 @@ const _fontLink = (() => {
         font-size: 9px;
         letter-spacing: 2px;
         text-transform: uppercase;
-        color: rgba(255,255,255,.28);
+        color: var(--text-4);
         padding: 0 12px;
         margin-bottom: 2px;
         margin-top: 4px;
       }
       /* Thin divider */
-      .nav-divider { height: 1px; background: rgba(255,255,255,.06); margin: 6px 10px; }
+      .nav-divider { height: 1px; background: var(--border); margin: 6px 10px; }
 
       /* Status dot pulse */
       @keyframes statusPulse { 0%,100%{box-shadow:0 0 0 0 rgba(34,197,94,.5)} 50%{box-shadow:0 0 0 5px rgba(34,197,94,0)} }
@@ -284,23 +284,24 @@ const _fontLink = (() => {
       }
 
       /* == ENTERPRISE POLISH LAYER == */
-      :root { --hero-bg: linear-gradient(120deg,#0b1730 0%,#12254a 62%,#1d3f8f 140%); }
+      :root { --hero-bg: linear-gradient(120deg,#3c6fe0 0%,#4b86ef 55%,#5ea3f3 100%); }
       body { font-size: 13px; font-feature-settings: "cv11","ss01"; }
       table { font-variant-numeric: tabular-nums; }
       ::selection { background: rgba(36,87,214,.18); }
       :focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
-      .page-hero { padding: 16px 24px !important; margin-bottom: 18px !important; background: var(--hero-bg) !important; box-shadow: var(--shadow-md); border: 1px solid rgba(255,255,255,.06); }
+      .page-hero { padding: 16px 24px !important; margin-bottom: 18px !important; background: var(--hero-bg) !important; box-shadow: var(--shadow-md); border: none; box-shadow: 0 1px 3px rgba(60,111,224,.25); }
       .page-hero::before { display: none !important; }
-      .page-hero::after { content:''; position:absolute; left:0; top:0; bottom:0; width:3px; background: var(--accent); }
+      .page-hero::after { display:none; }
       .page-hero-title { font-size: 18px !important; font-weight: 700 !important; letter-spacing: -.2px !important; }
-      .page-hero-sub { font-family: var(--font-sans) !important; font-size: 12.5px !important; color: rgba(255,255,255,.65) !important; }
+      .page-hero-sub { font-family: var(--font-sans) !important; font-size: 12.5px !important; color: rgba(255,255,255,.88) !important; }
       .trow-hover:hover td { background: #f4f7fd !important; }
       .card-hover:hover, .card-clickable:hover { transform: none !important; border-color: var(--border-2) !important; box-shadow: var(--shadow-md) !important; }
       .kpi-card:hover { transform: none !important; box-shadow: var(--shadow-md) !important; }
       .btn-primary:hover { transform: none !important; filter: brightness(1.06); box-shadow: var(--shadow-md) !important; }
       .section-divider, .nav-sec-label { font-family: var(--font-sans) !important; letter-spacing: .8px !important; font-weight: 600; }
       .nav-item { border-radius: 7px; }
-      .nav-item-active { background: rgba(255,255,255,.09) !important; border-left: 2px solid var(--accent) !important; }
+      .nav-item:hover { background: var(--surface-3) !important; color: var(--text-1) !important; }
+      .nav-item-active { background: var(--brand-light) !important; border-left: 2px solid var(--brand) !important; color: var(--brand) !important; }
       .modal-content { border-radius: var(--radius-xl) !important; }
       input, select, textarea { font-family: var(--font-sans); }
       input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(36,87,214,.16) !important; }
@@ -7867,7 +7868,7 @@ function PortalApp({initialUser, allUsersInit}) {
         <div className="modal-backdrop" onClick={e=>e.target===e.currentTarget&&resetImport()}
           style={{position:"fixed",inset:0,background:"rgba(15,23,42,.6)",backdropFilter:"blur(8px)",zIndex:600,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"32px 24px",overflowY:"auto"}}>
           <div className="modal-content" style={{background:"var(--surface)",borderRadius:"var(--radius-xl)",width:"100%",maxWidth:860,boxShadow:"var(--shadow-xl)",overflow:"hidden",marginBottom:32}}>
-            <div style={{background:"var(--sidebar-bg)",padding:"20px 28px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div style={{background:"var(--hero-bg)",padding:"20px 28px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <div>
                 <div style={{fontSize:17,fontWeight:800,color:"#fff",letterSpacing:"-.3px"}}>📥 Import Activities from Excel / CSV</div>
                 <div style={{fontSize:12,color:"rgba(255,255,255,.5)",marginTop:3}}>Bulk-add activities to <strong style={{color:"#60a5fa"}}>{user.team}</strong> team</div>
@@ -15707,10 +15708,10 @@ function PortalApp({initialUser, allUsersInit}) {
     <div style={{display:"flex",height:"100vh",fontFamily:"var(--font-sans)",background:"var(--surface-3)",overflow:"hidden",position:"relative"}}>
 
       {/* == SIDEBAR == */}
-      <div style={{width:"var(--sidebar-w)",minWidth:"var(--sidebar-w)",height:"100vh",background:"var(--sidebar-bg)",display:"flex",flexDirection:"column",overflow:"visible",flexShrink:0,boxShadow:"4px 0 24px rgba(0,0,0,.25)",zIndex:100}}>
+      <div style={{width:"var(--sidebar-w)",minWidth:"var(--sidebar-w)",height:"100vh",background:"var(--sidebar-bg)",display:"flex",flexDirection:"column",overflow:"visible",flexShrink:0,borderRight:"1px solid var(--border)",boxShadow:"1px 0 8px rgba(16,24,40,.04)",zIndex:100}}>
 
         {/* Logo */}
-        <div style={{padding:"20px 18px 16px",borderBottom:"1px solid rgba(255,255,255,.07)",display:"flex",alignItems:"center",gap:11,flexShrink:0}}>
+        <div style={{padding:"20px 18px 16px",borderBottom:"1px solid rgba(15,23,42,0.06)",display:"flex",alignItems:"center",gap:11,flexShrink:0}}>
           <div style={{width:36,height:36,borderRadius:"var(--radius-md)",background:"linear-gradient(135deg,#2563eb,#06b6d4)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,boxShadow:"0 4px 12px rgba(37,99,235,.45)"}}>
             <svg width="20" height="20" viewBox="0 0 26 26" fill="none">
               <path d="M13 2L4 6V13C4 17.97 7.9 22.56 13 24C18.1 22.56 22 17.97 22 13V6L13 2Z" fill="rgba(255,255,255,.92)"/>
@@ -15719,16 +15720,16 @@ function PortalApp({initialUser, allUsersInit}) {
             </svg>
           </div>
           <div>
-            <div style={{fontSize:16,fontWeight:800,letterSpacing:-.5,background:"linear-gradient(130deg,#fff 30%,rgba(255,255,255,.7) 100%)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",fontFamily:"var(--font-sans)"}}>ISMS</div>
-            <div style={{fontSize:8,color:"rgba(255,255,255,.3)",letterSpacing:2.5,textTransform:"uppercase",fontWeight:600,fontFamily:"var(--font-mono)"}}>Infra Service Mgmt</div>
+            <div style={{fontSize:16,fontWeight:800,letterSpacing:-.5,color:"var(--text-1)",fontFamily:"var(--font-sans)"}}>ISMS</div>
+            <div style={{fontSize:8,color:"rgba(15,23,42,0.60)",letterSpacing:2.5,textTransform:"uppercase",fontWeight:600,fontFamily:"var(--font-mono)"}}>Infra Service Mgmt</div>
           </div>
         </div>
 
         {/* User chip + switcher */}
-        <div style={{padding:"10px 12px",borderBottom:"1px solid rgba(255,255,255,.07)",flexShrink:0,position:"relative"}}>
-          <div onClick={()=>setShowSwitch(s=>!s)} style={{display:"flex",alignItems:"center",gap:10,background:"rgba(255,255,255,.06)",borderRadius:"var(--radius-md)",padding:"9px 12px",cursor:"pointer",border:"1px solid rgba(255,255,255,.08)",transition:"all .15s"}}
-            onMouseEnter={e=>{e.currentTarget.style.background="rgba(255,255,255,.1)";}}
-            onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,.06)";}}>
+        <div style={{padding:"10px 12px",borderBottom:"1px solid rgba(15,23,42,0.06)",flexShrink:0,position:"relative"}}>
+          <div onClick={()=>setShowSwitch(s=>!s)} style={{display:"flex",alignItems:"center",gap:10,background:"rgba(15,23,42,0.05)",borderRadius:"var(--radius-md)",padding:"9px 12px",cursor:"pointer",border:"1px solid rgba(15,23,42,0.07)",transition:"all .15s"}}
+            onMouseEnter={e=>{e.currentTarget.style.background="rgba(15,23,42,0.09)";}}
+            onMouseLeave={e=>{e.currentTarget.style.background="rgba(15,23,42,0.05)";}}>
             {/* Avatar with online dot */}
             <div style={{position:"relative",flexShrink:0}}>
               <div style={{width:28,height:28,borderRadius:"var(--radius-sm)",background:`linear-gradient(135deg,${tc},${tc}99)`,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:800,letterSpacing:.5}}>
@@ -15737,8 +15738,8 @@ function PortalApp({initialUser, allUsersInit}) {
               <div style={{position:"absolute",bottom:-1,right:-1,width:9,height:9,borderRadius:"50%",background:"#22c55e",border:"2px solid var(--sidebar-bg)"}}/>
             </div>
             <div style={{flex:1,minWidth:0}}>
-              <div style={{fontSize:12,fontWeight:700,color:"rgba(255,255,255,.92)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontFamily:"var(--font-sans)"}}>{user.name}</div>
-              <div style={{fontSize:10,color:"rgba(255,255,255,.4)",fontWeight:500,marginTop:1}}>{isAdmin?"Administrator":isMgr?(user.team||"")+" Manager":(user.team||"")+" Member"}</div>
+              <div style={{fontSize:12,fontWeight:700,color:"rgba(15,23,42,0.95)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontFamily:"var(--font-sans)"}}>{user.name}</div>
+              <div style={{fontSize:10,color:"rgba(15,23,42,0.70)",fontWeight:500,marginTop:1}}>{isAdmin?"Administrator":isMgr?(user.team||"")+" Manager":(user.team||"")+" Member"}</div>
             </div>
             <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{flexShrink:0,transition:"transform .2s",transform:showSwitch?"rotate(180deg)":"none",opacity:.4}}>
               <path d="M2 4l4 4 4-4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
@@ -15749,14 +15750,14 @@ function PortalApp({initialUser, allUsersInit}) {
           {showSwitch && (
             <div style={{position:"absolute",top:"calc(100% + 4px)",left:8,right:8,background:"var(--surface)",borderRadius:"var(--radius-lg)",border:"1px solid var(--border)",boxShadow:"var(--shadow-xl)",zIndex:400,overflow:"hidden",animation:"fadeSlideIn .15s ease"}}>
               {/* Profile header */}
-              <div style={{padding:"14px 16px",background:"linear-gradient(135deg,#0f172a,#1e3558)"}}>
+              <div style={{padding:"14px 16px",background:"var(--brand-light)"}}>
                 <div style={{display:"flex",alignItems:"center",gap:10}}>
                   <div style={{width:36,height:36,borderRadius:"var(--radius-md)",background:`linear-gradient(135deg,${tc},${tc}99)`,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:800,flexShrink:0}}>
                     {user.name.split(" ").map(n=>n[0]).join("")}
                   </div>
                   <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontSize:12.5,fontWeight:700,color:"#fff",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{user.name}</div>
-                    <div style={{fontSize:10,color:"rgba(255,255,255,.45)",marginTop:1,fontFamily:"var(--font-mono)"}}>{user.email||user.username}</div>
+                    <div style={{fontSize:12.5,fontWeight:700,color:"var(--text-1)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{user.name}</div>
+                    <div style={{fontSize:10,color:"var(--text-3)",marginTop:1,fontFamily:"var(--font-mono)"}}>{user.email||user.username}</div>
                   </div>
                 </div>
               </div>
@@ -15802,14 +15803,14 @@ function PortalApp({initialUser, allUsersInit}) {
                       style={{display:"flex",alignItems:"center",gap:9,padding:"8px 12px",
                         borderRadius:"var(--radius-sm)",cursor:"pointer",fontSize:12.5,
                         fontWeight:active?700:400,
-                        color:active?"#fff":"rgba(255,255,255,.55)",
-                        background:active?"linear-gradient(90deg,rgba(37,99,235,.6) 0%,rgba(37,99,235,.25) 100%)":"transparent",
+                        color:active?"var(--brand)":"rgba(15,23,42,0.85)",
+                        background:active?"var(--brand-light)":"transparent",
                         position:"relative",userSelect:"none",marginBottom:1,
                         fontFamily:"var(--font-sans)",transition:"all .15s",
-                        borderLeft:active?"2px solid #93c5fd":"2px solid transparent"}}>
+                        borderLeft:active?"2px solid var(--brand)":"2px solid transparent"}}>
                       <span style={{fontSize:14,lineHeight:1,flexShrink:0,opacity:active?1:.65}}>{item.icon}</span>
                       <span style={{flex:1,letterSpacing:.1}}>{item.label}</span>
-                      {active && <span style={{width:5,height:5,borderRadius:"50%",background:"#93c5fd",flexShrink:0}}/>}
+                      {active && <span style={{width:5,height:5,borderRadius:"50%",background:"var(--brand)",flexShrink:0}}/>}
                     </div>
                   );
                 })}
@@ -15819,16 +15820,16 @@ function PortalApp({initialUser, allUsersInit}) {
         </div>
 
         {/* Sidebar footer */}
-        <div style={{padding:"10px 12px 12px",borderTop:"1px solid rgba(255,255,255,.06)",flexShrink:0}}>
+        <div style={{padding:"10px 12px 12px",borderTop:"1px solid rgba(15,23,42,0.05)",flexShrink:0}}>
           <button onClick={()=>goPage("about_isms")}
-            style={{width:"100%",display:"flex",alignItems:"center",gap:7,padding:"7px 10px",borderRadius:"var(--radius-sm)",background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.08)",cursor:"pointer",marginBottom:7,transition:"background .15s"}}
-            onMouseEnter={e=>e.currentTarget.style.background="rgba(255,255,255,.1)"}
-            onMouseLeave={e=>e.currentTarget.style.background="rgba(255,255,255,.05)"}>
+            style={{width:"100%",display:"flex",alignItems:"center",gap:7,padding:"7px 10px",borderRadius:"var(--radius-sm)",background:"rgba(15,23,42,0.05)",border:"1px solid rgba(15,23,42,0.07)",cursor:"pointer",marginBottom:7,transition:"background .15s"}}
+            onMouseEnter={e=>e.currentTarget.style.background="rgba(15,23,42,0.09)"}
+            onMouseLeave={e=>e.currentTarget.style.background="rgba(15,23,42,0.05)"}>
             <span style={{fontSize:13}}>📖</span>
-            <span style={{fontSize:11,fontWeight:600,color:"rgba(255,255,255,.55)",flex:1,textAlign:"left"}}>Feature Guide</span>
-            <span style={{fontSize:9,color:"rgba(255,255,255,.25)"}}>-></span>
+            <span style={{fontSize:11,fontWeight:600,color:"rgba(15,23,42,0.85)",flex:1,textAlign:"left"}}>Feature Guide</span>
+            <span style={{fontSize:9,color:"rgba(15,23,42,0.55)"}}>-></span>
           </button>
-          <div style={{fontSize:9,color:"rgba(255,255,255,.18)",textAlign:"center",fontFamily:"var(--font-mono)",letterSpacing:1}}>ISMS v1.0.0 · ENTERPRISE</div>
+          <div style={{fontSize:9,color:"rgba(15,23,42,0.48)",textAlign:"center",fontFamily:"var(--font-mono)",letterSpacing:1}}>ISMS v1.0.0 · ENTERPRISE</div>
         </div>
       </div>
 
@@ -16249,7 +16250,7 @@ function PortalApp({initialUser, allUsersInit}) {
                         fontSize:12,fontWeight:600,transition:"all .15s",
                         border:`1.5px solid ${active?"var(--brand)":"var(--border)"}`,
                         background:active?"var(--brand)":"var(--surface)",
-                        color:active?"#fff":"var(--text-2)"
+                        color:active?"var(--brand)":"var(--text-2)"
                       }}>{c}</button>
                   );
                 })}
@@ -16305,7 +16306,7 @@ function PortalApp({initialUser, allUsersInit}) {
         <div className="modal-backdrop" style={{position:"fixed",inset:0,background:"rgba(15,23,42,.65)",backdropFilter:"blur(8px)",zIndex:4000,display:"flex",alignItems:"center",justifyContent:"center",padding:24}} onClick={()=>setDashDrill(null)}>
           <div className="modal-content" style={{background:"var(--surface)",borderRadius:"var(--radius-xl)",width:"100%",maxWidth:940,maxHeight:"82vh",display:"flex",flexDirection:"column",boxShadow:"var(--shadow-xl)",overflow:"hidden"}} onClick={e=>e.stopPropagation()}>
             {/* Header */}
-        <div style={{background:"var(--sidebar-bg)",padding:"18px 24px",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}}>
+        <div style={{background:"var(--hero-bg)",padding:"18px 24px",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}}>
               <div style={{fontSize:15,fontWeight:700,color:"#fff",letterSpacing:-.2}}>🔍 {dashDrill.label}</div>
               <div style={{display:"flex",alignItems:"center",gap:12}}>
                 <span style={{fontSize:12,color:"rgba(255,255,255,.45)",fontFamily:"var(--font-mono)"}}>{dashDrill.data.length} record{dashDrill.data.length!==1?"s":""}</span>
