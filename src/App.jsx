@@ -5884,7 +5884,7 @@ function PortalApp({initialUser, allUsersInit}) {
     setMustReset(initialUser?.mustReset||false);
     setPage("dashboard");
   }, [initialUser?.id]);
-  const [page,       setPage]       = useState("dashboard");
+  const [page,       setPage]       = useState(()=>{ try { return sessionStorage.getItem("isms_page") || "dashboard"; } catch (e) { return "dashboard"; } });
   const [acts,       setActs]       = useState(()=>{
     try {
       const s = localStorage.getItem('isms_acts');
@@ -6251,11 +6251,11 @@ function PortalApp({initialUser, allUsersInit}) {
 
   const showToast = (msg,type="ok") => { setToast({msg,type}); setTimeout(()=>setToast(null),3000); };
   const closeM    = () => { setModal(null); setTarget(null); setAForm(bAct); setLForm(bLog); };
-  const goPage    = p  => { setPage(p); setShowSwitch(false); };
+  const goPage    = p  => { setPage(p); setShowSwitch(false); try { sessionStorage.setItem('isms_page', p); } catch (e) {} };
 
   // handleLogin not needed in PortalApp — login handled by outer App wrapper
 
-  const handleLogout = () => { window.location.reload(); };
+  const handleLogout = () => { try { sessionStorage.removeItem('isms_session'); sessionStorage.removeItem('isms_page'); } catch (e) {} window.location.reload(); };
 
   // derived
   const teamActs  = useMemo(()=>isAdmin ? acts : acts.filter(a=>a.team===(user?.team)),[acts,user,isAdmin]);
@@ -16472,7 +16472,15 @@ function PortalApp({initialUser, allUsersInit}) {
 // Thin wrapper: shows Login or the full Portal
 // Keeping login OUTSIDE PortalApp avoids React hook #310 error
 export default function App() {
-  const [authUser, setAuthUser] = useState(null);
+  const [authUser, setAuthUser] = useState(() => {
+    try {
+      const sid = sessionStorage.getItem('isms_session');
+      if(!sid) return null;
+      const stored = JSON.parse(localStorage.getItem('isms_users') || 'null') || [];
+      const found = stored.find(u=>String(u.id)===sid) || SEED_USERS.find(u=>String(u.id)===sid);
+      return found || null;
+    } catch (e) { return null; }
+  });
   const [allUsersForLogin, setAllUsersForLogin] = useState(() => {
     try {
       const saved = localStorage.getItem('isms_users');
@@ -16501,6 +16509,7 @@ export default function App() {
       allUsers={allUsersForLogin}
       onLogin={(u) => {
         setAllUsersForLogin(p=>p.map(x=>x.id===u.id?{...x,lastLogin:new Date().toISOString().slice(0,10)}:x));
+        try { sessionStorage.setItem('isms_session', String(u.id)); } catch (e) {}
         setAuthUser(u);
       }}
     />;
