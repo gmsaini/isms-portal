@@ -5,42 +5,42 @@ const _fontLink = (() => {
   if(typeof document !== "undefined") {
     const l = document.createElement("link");
     l.rel = "stylesheet";
-    l.href = "https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=JetBrains+Mono:wght@400;500;600&display=swap";
+    l.href = "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap";
     document.head.appendChild(l);
     // Inject global styles
     const s = document.createElement("style");
     s.textContent = `
       :root {
-        --brand:       #2563eb;
-        --brand-deep:  #1d4ed8;
+        --brand:       #2457d6;
+        --brand-deep:  #1e47b0;
         --brand-light: #eff6ff;
         --brand-glow:  rgba(37,99,235,.22);
         --accent:      #06b6d4;
         --surface:     #ffffff;
-        --surface-2:   #f8fafc;
-        --surface-3:   #f1f5f9;
-        --border:      #e2e8f0;
+        --surface-2:   #f8f9fb;
+        --surface-3:   #f0f2f6;
+        --border:      #e4e7ee;
         --border-2:    #cbd5e1;
         --text-1:      #0f172a;
         --text-2:      #334155;
         --text-3:      #64748b;
         --text-4:      #94a3b8;
-        --sidebar-bg:  #0f172a;
+        --sidebar-bg:  #0e1626;
         --sidebar-w:   240px;
-        --radius-sm:   6px;
-        --radius-md:   10px;
-        --radius-lg:   14px;
-        --radius-xl:   18px;
-        --shadow-sm:   0 1px 2px rgba(15,23,42,.05);
-        --shadow-md:   0 2px 8px rgba(15,23,42,.08), 0 1px 2px rgba(15,23,42,.04);
-        --shadow-lg:   0 8px 24px rgba(15,23,42,.10), 0 2px 6px rgba(15,23,42,.06);
+        --radius-sm:   5px;
+        --radius-md:   8px;
+        --radius-lg:   10px;
+        --radius-xl:   12px;
+        --shadow-sm:   0 1px 2px rgba(16,24,40,.05);
+        --shadow-md:   0 2px 6px rgba(16,24,40,.07), 0 1px 2px rgba(16,24,40,.04);
+        --shadow-lg:   0 8px 20px rgba(16,24,40,.09), 0 2px 6px rgba(16,24,40,.05);
         --shadow-xl:   0 20px 48px rgba(15,23,42,.14), 0 4px 12px rgba(15,23,42,.08);
-        --font-sans:   'Plus Jakarta Sans', system-ui, sans-serif;
+        --font-sans:   'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
         --font-mono:   'JetBrains Mono', monospace;
       }
       *, *::before, *::after { box-sizing: border-box; }
       html, body, #root { height: 100%; margin: 0; }
-      body { font-family: var(--font-sans); background: #f1f5f9; color: var(--text-1); -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+      body { font-family: var(--font-sans); background: #f5f6f9; color: var(--text-1); -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
       ::-webkit-scrollbar { width: 5px; height: 5px; }
       ::-webkit-scrollbar-track { background: transparent; }
       ::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 10px; }
@@ -282,6 +282,30 @@ const _fontLink = (() => {
         pointer-events: none;
         z-index: 100;
       }
+
+      /* == ENTERPRISE POLISH LAYER == */
+      :root { --hero-bg: linear-gradient(120deg,#0b1730 0%,#12254a 62%,#1d3f8f 140%); }
+      body { font-size: 13px; font-feature-settings: "cv11","ss01"; }
+      table { font-variant-numeric: tabular-nums; }
+      ::selection { background: rgba(36,87,214,.18); }
+      :focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+      .page-hero { padding: 16px 24px !important; margin-bottom: 18px !important; background: var(--hero-bg) !important; box-shadow: var(--shadow-md); border: 1px solid rgba(255,255,255,.06); }
+      .page-hero::before { display: none !important; }
+      .page-hero::after { content:''; position:absolute; left:0; top:0; bottom:0; width:3px; background: var(--accent); }
+      .page-hero-title { font-size: 18px !important; font-weight: 700 !important; letter-spacing: -.2px !important; }
+      .page-hero-sub { font-family: var(--font-sans) !important; font-size: 12.5px !important; color: rgba(255,255,255,.65) !important; }
+      .trow-hover:hover td { background: #f4f7fd !important; }
+      .card-hover:hover, .card-clickable:hover { transform: none !important; border-color: var(--border-2) !important; box-shadow: var(--shadow-md) !important; }
+      .kpi-card:hover { transform: none !important; box-shadow: var(--shadow-md) !important; }
+      .btn-primary:hover { transform: none !important; filter: brightness(1.06); box-shadow: var(--shadow-md) !important; }
+      .section-divider, .nav-sec-label { font-family: var(--font-sans) !important; letter-spacing: .8px !important; font-weight: 600; }
+      .nav-item { border-radius: 7px; }
+      .nav-item-active { background: rgba(255,255,255,.09) !important; border-left: 2px solid var(--accent) !important; }
+      .modal-content { border-radius: var(--radius-xl) !important; }
+      input, select, textarea { font-family: var(--font-sans); }
+      input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(36,87,214,.16) !important; }
+      .badge { border-radius: 6px; font-weight: 600; }
+      ::-webkit-scrollbar { width: 8px; height: 8px; }
     `;
     document.head.appendChild(s);
   }
@@ -5122,8 +5146,8 @@ const Card = ({children,style={},onClick,onMouseEnter,onMouseLeave,className=""}
       border:"1px solid var(--border)",
       borderRadius:"var(--radius-lg)",
       padding:20,
-      boxShadow:"0 1px 3px rgba(15,23,42,.04), 0 1px 2px rgba(15,23,42,.06)",
-      transition:"box-shadow .2s, transform .2s",
+      boxShadow:"var(--shadow-sm)",
+      transition:"box-shadow .2s, border-color .2s",
       ...style
     }}>{children}</div>
 );
@@ -5149,22 +5173,22 @@ const PageHero = ({icon, title, subtitle, right=null, color="var(--brand)", acti
 const TH = ({c}) => (
   <th style={{
     textAlign:"left",
-    padding:"11px 16px",
-    fontSize:10,
-    letterSpacing:1.2,
+    padding:"10px 16px",
+    fontSize:11,
+    letterSpacing:.5,
     textTransform:"uppercase",
-    color:"var(--text-4)",
+    color:"var(--text-3)",
     background:"var(--surface-2)",
     borderBottom:"1px solid var(--border)",
-    fontWeight:700,
+    fontWeight:600,
     whiteSpace:"nowrap",
-    fontFamily:"var(--font-mono)"
+    fontFamily:"var(--font-sans)"
   }}>{c}</th>
 );
 
 const TD = ({children,s={}}) => (
   <td style={{
-    padding:"12px 16px",
+    padding:"11px 16px",
     color:"var(--text-2)",
     verticalAlign:"middle",
     borderBottom:"1px solid var(--surface-3)",
@@ -5178,7 +5202,7 @@ const iS = {
   width:"100%",
   padding:"9px 13px",
   borderRadius:"var(--radius-md)",
-  border:"1.5px solid var(--border)",
+  border:"1px solid var(--border-2)",
   fontSize:13,
   fontFamily:"var(--font-sans)",
   outline:"none",
@@ -5195,7 +5219,7 @@ const Btn = ({children,v="pri",sm,onClick,style={}}) => {
     padding:sm?"5px 13px":"9px 18px",
     borderRadius:"var(--radius-md)",
     border:"none",fontWeight:600,cursor:"pointer",
-    fontSize:sm?11.5:13,
+    fontSize:sm?12:13,
     fontFamily:"var(--font-sans)",
     letterSpacing:.1,
     transition:"all .15s",
@@ -5203,24 +5227,24 @@ const Btn = ({children,v="pri",sm,onClick,style={}}) => {
     ...style
   };
   const vs = {
-    pri:{background:"linear-gradient(135deg,#2563eb,#1d4ed8)",color:"#fff",boxShadow:"0 2px 8px rgba(37,99,235,.3)"},
-    sec:{background:"var(--surface)",color:"var(--text-2)",border:"1.5px solid var(--border)",boxShadow:"var(--shadow-sm)"},
+    pri:{background:"var(--brand)",color:"#fff",boxShadow:"0 1px 2px rgba(16,24,40,.12)"},
+    sec:{background:"var(--surface)",color:"var(--text-2)",border:"1px solid var(--border-2)",boxShadow:"var(--shadow-sm)"},
     dan:{background:"#fff5f5",color:"#b91c1c",border:"1.5px solid #fecaca"},
-    suc:{background:"linear-gradient(135deg,#059669,#0d9488)",color:"#fff",boxShadow:"0 2px 8px rgba(5,150,105,.28)"},
+    suc:{background:"#059669",color:"#fff",boxShadow:"0 1px 2px rgba(16,24,40,.12)"},
   };
   return <button className="btn-primary" style={{...base,...vs[v]}} onClick={onClick}>{children}</button>;
 };
 
 const Lbl = ({t,children}) => (
   <div>
-    <div style={{fontSize:11,fontWeight:600,color:"var(--text-3)",marginBottom:5,letterSpacing:.5,textTransform:"uppercase",fontFamily:"var(--font-sans)"}}>{t}</div>
+    <div style={{fontSize:12,fontWeight:600,color:"var(--text-2)",marginBottom:5,letterSpacing:0,fontFamily:"var(--font-sans)"}}>{t}</div>
     {children}
   </div>
 );
 
 const ModalWrap = ({title,onClose,children,wide}) => (
   <div className="modal-backdrop" onClick={e=>e.target===e.currentTarget&&onClose()}
-    style={{position:"absolute",inset:0,background:"rgba(15,23,42,.6)",backdropFilter:"blur(8px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:600}}>
+    style={{position:"absolute",inset:0,background:"rgba(14,22,38,.55)",backdropFilter:"blur(4px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:600}}>
     <div className="modal-content" style={{
       background:"var(--surface)",
       borderRadius:"var(--radius-xl)",
@@ -5246,14 +5270,13 @@ const MFoot = ({onClose,onSave,label="Save"}) => (
 );
 
 const Tabs = ({tabs,active,onChange}) => (
-  <div style={{display:"flex",gap:2,background:"var(--surface-3)",borderRadius:12,padding:3,width:"fit-content",marginBottom:18}}>
+  <div style={{display:"flex",gap:4,borderBottom:"1px solid var(--border)",marginBottom:18,overflowX:"auto"}}>
     {tabs.map(t=>(
       <button key={t.id} onClick={()=>onChange(t.id)}
-        style={{padding:"7px 18px",borderRadius:"var(--radius-md)",border:"none",cursor:"pointer",fontSize:12.5,fontWeight:600,
-          background:active===t.id?"var(--surface)":"transparent",
+        style={{padding:"9px 16px",border:"none",background:"transparent",cursor:"pointer",fontSize:13,fontWeight:active===t.id?700:500,
           color:active===t.id?"var(--brand)":"var(--text-3)",
-          boxShadow:active===t.id?"var(--shadow-sm), 0 0 0 1px var(--border)":"none",
-          fontFamily:"var(--font-sans)",transition:"all .17s",letterSpacing:.1}}>
+          borderBottom:active===t.id?"2px solid var(--brand)":"2px solid transparent",marginBottom:-1,
+          fontFamily:"var(--font-sans)",transition:"color .15s, border-color .15s",whiteSpace:"nowrap"}}>
         {t.label}
       </button>
     ))}
@@ -6597,7 +6620,7 @@ function PortalApp({initialUser, allUsersInit}) {
       return (
         <div>
           {/* Welcome hero */}
-          <div style={{background:"linear-gradient(135deg,var(--sidebar-bg) 0%,#1e3a6e 55%,var(--brand) 100%)",borderRadius:"var(--radius-xl)",padding:"22px 26px",marginBottom:18,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:14}}>
+          <div style={{background:"var(--hero-bg)",borderRadius:"var(--radius-xl)",padding:"22px 26px",marginBottom:18,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:14}}>
             <div>
               <div style={{fontSize:20,fontWeight:800,color:"#fff",letterSpacing:-.4}}>
                 {hr<12?"🌤":hr<17?"☀️":"🌙"} Good {greeting}, {user.name.split(" ")[0]}
@@ -7066,7 +7089,7 @@ function PortalApp({initialUser, allUsersInit}) {
           const gDay=hr<12?"morning":hr<17?"afternoon":"evening";
           const gIcon=hr<12?"🌤":hr<17?"☀️":"🌙";
           return (
-            <div style={{background:"linear-gradient(135deg,var(--sidebar-bg) 0%,#1e3a6e 55%,var(--brand) 100%)",borderRadius:"var(--radius-xl)",padding:"20px 26px",marginBottom:20,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:14}}>
+            <div style={{background:"var(--hero-bg)",borderRadius:"var(--radius-xl)",padding:"20px 26px",marginBottom:20,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:14}}>
               <div>
                 <div style={{fontSize:20,fontWeight:800,color:"#fff",letterSpacing:-.4}}>{gIcon} Good {gDay}, {user.name.split(" ")[0]}</div>
                 <div style={{fontSize:12,color:"rgba(255,255,255,.55)",marginTop:4,fontFamily:"var(--font-mono)"}}>
