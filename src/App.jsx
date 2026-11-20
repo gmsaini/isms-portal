@@ -5384,12 +5384,12 @@ class ErrorBoundary extends React.Component {
 
 // == LOGIN PAGE ===============================
 // == CLOUD: login, data panel, app shell =============================
-function CloudLogin({sb, onSignedIn, startMode}) {
+function CloudLogin({sb, onSignedIn, startMode, note}) {
   const [mode,  setMode]  = React.useState(startMode||"in");
   const [email, setEmail] = React.useState("");
   const [pw,    setPw]    = React.useState("");
   const [pw2,   setPw2]   = React.useState("");
-  const [err,   setErr]   = React.useState("");
+  const [err,   setErr]   = React.useState(note || "");
   const [info,  setInfo]  = React.useState("");
   const [busy,  setBusy]  = React.useState(false);
 
@@ -5548,16 +5548,20 @@ function CloudApp() {
   const [err,   setErr]   = React.useState("");
   const sbRef = React.useRef(null);
   const recoverRef = React.useRef(false);
+  const [loginNote, setLoginNote] = React.useState("");
 
   const openSession = async (sb) => {
     setPhase("loading");
     const au = await sb.auth.getUser();
-    if(au.error || !au.data || !au.data.user) { setPhase("login"); throw new Error("Sign-in failed. Please try again."); }
+    if(au.error || !au.data || !au.data.user) { setLoginNote("Sign-in failed: " + (au.error ? au.error.message : "no session returned")); setPhase("login"); return; }
     const pr = await sb.from("profiles").select("id,data,name,role,team,status").eq("auth_id", au.data.user.id).maybeSingle();
     if(pr.error || !pr.data) {
       await sb.auth.signOut();
+      setLoginNote(pr.error
+        ? "Could not read your profile: " + pr.error.message
+        : "You signed in, but no ISMS profile is linked to this account. If you are setting up for the first time, run the seed script (seed.mjs) and check the profiles table in Supabase.");
       setPhase("login");
-      throw new Error("Your account is not linked to an ISMS profile. Contact your administrator.");
+      return;
     }
     let data;
     try { data = await cloudLoadAll(sb); }
@@ -5594,7 +5598,7 @@ function CloudApp() {
       <button onClick={()=>window.location.reload()} style={{padding:"9px 20px",borderRadius:"var(--radius-md)",border:"none",background:"var(--brand)",color:"#fff",fontWeight:600,cursor:"pointer"}}>Retry</button>
     </div></div>
   );
-  if(phase==="login" || phase==="recover") return <CloudLogin sb={sbRef.current} startMode={phase==="recover"?"recover":"in"} onSignedIn={()=>openSession(sbRef.current)}/>;
+  if(phase==="login" || phase==="recover") return <CloudLogin sb={sbRef.current} note={loginNote} startMode={phase==="recover"?"recover":"in"} onSignedIn={()=>openSession(sbRef.current)}/>;
   return <PortalApp initialUser={ctx.me} allUsersInit={ctx.data.users} cloud={ctx}/>;
 }
 
