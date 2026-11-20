@@ -11225,126 +11225,167 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
   //  PAGE: SUGGESTIONS & ACTIONS
   // ====================================================================
   const PageProdSuggest = () => {
-    const { memberStats, actStats, teamStats, reactOrgPct, incidentOrgPct } = prodData;
+    const { memberStats, actStats, reactOrgPct, incidentOrgPct } = prodData;
     const [expandedId, setExpandedId] = React.useState(null);
     const [filter, setFilter] = React.useState("all");
 
-    // == Generate smart suggestions from live data ==
+    const plural = (n, one, many) => n + " " + (n === 1 ? one : many);
+    const memEnt = (list, metric) => list.map(m=>({name:m.name, team:m.team, metric:metric(m)}));
+    const actEnt = (list, metric) => list.map(a=>({name:a.name, team:a.team, metric:metric(a)}));
+
+    // == Generate smart suggestions from live data (short text + structured people/activities) ==
     const suggestions = React.useMemo(()=>{
       const items = [];
+      if(reactOrgPct>50) items.push({id:"s1",priority:"Critical",category:"Work Balance",icon:"🔴",title:"High reactive workload",summary:reactOrgPct+"% of logged time is reactive (target under 30%).",entities:[],entityLabel:"",action:"Review incident logs for repeat patterns. Schedule a Problem Management review. Create proactive maintenance activities to reduce firefighting.",kpi:"Under 30% reactive (now "+reactOrgPct+"%)",nav:"prod_flags"});
+      else if(reactOrgPct>30) items.push({id:"s2",priority:"High",category:"Work Balance",icon:"⚡",title:"Reactive work slightly elevated",summary:reactOrgPct+"% reactive time is above the 30% benchmark.",entities:[],entityLabel:"",action:"Identify the top 3 reactive activities in the last 30 days and convert them to planned BAU tickets.",kpi:"Under 30% reactive (now "+reactOrgPct+"%)",nav:"prod_flags"});
+      if(incidentOrgPct>30) items.push({id:"s3",priority:"Critical",category:"Incident Management",icon:"🚨",title:"Excessive incident time",summary:incidentOrgPct+"% of time goes to incidents, which signals systemic instability (target under 15%).",entities:[],entityLabel:"",action:"Implement Problem Management. Run Root Cause Analysis on the top 5 incidents. Publish a Known Error Database (KEDB).",kpi:"Under 15% incident time (now "+incidentOrgPct+"%)",nav:"prod_heatmap"});
 
-      // 1. Reactive ratio
-      if(reactOrgPct>50) items.push({id:"s1",priority:"Critical",category:"Work Balance",icon:"🔴",title:"High Reactive Workload",detail:`${reactOrgPct}% of all logged time is reactive. Industry best practice for infra teams is <30% reactive. Root-cause analysis and proactive maintenance scheduling is strongly recommended.`,action:"Review incident logs for repeat patterns. Schedule a Problem Management review. Create proactive maintenance activities to reduce firefighting.",kpi:`Target: <30% reactive (currently ${reactOrgPct}%)`,nav:"prod_flags"});
-      else if(reactOrgPct>30) items.push({id:"s2",priority:"High",category:"Work Balance",icon:"⚡",title:"Reactive Work Slightly Elevated",detail:`${reactOrgPct}% reactive time is above the 30% industry benchmark. Consider shifting recurring reactive tasks into scheduled BAU activities.`,action:"Identify the top 3 reactive activities in the last 30 days and convert them to planned BAU tickets.",kpi:`Target: <30% reactive (currently ${reactOrgPct}%)`,nav:"prod_flags"});
+      const idle = memberStats.filter(m=>m.isIdle);
+      if(idle.length>0) items.push({id:"s4",priority:"High",category:"Resource Utilisation",icon:"💤",title:plural(idle.length,"member","members")+" under-utilised",summary:"Logged under 50% of available capacity this month. May mean unclear ownership or blocked tasks.",entityLabel:"Utilisation",entities:memEnt(idle,m=>m.utilPct+"%"),action:"Assign open activities to under-utilised members. Check the activity backlog is up to date. Hold 1:1s to uncover blockers.",kpi:"65-85% utilisation per member",nav:"prod_flags"});
 
-      // 2. Incident ratio
-      if(incidentOrgPct>30) items.push({id:"s3",priority:"Critical",category:"Incident Management",icon:"🚨",title:"Excessive Incident Time",detail:`${incidentOrgPct}% of all time is spent on incidents. This signals systemic instability. ITIL best practice recommends <15% incident time for mature infra teams.`,action:"Implement Problem Management process. Run Root Cause Analysis on top 5 incidents. Publish a Known Error Database (KEDB).",kpi:`Target: <15% incident time (currently ${incidentOrgPct}%)`,nav:"prod_heatmap"});
+      const over = memberStats.filter(m=>m.isOverloaded);
+      if(over.length>0) items.push({id:"s5",priority:"High",category:"Resource Utilisation",icon:"🔥",title:plural(over.length,"member","members")+" overloaded",summary:"Above 90% utilisation. Sustained overload leads to burnout and lower quality.",entityLabel:"Utilisation",entities:memEnt(over,m=>m.utilPct+"%"),action:"Redistribute activities. Check whether BAU tasks can be automated or delegated. Look for silent overtime.",kpi:"Under 85% peak utilisation",nav:"prod_flags"});
 
-      // 3. Idle members
-      const idleMembers = memberStats.filter(m=>m.isIdle);
-      if(idleMembers.length>0) items.push({id:"s4",priority:"High",category:"Resource Utilisation",icon:"💤",title:(idleMembers.length+" Member"+idleMembers.length>1?"s":""+" Under-utilised"),detail:`${idleMembers.map(m=>m.name).join(", ")} logged <50% of available capacity. Under-utilisation may indicate unclear ownership, blocked tasks, or poor activity coverage.`,action:"Assign open activities to under-utilised members. Review if activity backlog is up to date. Conduct 1:1 to uncover blockers.",kpi:"Target: 65–85% utilisation per member",nav:"prod_flags"});
+      const stale = actStats.filter(a=>a.isStale);
+      if(stale.length>0) items.push({id:"s6",priority:"Medium",category:"Activity Governance",icon:"📋",title:plural(stale.length,"stale activity","stale activities"),summary:"Active, but no time logged for several days. Stale items distort utilisation metrics.",entityLabel:"Days without a log",entities:actEnt(stale,a=>a.daysStale+" days"),action:"Manager to review each one: close, defer, or re-assign with a clear owner and target date.",kpi:"0 active activities with a gap over 3 days",nav:"prod_flags"});
 
-      // 4. Overloaded members
-      const overloaded = memberStats.filter(m=>m.isOverloaded);
-      if(overloaded.length>0) items.push({id:"s5",priority:"High",category:"Resource Utilisation",icon:"🔥",title:(overloaded.length+" Member"+overloaded.length>1?"s":""+" Overloaded"),detail:`${overloaded.map(m=>m.name).join(", ")} exceeded 90% utilisation. Sustained overloading leads to burnout and quality degradation.`,action:"Redistribute activities. Review if any BAU tasks can be automated or delegated. Check if overtime is being worked silently.",kpi:"Target: <85% peak utilisation",nav:"prod_flags"});
-
-      // 5. Stale activities
-      const staleActs = actStats.filter(a=>a.isStale);
-      if(staleActs.length>0) items.push({id:"s6",priority:"Medium",category:"Activity Governance",icon:"📋",title:(staleActs.length+" Stale Active Activit"+staleActs.length>1?"ies":"y"),detail:`Active activities with no time logged for 4+ days: ${staleActs.map(a=>a.name).join("; ")}. Stale activities distort utilisation metrics and indicate planning gaps.`,action:"Manager to review each stale activity. Either close/defer or re-assign with a clear owner and target date.",kpi:"Target: 0 active activities with >3 day logging gap",nav:"prod_flags"});
-
-      // 6. Over-estimate activities
       const overEst = actStats.filter(a=>a.isOverEst);
-      if(overEst.length>0) items.push({id:"s7",priority:"Medium",category:"Estimation Accuracy",icon:"📈",title:(overEst.length+" Activit"+overEst.length>1?"ies":"y"+" Exceeding Estimate"),detail:`${overEst.map(a=>a.name).join(", ")} have exceeded original time estimates. Poor estimation leads to capacity planning failures and missed commitments.`,action:"Run a retrospective on over-estimated activities. Update estimation baselines. Consider using reference class forecasting for similar future tasks.",kpi:"Target: <10% of activities over estimate by >20%",nav:"bandwidth"});
+      if(overEst.length>0) items.push({id:"s7",priority:"Medium",category:"Estimation Accuracy",icon:"📈",title:plural(overEst.length,"activity","activities")+" over estimate",summary:"Time logged has passed the original estimate, which hurts capacity planning.",entityLabel:"Of estimate used",entities:actEnt(overEst,a=>a.pct+"%"),action:"Run a retrospective on these activities. Update estimation baselines and use reference-class forecasting for similar future tasks.",kpi:"Under 10% of activities over estimate by more than 20%",nav:"bandwidth"});
 
-      // 7. Blocked activities
       const blocked = actStats.filter(a=>a.isBlocked);
-      if(blocked.length>0) items.push({id:"s8",priority:"Medium",category:"Delivery Flow",icon:"🚧",title:(blocked.length+" Suspended Activit"+blocked.length>1?"ies":"y"),detail:`${blocked.map(a=>a.name).join(", ")} are suspended. Each suspended activity is unavailable for logging and ties up capacity and delays delivery. DORA metrics show blocked work is a key lead-time killer.`,action:"Escalate dependencies. Assign a dedicated owner for each blocker. Run a weekly 'blocked items' standup to clear impediments faster.",kpi:"Target: 0 blocked activities >2 days",nav:"prod_flags"});
+      if(blocked.length>0) items.push({id:"s8",priority:"Medium",category:"Delivery Flow",icon:"🚧",title:plural(blocked.length,"suspended activity","suspended activities"),summary:"Suspended work cannot be logged against and delays delivery.",entityLabel:"Status",entities:actEnt(blocked,a=>"Suspended"),action:"Escalate dependencies. Assign an owner to each blocker. Run a weekly blocked-items stand-up.",kpi:"0 blocked activities for more than 2 days",nav:"prod_flags"});
 
-      // 8. Reactive-heavy members
-      const reactHeavy = memberStats.filter(m=>m.isReactiveHeavy);
-      if(reactHeavy.length>0) items.push({id:"s9",priority:"Medium",category:"Work Balance",icon:"🎯",title:(reactHeavy.length+" Member"+reactHeavy.length>1?"s":""+" Reactive-Heavy"),detail:`${reactHeavy.map(m=>m.name).join(", ")} are spending >60% of their time on reactive work. This limits strategic/proactive contribution.`,action:"Protect at least 40% of each member's time for proactive/project work. Use time-boxing in weekly sprint planning.",kpi:"Target: <40% reactive per member",nav:"prod_flags"});
+      const rh = memberStats.filter(m=>m.isReactiveHeavy);
+      if(rh.length>0) items.push({id:"s9",priority:"Medium",category:"Work Balance",icon:"🎯",title:plural(rh.length,"member","members")+" reactive-heavy",summary:"Spending over 60% of their time on reactive work, which limits proactive contribution.",entityLabel:"Reactive share",entities:memEnt(rh,m=>m.reactPct+"%"),action:"Protect at least 40% of each person's time for proactive and project work. Use time-boxing in sprint planning.",kpi:"Under 40% reactive per member",nav:"prod_flags"});
 
-      // 9. No-log streaks
-      const staleMembers = memberStats.filter(m=>m.isStale);
-      if(staleMembers.length>0) items.push({id:"s10",priority:"Low",category:"Time Tracking Compliance",icon:"📝",title:(staleMembers.length+" Member"+staleMembers.length>1?"s":""+" Not Logging Regularly"),detail:`${staleMembers.map(m=>m.name).join(", ")} have not logged time in 3+ days. Incomplete time tracking makes capacity planning and performance reporting unreliable.`,action:"Send reminder to log daily. Manager to review in next 1:1. Consider setting a daily 5-min log-time reminder at end of workday.",kpi:"Target: 100% members log at least once every 2 business days",nav:"timelog"});
+      const sm = memberStats.filter(m=>m.isStale);
+      if(sm.length>0) items.push({id:"s10",priority:"Low",category:"Time Tracking",icon:"📝",title:plural(sm.length,"member","members")+" not logging regularly",summary:"No time logged for 3+ days. Gaps make capacity and performance reporting unreliable.",entityLabel:"Last log",entities:memEnt(sm,m=>m.daysSinceLog>=999?"never":m.daysSinceLog+" days ago"),action:"Send a reminder to log daily, review in the next 1:1, and set an end-of-day log-time reminder.",kpi:"Everyone logs at least once every 2 business days",nav:"timelog"});
 
-      // 10. Best practice: automation recommendation
       const bauPct = prodData.scopeLogs ? Math.round(prodData.scopeLogs.filter(l=>l.type==="BAU").reduce((s,l)=>s+l.mins,0)/Math.max(prodData.totalLogged,1)*100) : 0;
-      if(bauPct>40) items.push({id:"s11",priority:"Low",category:"Automation Opportunity",icon:"🤖",title:"High BAU Volume — Automation Candidate",detail:`${bauPct}% of logged time is BAU work. A significant BAU proportion often indicates manual repetitive tasks that could be automated (monitoring scripts, patching pipelines, backup validation).`,action:"Audit top 5 BAU activities by hours. Identify automation candidates. Assign an Automation & Scripting sprint to reduce recurring manual work by 30%.",kpi:`Target: BAU <30% of total effort (currently ${bauPct}%)`,nav:"activities"});
-
+      if(bauPct>40) items.push({id:"s11",priority:"Low",category:"Automation",icon:"🤖",title:"High BAU volume - automation candidate",summary:bauPct+"% of logged time is BAU work. Repetitive BAU is often a good automation target.",entities:[],entityLabel:"",action:"List the top 5 recurring BAU tasks by hours and assess them for scripting or runbook automation.",kpi:"Reduce BAU share by 10% through automation",nav:"prod_repeat"});
       return items;
     },[memberStats, actStats, reactOrgPct, incidentOrgPct]);
 
     const priorityOrder = {Critical:0,High:1,Medium:2,Low:3};
     const sorted = [...suggestions].sort((a,b)=>priorityOrder[a.priority]-priorityOrder[b.priority]);
-    const riskColor = (p) => p==="Critical"?"#dc2626":p==="High"?"#ea580c":p==="Medium"?"#d97706":"var(--text-3)";
+    const riskColor = (p) => p==="Critical"?"#dc2626":p==="High"?"#ea580c":p==="Medium"?"#d97706":"#64748b";
     const riskBg    = (p) => p==="Critical"?"#fef2f2":p==="High"?"#fff7ed":p==="Medium"?"#fffbeb":"var(--surface-2)";
+    const groupTitle = {Critical:"Needs attention now",High:"High priority",Medium:"Worth planning",Low:"Good to know"};
+    const shown = filter==="all" ? sorted : sorted.filter(s=>s.priority===filter);
+    const MAXCHIPS = 4;
+
+    const Chip = ({e}) => (
+      <span style={{display:"inline-flex",alignItems:"center",gap:6,padding:"3px 10px",borderRadius:20,background:"var(--surface-2)",border:"1px solid var(--border)",fontSize:11.5,color:"var(--text-2)",maxWidth:230}}>
+        <span style={{width:7,height:7,borderRadius:"50%",background:tCol(e.team),flexShrink:0}}/>
+        <span style={{fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.name}</span>
+        <span style={{color:"var(--text-4)",fontFamily:"var(--font-mono)",fontSize:10.5,flexShrink:0}}>{e.metric}</span>
+      </span>
+    );
 
     return (
       <div>
         <PageHero icon="💡" title="Suggestions & Actions"
-          subtitle="AI-generated recommendations based on your live data · ITIL & DORA aligned"
-          right={<button onClick={()=>goPage("prod_intel")} style={{fontSize:11,background:"rgba(255,255,255,.15)",color:"#fff",border:"1px solid rgba(255,255,255,.25)",borderRadius:"var(--radius-md)",padding:"7px 14px",cursor:"pointer",fontWeight:700,backdropFilter:"blur(4px)"}}>🧠 Intelligence Report -></button>}/>
+          subtitle="Recommendations generated from your live data, ordered by priority"
+          right={<button onClick={()=>goPage("prod_intel")} style={{fontSize:12,background:"rgba(255,255,255,.18)",color:"#fff",border:"1px solid rgba(255,255,255,.3)",borderRadius:"var(--radius-md)",padding:"7px 14px",cursor:"pointer",fontWeight:600}}>Intelligence report</button>}/>
 
-        {/* Stats bar */}
-        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:18}}>
-          {["Critical","High","Medium","Low"].map(p=>{
-            const cnt = sorted.filter(s=>s.priority===p).length;
-            const icons = {Critical:"🚨",High:"⚠️",Medium:"💛",Low:"✅"};
+        {/* Priority filter chips */}
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:18,alignItems:"center"}}>
+          {[["all","All"],["Critical","Critical"],["High","High"],["Medium","Medium"],["Low","Low"]].map(function(pr){
+            const id = pr[0];
+            const cnt = id==="all" ? sorted.length : sorted.filter(s=>s.priority===id).length;
+            const on = filter===id;
+            const col = id==="all" ? "var(--brand)" : riskColor(id);
             return (
-              <Card key={p} className="card-clickable"
-                onClick={()=>setFilter(f=>f===p?"all":p)}
-                style={{padding:14,borderLeft:`4px solid ${riskColor(p)}`,
-                        background:filter===p?`${riskBg(p)}`:"var(--surface)"}}>
-                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
-                  <span style={{fontSize:18}}>{icons[p]}</span>
-                  {filter===p&&<span style={{fontSize:9,background:riskColor(p),color:"#fff",padding:"2px 7px",borderRadius:10,fontWeight:700}}>Active</span>}
-                </div>
-                <div style={{fontSize:28,fontWeight:800,color:riskColor(p),lineHeight:1.1}}>{cnt}</div>
-                <div style={{fontSize:10,fontWeight:700,color:riskColor(p),textTransform:"uppercase",letterSpacing:.6,marginTop:4}}>{p}</div>
-                <div style={{fontSize:10,color:"var(--text-4)"}}>suggestion{cnt!==1?"s":""}</div>
-              </Card>
+              <button key={id} onClick={()=>setFilter(id)}
+                style={{display:"inline-flex",alignItems:"center",gap:8,padding:"7px 14px",borderRadius:20,cursor:"pointer",fontSize:12.5,fontWeight:600,fontFamily:"var(--font-sans)",
+                  border:"1px solid "+(on?col:"var(--border-2)"),background:on?col:"var(--surface)",color:on?"#fff":"var(--text-2)"}}>
+                {pr[1]}
+                <span style={{minWidth:20,textAlign:"center",padding:"1px 6px",borderRadius:10,fontSize:11,fontWeight:700,background:on?"rgba(255,255,255,.25)":"var(--surface-3)",color:on?"#fff":col}}>{cnt}</span>
+              </button>
             );
           })}
         </div>
 
-        {(filter!=="all"?sorted.filter(s=>s.priority===filter):sorted).length===0
-          ? <Card><div className="empty-state"><div className="empty-state-icon">{filter!=="all"?"🔍":"🏆"}</div><div className="empty-state-title">{filter!=="all"?`No ${filter} suggestions`:"All Good!"}</div><div className="empty-state-sub">{filter!=="all"?"Try a different filter or check back later.":"No productivity flags detected. Keep up the great work!"}</div></div></Card>
-          : (filter!=="all"?sorted.filter(s=>s.priority===filter):sorted).map(s=>(
-            <div key={s.id} style={{marginBottom:12}}>
-              <div onClick={()=>setExpandedId(expandedId===s.id?null:s.id)}
-                style={{background:"var(--surface)",border:`1px solid ${riskColor(s.priority)}25`,borderLeft:`4px solid ${riskColor(s.priority)}`,borderRadius:12,padding:"15px 20px",cursor:"pointer",transition:"all .18s",display:"flex",alignItems:"flex-start",gap:14,boxShadow:"0 1px 3px rgba(15,23,42,.04)"}}
-                onMouseEnter={e=>e.currentTarget.style.boxShadow=`0 4px 16px ${riskColor(s.priority)}20`}
-                onMouseLeave={e=>{e.currentTarget.style.boxShadow="";e.currentTarget.style.transform="";}}>
-                <span style={{fontSize:22,flexShrink:0,marginTop:1}}>{s.icon}</span>
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:4,flexWrap:"wrap"}}>
-                    <span style={{fontWeight:800,fontSize:14,color:"var(--text-1)"}}>{s.title}</span>
-                    <span style={{fontSize:11,background:riskBg(s.priority),color:riskColor(s.priority),padding:"2px 9px",borderRadius:"var(--radius-md)",fontWeight:700,flexShrink:0}}>{s.priority}</span>
-                    <span style={{fontSize:11,background:"var(--surface-3)",color:"var(--text-3)",padding:"2px 8px",borderRadius:"var(--radius-md)",flexShrink:0}}>{s.category}</span>
-                  </div>
-                  <div style={{fontSize:12,color:"var(--text-3)",lineHeight:1.5}}>{s.detail}</div>
-                  {expandedId===s.id && (
-                    <div style={{marginTop:12,padding:"12px 14px",background:riskBg(s.priority),borderRadius:"var(--radius-sm)"}}>
-                      <div style={{fontSize:11,fontWeight:700,color:riskColor(s.priority),marginBottom:6}}>📌 Recommended Action</div>
-                      <div style={{fontSize:12,color:"var(--text-2)",lineHeight:1.6,marginBottom:10}}>{s.action}</div>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
-                        <div style={{fontSize:11,color:"var(--text-3)",background:"var(--surface)",padding:"4px 10px",borderRadius:7,border:"1px solid #e5e7eb"}}>
-                          📊 <strong>KPI Target:</strong> {s.kpi}
+        {shown.length===0 && (
+          <Card><div className="empty-state"><div className="empty-state-icon">{filter!=="all"?"🔍":"🏆"}</div>
+            <div className="empty-state-title">{filter!=="all"?("No "+filter+" suggestions"):"All good!"}</div>
+            <div className="empty-state-sub">{filter!=="all"?"Pick another priority to see more.":"No issues detected in the current data."}</div></div></Card>
+        )}
+
+        {["Critical","High","Medium","Low"].map(function(g){
+          const list = shown.filter(s=>s.priority===g);
+          if(!list.length) return null;
+          return (
+            <div key={g} style={{marginBottom:22}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                <span style={{width:8,height:8,borderRadius:"50%",background:riskColor(g)}}/>
+                <span style={{fontSize:12,fontWeight:700,color:"var(--text-2)",textTransform:"uppercase",letterSpacing:.6}}>{groupTitle[g]}</span>
+                <span style={{fontSize:12,color:"var(--text-4)"}}>{list.length}</span>
+              </div>
+              <div style={{display:"grid",gap:10}}>
+                {list.map(function(s){
+                  const open = expandedId===s.id;
+                  const extra = s.entities.length - MAXCHIPS;
+                  return (
+                    <div key={s.id} style={{background:"var(--surface)",border:"1px solid var(--border)",borderLeft:"3px solid "+riskColor(s.priority),borderRadius:"var(--radius-lg)",overflow:"hidden"}}>
+                      <div onClick={()=>setExpandedId(open?null:s.id)} style={{display:"flex",gap:14,alignItems:"flex-start",padding:"14px 18px",cursor:"pointer"}}>
+                        <div style={{width:36,height:36,borderRadius:"var(--radius-md)",background:riskBg(s.priority),display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{s.icon}</div>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                            <span style={{fontWeight:700,fontSize:14,color:"var(--text-1)"}}>{s.title}</span>
+                            <span style={{fontSize:11,color:"var(--text-3)",background:"var(--surface-3)",padding:"1px 8px",borderRadius:10}}>{s.category}</span>
+                          </div>
+                          <div style={{fontSize:12.5,color:"var(--text-3)",marginTop:3,lineHeight:1.5}}>{s.summary}</div>
+                          {s.entities.length>0 && !open && (
+                            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:10}}>
+                              {s.entities.slice(0,MAXCHIPS).map((e,i)=><Chip key={i} e={e}/>)}
+                              {extra>0 && <span style={{display:"inline-flex",alignItems:"center",padding:"3px 10px",borderRadius:20,fontSize:11.5,fontWeight:600,color:"var(--brand)",background:"var(--brand-light)"}}>{"+" + extra + " more"}</span>}
+                            </div>
+                          )}
                         </div>
-                        <button onClick={e=>{e.stopPropagation();goPage(s.nav);}}
-                          style={{padding:"6px 16px",borderRadius:"var(--radius-sm)",background:riskColor(s.priority),color:"#fff",border:"none",fontWeight:700,fontSize:12,cursor:"pointer"}}>
-                          View Data ->
-                        </button>
+                        <span style={{fontSize:12,color:"var(--text-4)",flexShrink:0,marginTop:8}}>{open?"▲":"▼"}</span>
                       </div>
+
+                      {open && (
+                        <div style={{borderTop:"1px solid var(--border)",background:"var(--surface-2)",padding:"16px 18px 16px 68px"}}>
+                          {s.entities.length>0 && (
+                            <div style={{marginBottom:16}}>
+                              <div style={{fontSize:11,fontWeight:700,color:"var(--text-3)",textTransform:"uppercase",letterSpacing:.5,marginBottom:8}}>{"Affected (" + s.entities.length + ")"}</div>
+                              <div style={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-md)",maxHeight:230,overflowY:"auto"}}>
+                                {s.entities.map((e,i)=>(
+                                  <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",borderTop:i?"1px solid var(--surface-3)":"none",fontSize:12.5}}>
+                                    <span style={{width:8,height:8,borderRadius:"50%",background:tCol(e.team),flexShrink:0}}/>
+                                    <span style={{flex:1,minWidth:0,fontWeight:600,color:"var(--text-1)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.name}</span>
+                                    <span style={{color:"var(--text-4)",fontSize:11.5,width:90,flexShrink:0}}>{e.team}</span>
+                                    <span style={{color:riskColor(s.priority),fontWeight:700,fontFamily:"var(--font-mono)",fontSize:12,minWidth:84,textAlign:"right"}}>{e.metric}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))",gap:14}}>
+                            <div>
+                              <div style={{fontSize:11,fontWeight:700,color:"var(--text-3)",textTransform:"uppercase",letterSpacing:.5,marginBottom:6}}>Recommended action</div>
+                              <div style={{fontSize:12.5,color:"var(--text-2)",lineHeight:1.6}}>{s.action}</div>
+                            </div>
+                            <div>
+                              <div style={{fontSize:11,fontWeight:700,color:"var(--text-3)",textTransform:"uppercase",letterSpacing:.5,marginBottom:6}}>Target</div>
+                              <div style={{fontSize:12.5,color:"var(--text-2)",lineHeight:1.6}}>{s.kpi}</div>
+                            </div>
+                          </div>
+                          <button onClick={e=>{e.stopPropagation();goPage(s.nav);}}
+                            style={{marginTop:14,padding:"7px 16px",borderRadius:"var(--radius-md)",background:"var(--brand)",color:"#fff",border:"none",fontWeight:600,fontSize:12.5,cursor:"pointer"}}>
+                            View the data
+                          </button>
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-                <span style={{fontSize:14,color:"var(--text-4)",flexShrink:0,marginTop:2}}>{expandedId===s.id?"▲":"▼"}</span>
+                  );
+                })}
               </div>
             </div>
-          ))
-        }
+          );
+        })}
       </div>
     );
   };
