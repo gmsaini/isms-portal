@@ -6107,8 +6107,15 @@ async function cloudPush(sb, name, items, snap) {
   for(let i=0; i<up.length; i+=400) {
     const chunk = up.slice(i, i+400);
     const res = await sb.from(c.table).upsert(chunk.map(x=>x.row), {onConflict:c.pk});
-    if(res.error) throw res.error;
-    chunk.forEach(x=>snap.set(x.k, x.j));
+    if(!res.error) { chunk.forEach(x=>snap.set(x.k, x.j)); continue; }
+    // One bad record must not block the others: retry one by one, then report the ones that failed
+    let firstBad = null;
+    for(const x of chunk) {
+      const r1 = await sb.from(c.table).upsert([x.row], {onConflict:c.pk});
+      if(r1.error) { if(!firstBad) firstBad = {k:x.k, msg:r1.error.message}; }
+      else snap.set(x.k, x.j);
+    }
+    if(firstBad) throw new Error(firstBad.msg + " [record " + firstBad.k + "]");
   }
   for(let i=0; i<del.length; i+=200) {
     const chunk = del.slice(i, i+200);
