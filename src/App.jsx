@@ -8586,7 +8586,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
                   <SortTH col="cat"        label="Category"/>
                   <SortTH col="mins"       label="Time" right/>
                   <th style={{padding:"10px 12px",textAlign:"left",fontSize:11,fontWeight:700,color:"var(--text-4)",textTransform:"uppercase",letterSpacing:.7,background:"var(--surface-2)",borderBottom:"2px solid var(--border)"}}>Notes</th>
-                  <th style={{padding:"10px 12px",textAlign:"left",fontSize:11,fontWeight:700,color:"var(--text-4)",textTransform:"uppercase",letterSpacing:.7,background:"var(--surface-2)",borderBottom:"2px solid var(--border)"}}/>
+                  <th style={{padding:"10px 12px",textAlign:"left",fontSize:11,fontWeight:700,color:"var(--text-4)",textTransform:"uppercase",letterSpacing:.7,background:"var(--surface-2)",borderBottom:"2px solid var(--border)",position:"sticky",right:0,zIndex:2}}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -8626,7 +8626,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
                         <div style={{fontSize:9,color:"var(--text-4)",fontFamily:"var(--font-mono)"}}>{l.mins}m</div>
                       </TD>
                       <TD s={{fontSize:11,color:"var(--text-3)",maxWidth:180,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{l.notes||"—"}</TD>
-                      <TD>{(isMgrOrAdmin || l.userId===user.id) && <div style={{display:"flex",gap:5}}><Btn sm v="sec" onClick={()=>openEditL(l)}>✏️ Edit</Btn><Btn sm v="dan" onClick={()=>{ if(window.confirm("Delete this time entry?")) delLog(l.id); }}>🗑</Btn></div>}</TD>
+                      <TD s={{position:"sticky",right:0,background:"var(--surface)",boxShadow:"-8px 0 8px -8px rgba(16,24,40,.18)"}}>{(isMgrOrAdmin || l.userId===user.id) && <div style={{display:"flex",gap:5}}><Btn sm v="sec" onClick={()=>openEditL(l)}>✏️ Edit</Btn><Btn sm v="dan" onClick={()=>{ if(window.confirm("Delete this time entry?")) delLog(l.id); }}>🗑</Btn></div>}</TD>
                     </tr>
                   );
                 })}
