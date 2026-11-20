@@ -6046,7 +6046,7 @@ function LogTimeTable({ loggable, logs, user, onClose, onLog, showToast }) {
 // Paste your Supabase project values below to store data in the cloud.
 // Leave both empty to keep using browser storage (local mode).
 const CLOUD_URL = "https://mtmqnnrqfxnklpfdfayg.supabase.co";   // e.g. https://abcdxyz.supabase.co
-const CLOUD_KEY = "sb_secret_206r8cnNRyy7oDQ8_P-77g_fdaP0jvV";   // the public "anon" key (safe to expose; never use the service_role key here)
+const CLOUD_KEY = "sb_publishable_k0GHDB2cl7slnmhevOaF5A_GeqOyPFK";   // the public "anon" key (safe to expose; never use the service_role key here)
 const CLOUD_ON  = !!(CLOUD_URL && CLOUD_KEY);
 let _sb = null;
 const getSb = async () => {
