@@ -5395,6 +5395,8 @@ function CloudLogin({sb, onSignedIn, startMode, note}) {
 
   const friendly = (e) => {
     const m = (e && e.message) ? e.message : String(e);
+    if(/rate limit/i.test(m)) return "Too many emails were sent. In Supabase, turn off Authentication > Providers > Email > Confirm email (or wait an hour), then try again.";
+    if(/email address .* invalid|invalid.*email/i.test(m)) return "Supabase does not accept this email address. Use a real email address (for example name@yourcompany.com); fake domains such as .local cannot be activated.";
     if(/database error/i.test(m) || /No ISMS profile/i.test(m)) return "This email is not registered in ISMS. Ask your manager or administrator to add you first.";
     if(/invalid login/i.test(m)) return "Incorrect email or password.";
     if(/already registered/i.test(m)) return "This email already has an account. Use Sign in.";
@@ -8805,6 +8807,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
         if(user.id===mTarget.id) setUser(p=>({...p,...mForm,name:mForm.name.trim()}));
         showToast(`${mForm.name} updated`);
       } else {
+        if(CLOUD_ON) { showToast("In cloud mode add people from User Management (a real email address is required)","err"); return; }
         const nu={id:uid("USR"),name:mForm.name.trim(),title:mForm.title,team:mForm.team||null,role:mForm.role,
           email:`${mForm.name.toLowerCase().replace(/\s+/g,".")}@isms.local`,
           username:mForm.name.toLowerCase().replace(/\s+/g,"."),
@@ -12135,6 +12138,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       if(!uForm.email.trim()) { showToast("Email is required","err");     return; }
       if(!uTarget && !uForm.password && !CLOUD_ON) { showToast("Password required for new users","err"); return; }
       if(isMgr && uForm.role!=="member") { showToast("Managers can only add Members","err"); return; }
+      if(CLOUD_ON && !uTarget && (/\.local$/i.test(uForm.email.trim()) || !/^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(uForm.email.trim()))) { showToast("Use a real email address - fake domains like .local cannot be activated","err"); return; }
       if(uTarget) {
         const update = {...uTarget,...uForm};
         if(uForm.resetPw && uForm.newPw) { update.password=uForm.newPw; update.mustReset=true; }
