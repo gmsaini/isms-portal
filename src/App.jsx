@@ -6051,7 +6051,7 @@ const CLOUD_ON  = !!(CLOUD_URL && CLOUD_KEY);
 let _sb = null;
 const getSb = async () => {
   if(_sb) return _sb;
-  const m = await import(/* @vite-ignore */ "https://esm.sh/@supabase/supabase-js@2.45.4");
+  const m = await import(/* @vite-ignore */ "https://esm.sh/@supabase/supabase-js@2.119.0");
   _sb = m.createClient(CLOUD_URL, CLOUD_KEY, {auth:{persistSession:true, autoRefreshToken:true}});
   return _sb;
 };
