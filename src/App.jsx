@@ -5072,7 +5072,7 @@ const fmtM   = m => { if (!m && m !== 0) return "—"; const h = Math.floor(m/60
 const tCol_module = t => SEED_TEAMS.find(x=>x.name===t)?.color || "var(--text-3)";
 const uCol   = p => p>85?"#dc2626":p>70?"#f59e0b":"#16a34a";
 let   seq    = 300;
-const uid    = p => `${p}-${++seq}`;
+const uid    = p => CLOUD_ON ? (p + "-" + Date.now().toString(36) + Math.random().toString(36).slice(2,6)) : `${p}-${++seq}`;
 const today  = () => new Date().toISOString().slice(0,10);
 const currentMonthLabel = () => new Date().toLocaleDateString("en-GB",{month:"long",year:"numeric"});
 const currentMonthShort = () => new Date().toLocaleDateString("en-GB",{month:"short",year:"numeric"});
@@ -5383,6 +5383,221 @@ class ErrorBoundary extends React.Component {
 }
 
 // == LOGIN PAGE ===============================
+// == CLOUD: login, data panel, app shell =============================
+function CloudLogin({sb, onSignedIn, startMode}) {
+  const [mode,  setMode]  = React.useState(startMode||"in");
+  const [email, setEmail] = React.useState("");
+  const [pw,    setPw]    = React.useState("");
+  const [pw2,   setPw2]   = React.useState("");
+  const [err,   setErr]   = React.useState("");
+  const [info,  setInfo]  = React.useState("");
+  const [busy,  setBusy]  = React.useState(false);
+
+  const friendly = (e) => {
+    const m = (e && e.message) ? e.message : String(e);
+    if(/database error/i.test(m) || /No ISMS profile/i.test(m)) return "This email is not registered in ISMS. Ask your manager or administrator to add you first.";
+    if(/invalid login/i.test(m)) return "Incorrect email or password.";
+    if(/already registered/i.test(m)) return "This email already has an account. Use Sign in.";
+    return m;
+  };
+
+  const submit = async () => {
+    setErr(""); setInfo("");
+    const em = email.trim().toLowerCase();
+    if(mode!=="recover" && !em) { setErr("Enter your email address"); return; }
+    setBusy(true);
+    try {
+      if(mode==="forgot") {
+        const r = await sb.auth.resetPasswordForEmail(em, {redirectTo: window.location.origin});
+        if(r.error) throw r.error;
+        setInfo("If this email is registered, a reset link is on its way.");
+      } else if(mode==="in") {
+        if(!pw) { setErr("Enter your password"); setBusy(false); return; }
+        const r = await sb.auth.signInWithPassword({email:em, password:pw});
+        if(r.error) throw r.error;
+        await onSignedIn();
+      } else {
+        if(pw.length < 8) { setErr("Password must be at least 8 characters"); setBusy(false); return; }
+        if(pw !== pw2)    { setErr("Passwords do not match"); setBusy(false); return; }
+        if(mode==="up") {
+          const r = await sb.auth.signUp({email:em, password:pw});
+          if(r.error) throw r.error;
+          if(r.data && r.data.session) await onSignedIn();
+          else setInfo("Account created. Check your email to confirm it, then sign in.");
+        } else {
+          const r = await sb.auth.updateUser({password:pw});
+          if(r.error) throw r.error;
+          await onSignedIn();
+        }
+      }
+    } catch(e) { setErr(friendly(e)); }
+    setBusy(false);
+  };
+
+  const title = mode==="in" ? "Sign in" : mode==="up" ? "Activate your account" : mode==="forgot" ? "Reset password" : "Choose a new password";
+  const sub   = mode==="in" ? "Use your work email and password"
+              : mode==="up" ? "Your manager or admin must have added your email first"
+              : mode==="forgot" ? "We will email you a reset link" : "Enter and confirm your new password";
+  const fld = {width:"100%",padding:"10px 12px",borderRadius:"var(--radius-md)",border:"1px solid var(--border-2)",fontSize:14,fontFamily:"var(--font-sans)",background:"#fff",color:"var(--text-1)"};
+  const lbl = {fontSize:12,fontWeight:600,color:"var(--text-2)",marginBottom:5};
+
+  return (
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"var(--hero-bg)",padding:20,fontFamily:"var(--font-sans)"}}>
+      <div style={{width:400,maxWidth:"100%",background:"#fff",borderRadius:"var(--radius-xl)",boxShadow:"var(--shadow-xl)",padding:"30px 30px 24px"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:20}}>
+          <div style={{width:36,height:36,borderRadius:"var(--radius-md)",background:"var(--brand)",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:14}}>IS</div>
+          <div>
+            <div style={{fontWeight:800,fontSize:16,color:"var(--text-1)"}}>ISMS</div>
+            <div style={{fontSize:11,color:"var(--text-3)"}}>Infra Service Management</div>
+          </div>
+        </div>
+        <div style={{fontSize:18,fontWeight:700,color:"var(--text-1)"}}>{title}</div>
+        <div style={{fontSize:12.5,color:"var(--text-3)",margin:"4px 0 18px"}}>{sub}</div>
+
+        {mode!=="recover" && (
+          <div style={{marginBottom:12}}>
+            <div style={lbl}>Email</div>
+            <input style={fld} type="email" value={email} autoComplete="username" placeholder="you@company.com"
+              onChange={e=>setEmail(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") submit(); }}/>
+          </div>
+        )}
+        {mode!=="forgot" && (
+          <div style={{marginBottom:12}}>
+            <div style={lbl}>{mode==="in" ? "Password" : "New password (min 8 characters)"}</div>
+            <input style={fld} type="password" value={pw} autoComplete={mode==="in"?"current-password":"new-password"}
+              onChange={e=>setPw(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") submit(); }}/>
+          </div>
+        )}
+        {(mode==="up" || mode==="recover") && (
+          <div style={{marginBottom:12}}>
+            <div style={lbl}>Confirm password</div>
+            <input style={fld} type="password" value={pw2} autoComplete="new-password"
+              onChange={e=>setPw2(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") submit(); }}/>
+          </div>
+        )}
+
+        {err  && <div style={{background:"#fef2f2",border:"1px solid #fecaca",color:"#b91c1c",borderRadius:"var(--radius-md)",padding:"9px 12px",fontSize:12.5,marginBottom:12}}>{err}</div>}
+        {info && <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",color:"#166534",borderRadius:"var(--radius-md)",padding:"9px 12px",fontSize:12.5,marginBottom:12}}>{info}</div>}
+
+        <button onClick={submit} disabled={busy}
+          style={{width:"100%",padding:"11px 0",borderRadius:"var(--radius-md)",border:"none",background:"var(--brand)",color:"#fff",fontWeight:700,fontSize:14,cursor:busy?"wait":"pointer",opacity:busy?.7:1}}>
+          {busy ? "Please wait..." : mode==="in" ? "Sign in" : mode==="up" ? "Activate account" : mode==="forgot" ? "Send reset link" : "Save password"}
+        </button>
+
+        {mode!=="recover" && (
+          <div style={{display:"flex",justifyContent:"space-between",marginTop:16,fontSize:12.5}}>
+            {mode==="in"
+              ? <span style={{color:"var(--brand)",cursor:"pointer",fontWeight:600}} onClick={()=>{setMode("up");setErr("");setInfo("");}}>First time? Activate account</span>
+              : <span style={{color:"var(--brand)",cursor:"pointer",fontWeight:600}} onClick={()=>{setMode("in");setErr("");setInfo("");}}>Back to sign in</span>}
+            {mode==="in" && <span style={{color:"var(--text-3)",cursor:"pointer"}} onClick={()=>{setMode("forgot");setErr("");setInfo("");}}>Forgot password?</span>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CloudDataPanel({cloud, syncState, syncErr}) {
+  const [busy, setBusy] = React.useState(false);
+  const [msg,  setMsg]  = React.useState("");
+  const counts = Object.keys(CLOUD_COLL).map(k=>k+": "+cloud.snaps[k].size).join("   ·   ");
+  const migrate = async () => {
+    if(!window.confirm("Upload the data saved in THIS browser to the cloud database?\n\nRows with the same ID are overwritten. Nothing is deleted.")) return;
+    setBusy(true); setMsg("");
+    try {
+      const keys = {users:"isms_users", acts:"isms_acts", logs:"isms_logs", mis:"isms_mis"};
+      let total = 0;
+      for(const k of Object.keys(keys)) {
+        const raw = localStorage.getItem(keys[k]);
+        if(!raw) continue;
+        let arr = JSON.parse(raw);
+        if(!Array.isArray(arr)) continue;
+        if(k==="acts") arr = arr.filter(a=>!a.isMajorIncident);
+        if(!arr.length) continue;
+        await cloudPush(cloud.sb, k, arr, new Map());
+        total += arr.length;
+      }
+      setMsg("Uploaded " + total + " records. Reload the page to see them.");
+    } catch(e) { setMsg("Upload failed: " + (e.message || String(e))); }
+    setBusy(false);
+  };
+  return (
+    <div>
+      <div style={{background:"#f0fdf4",border:"1px solid #86efac",borderRadius:"var(--radius-md)",padding:14,marginBottom:16}}>
+        <div style={{fontSize:12,fontWeight:600,color:"#15803d",marginBottom:6}}>Cloud database connected</div>
+        <div style={{fontSize:11,color:"#4b5563"}}>Changes are saved automatically to your Supabase database and are shared by everyone who signs in.</div>
+        <div style={{fontSize:11,color:"#4b5563",marginTop:6,fontFamily:"var(--font-mono)"}}>{counts}</div>
+        <div style={{fontSize:11,marginTop:6,color:syncState==="error"?"#b91c1c":"#4b5563"}}>Sync status: {syncState==="error" ? ("error - " + syncErr) : syncState}</div>
+      </div>
+      <div style={{borderTop:"1px solid var(--border)",paddingTop:16}}>
+        <div style={{fontWeight:600,fontSize:13,marginBottom:8,color:"var(--text-1)"}}>Move data saved in this browser to the cloud</div>
+        <div style={{fontSize:12,color:"var(--text-3)",marginBottom:12}}>Use this once if you created users, activities or time logs while the portal was using browser storage. Only needed from the browser that holds that data.</div>
+        <button onClick={migrate} disabled={busy}
+          style={{padding:"9px 16px",borderRadius:"var(--radius-sm)",background:"var(--brand)",border:"none",color:"#fff",fontWeight:600,fontSize:12,cursor:busy?"wait":"pointer"}}>
+          {busy ? "Uploading..." : "Upload this browser's data to cloud"}
+        </button>
+        {msg && <div style={{fontSize:12,marginTop:10,color:"var(--text-2)"}}>{msg}</div>}
+      </div>
+    </div>
+  );
+}
+
+function CloudApp() {
+  const [phase, setPhase] = React.useState("boot");   // boot | login | recover | loading | ready | error
+  const [ctx,   setCtx]   = React.useState(null);
+  const [err,   setErr]   = React.useState("");
+  const sbRef = React.useRef(null);
+  const recoverRef = React.useRef(false);
+
+  const openSession = async (sb) => {
+    setPhase("loading");
+    const au = await sb.auth.getUser();
+    if(au.error || !au.data || !au.data.user) { setPhase("login"); throw new Error("Sign-in failed. Please try again."); }
+    const pr = await sb.from("profiles").select("id,data,name,role,team,status").eq("auth_id", au.data.user.id).maybeSingle();
+    if(pr.error || !pr.data) {
+      await sb.auth.signOut();
+      setPhase("login");
+      throw new Error("Your account is not linked to an ISMS profile. Contact your administrator.");
+    }
+    let data;
+    try { data = await cloudLoadAll(sb); }
+    catch(e) { setErr(e.message || String(e)); setPhase("error"); return; }
+    const snaps = {};
+    Object.keys(CLOUD_COLL).forEach(k=>{ snaps[k] = cloudSnap(k, data[k]); });
+    const row = pr.data;
+    const me = {...row.data, id:row.id, name:row.name, role:row.role, team:row.team, status:row.status, mustReset:false};
+    setCtx({sb:sb, data:data, snaps:snaps, me:me});
+    setPhase("ready");
+  };
+
+  React.useEffect(()=>{
+    (async ()=>{
+      try {
+        const sb = await getSb();
+        sbRef.current = sb;
+        sb.auth.onAuthStateChange((ev)=>{ if(ev==="PASSWORD_RECOVERY") { recoverRef.current = true; setPhase("recover"); } });
+        const s = await sb.auth.getSession();
+        if(s.data && s.data.session) {
+          await new Promise(r=>setTimeout(r,80));   // let a password-recovery event arrive first
+          if(!recoverRef.current) await openSession(sb).catch(()=>{});
+        } else setPhase("login");
+      } catch(e) { setErr(e.message || String(e)); setPhase("error"); }
+    })();
+  }, []);
+
+  const center = {minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"var(--font-sans)",color:"var(--text-3)",fontSize:14,textAlign:"center",padding:20};
+  if(phase==="boot" || phase==="loading") return <div style={center}>Loading ISMS...</div>;
+  if(phase==="error") return (
+    <div style={center}><div>
+      <div style={{fontSize:16,fontWeight:700,color:"#b91c1c",marginBottom:8}}>Could not connect to the cloud database</div>
+      <div style={{maxWidth:460,marginBottom:14}}>{err}</div>
+      <button onClick={()=>window.location.reload()} style={{padding:"9px 20px",borderRadius:"var(--radius-md)",border:"none",background:"var(--brand)",color:"#fff",fontWeight:600,cursor:"pointer"}}>Retry</button>
+    </div></div>
+  );
+  if(phase==="login" || phase==="recover") return <CloudLogin sb={sbRef.current} startMode={phase==="recover"?"recover":"in"} onSignedIn={()=>openSession(sbRef.current)}/>;
+  return <PortalApp initialUser={ctx.me} allUsersInit={ctx.data.users} cloud={ctx}/>;
+}
+
 function LoginPage({allUsers, onLogin}) {
   const [cred,       setCred]       = React.useState({username:"", password:""});
   const [showPw,     setShowPw]     = React.useState(false);
@@ -5827,6 +6042,74 @@ function LogTimeTable({ loggable, logs, user, onClose, onLog, showToast }) {
   );
 }
 
+// == CLOUD STORAGE (Supabase) ======================================
+// Paste your Supabase project values below to store data in the cloud.
+// Leave both empty to keep using browser storage (local mode).
+const CLOUD_URL = "https://mtmqnnrqfxnklpfdfayg.supabase.co";   // e.g. https://abcdxyz.supabase.co
+const CLOUD_KEY = "sb_secret_206r8cnNRyy7oDQ8_P-77g_fdaP0jvV";   // the public "anon" key (safe to expose; never use the service_role key here)
+const CLOUD_ON  = !!(CLOUD_URL && CLOUD_KEY);
+let _sb = null;
+const getSb = async () => {
+  if(_sb) return _sb;
+  const m = await import(/* @vite-ignore */ "https://esm.sh/@supabase/supabase-js@2.45.4");
+  _sb = m.createClient(CLOUD_URL, CLOUD_KEY, {auth:{persistSession:true, autoRefreshToken:true}});
+  return _sb;
+};
+const _noPw = u => { const d = {...u}; delete d.password; return d; };
+const CLOUD_COLL = {
+  users:{table:"profiles", pk:"id", sel:"data,name,role,team,status",
+    key:u=>u.id,
+    out:r=>({...r.data, name:r.name, role:r.role, team:r.team, status:r.status}),
+    row:u=>({id:u.id, email:(u.email||"").trim().toLowerCase(), username:u.username||null, name:u.name||"", role:u.role||"member", team:u.team||null, status:u.status||"Active", data:_noPw(u)})},
+  teams:{table:"teams", pk:"name", sel:"data", key:t=>t.name, out:r=>r.data, row:t=>({name:t.name, data:t})},
+  acts: {table:"activities", pk:"id", sel:"data", key:a=>a.id, out:r=>r.data, row:a=>({id:a.id, team:a.team||null, data:a})},
+  logs: {table:"time_logs", pk:"id", sel:"data", key:l=>l.id, out:r=>r.data, row:l=>({id:l.id, user_id:l.userId||null, team:l.team||null, log_date:l.date||null, data:l})},
+  mis:  {table:"major_incidents", pk:"id", sel:"data", key:m=>m.id, out:r=>r.data, row:m=>({id:m.id, data:m})}
+};
+async function cloudLoadAll(sb) {
+  const out = {};
+  for(const name of Object.keys(CLOUD_COLL)) {
+    const c = CLOUD_COLL[name];
+    const rows = [];
+    let from = 0;
+    for(;;) {
+      const res = await sb.from(c.table).select(c.sel).order("seq",{ascending:true}).range(from, from+999);
+      if(res.error) throw res.error;
+      res.data.forEach(r=>rows.push(c.out(r)));
+      if(res.data.length < 1000) break;
+      from += 1000;
+    }
+    out[name] = rows;
+  }
+  return out;
+}
+const cloudSnap = (name, items) => new Map(items.map(it=>[CLOUD_COLL[name].key(it), JSON.stringify(it)]));
+// Sends only what changed since the last sync (snap = Map key -> JSON string)
+async function cloudPush(sb, name, items, snap) {
+  const c = CLOUD_COLL[name];
+  const up = [];
+  const seen = new Set();
+  items.forEach(it=>{
+    const k = c.key(it); seen.add(k);
+    const j = JSON.stringify(it);
+    if(snap.get(k) !== j) up.push({k:k, j:j, row:c.row(it)});
+  });
+  const del = [];
+  snap.forEach((v,k)=>{ if(!seen.has(k)) del.push(k); });
+  for(let i=0; i<up.length; i+=400) {
+    const chunk = up.slice(i, i+400);
+    const res = await sb.from(c.table).upsert(chunk.map(x=>x.row), {onConflict:c.pk});
+    if(res.error) throw res.error;
+    chunk.forEach(x=>snap.set(x.k, x.j));
+  }
+  for(let i=0; i<del.length; i+=200) {
+    const chunk = del.slice(i, i+200);
+    const res = await sb.from(c.table).delete().in(c.pk, chunk);
+    if(res.error) throw res.error;
+    chunk.forEach(k=>snap.delete(k));
+  }
+}
+
 // == DATA VERSION CHECK — runs synchronously before any React state initialises ==
 // Bumping DATA_VERSION clears stale localStorage so fresh seed data always loads
 (function() {
@@ -5840,9 +6123,10 @@ function LogTimeTable({ loggable, logs, user, onClose, onLog, showToast }) {
   } catch(e) {}
 })();
 
-function PortalApp({initialUser, allUsersInit}) {
+function PortalApp({initialUser, allUsersInit, cloud}) {
   // Load users from localStorage if available, otherwise use initial
   const [allUsers,   setAllUsers]   = useState(() => {
+    if(cloud) return cloud.data.users;
     try {
       const saved = localStorage.getItem('isms_users');
       if(!saved) return allUsersInit||SEED_USERS;
@@ -5866,26 +6150,30 @@ function PortalApp({initialUser, allUsersInit}) {
 
   // Save users to localStorage whenever they change
   React.useEffect(() => {
+    if(cloud) return;
     try {
       localStorage.setItem('isms_users', JSON.stringify(allUsers));
     } catch (e) {
       console.error('Failed to save users:', e);
     }
   }, [allUsers]);
-  const [teams,      setTeams]      = useState(SEED_TEAMS);
+  const [teams,      setTeams]      = useState(cloud ? cloud.data.teams : SEED_TEAMS);
   const tCol = t => (teams||SEED_TEAMS).find(x=>x.name===t)?.color || "var(--text-3)";
   const [user,       setUser]       = useState(initialUser);
   const [mustReset,  setMustReset]  = useState(initialUser?.mustReset||false);
 
   // When a different user logs in, update user state without remounting PortalApp
   // (remounting would reset acts/logs back to SEED data)
+  const firstUserRun = React.useRef(true);
   React.useEffect(()=>{
     setUser(initialUser);
     setMustReset(initialUser?.mustReset||false);
+    if(firstUserRun.current) { firstUserRun.current = false; return; }
     setPage("dashboard");
   }, [initialUser?.id]);
   const [page,       setPage]       = useState(()=>{ try { return sessionStorage.getItem("isms_page") || "dashboard"; } catch (e) { return "dashboard"; } });
   const [acts,       setActs]       = useState(()=>{
+    if(cloud) return cloud.data.acts;
     try {
       const s = localStorage.getItem('isms_acts');
       if (!s) return SEED_ACT;
@@ -5906,6 +6194,7 @@ function PortalApp({initialUser, allUsersInit}) {
     } catch(e) { return SEED_ACT; }
   });
   const [mis,        setMis]        = useState(()=>{
+    if(cloud) return cloud.data.mis;
     try {
       const s = localStorage.getItem('isms_mis');
       if (!s) return SEED_MI;
@@ -5916,6 +6205,7 @@ function PortalApp({initialUser, allUsersInit}) {
     } catch(e) { return SEED_MI; }
   });
   const [logs,       setLogs]       = useState(()=>{
+    if(cloud) return cloud.data.logs;
     try {
       const s = localStorage.getItem('isms_logs');
       if(!s) return SEED_LOGS;
@@ -5931,9 +6221,30 @@ function PortalApp({initialUser, allUsersInit}) {
   const [miModal,    setMiModal]    = useState(false); // create/edit Major Incident
 
   // Persist acts and logs whenever they change
-  React.useEffect(()=>{ try{ localStorage.setItem('isms_acts', JSON.stringify(acts)); }catch(e){} }, [acts]);
-  React.useEffect(()=>{ try{ localStorage.setItem('isms_mis',  JSON.stringify(mis));  }catch(e){} }, [mis]);
-  React.useEffect(()=>{ try{ localStorage.setItem('isms_logs', JSON.stringify(logs)); }catch(e){} }, [logs]);
+  React.useEffect(()=>{ if(cloud) return; try{ localStorage.setItem('isms_acts', JSON.stringify(acts)); }catch(e){} }, [acts]);
+  React.useEffect(()=>{ if(cloud) return; try{ localStorage.setItem('isms_mis',  JSON.stringify(mis));  }catch(e){} }, [mis]);
+  React.useEffect(()=>{ if(cloud) return; try{ localStorage.setItem('isms_logs', JSON.stringify(logs)); }catch(e){} }, [logs]);
+
+  // Cloud sync: debounced diff-upload of each collection to Supabase
+  const [syncState, setSyncState] = useState("idle");
+  const [syncErr,   setSyncErr]   = useState("");
+  const syncTimers = React.useRef({});
+  const cloudSave = (name, items) => {
+    if(!cloud) return;
+    clearTimeout(syncTimers.current[name]);
+    syncTimers.current[name] = setTimeout(async ()=>{
+      try {
+        setSyncState("saving");
+        await cloudPush(cloud.sb, name, items, cloud.snaps[name]);
+        setSyncState("saved"); setSyncErr("");
+      } catch(e) { console.error("Cloud sync failed:", e); setSyncErr(e.message || String(e)); setSyncState("error"); }
+    }, 700);
+  };
+  React.useEffect(()=>{ cloudSave("users", allUsers); }, [allUsers]);
+  React.useEffect(()=>{ cloudSave("teams", teams);    }, [teams]);
+  React.useEffect(()=>{ cloudSave("acts",  acts);     }, [acts]);
+  React.useEffect(()=>{ cloudSave("mis",   mis);      }, [mis]);
+  React.useEffect(()=>{ cloudSave("logs",  logs);     }, [logs]);
   const [modal,      setModal]      = useState(null);
   const [target,     setTarget]     = useState(null);
   const [toast,      setToast]      = useState(null);
@@ -6255,7 +6566,11 @@ function PortalApp({initialUser, allUsersInit}) {
 
   // handleLogin not needed in PortalApp — login handled by outer App wrapper
 
-  const handleLogout = () => { try { sessionStorage.removeItem('isms_session'); sessionStorage.removeItem('isms_page'); } catch (e) {} window.location.reload(); };
+  const handleLogout = () => {
+    try { sessionStorage.removeItem('isms_session'); sessionStorage.removeItem('isms_page'); } catch (e) {}
+    if(cloud) { cloud.sb.auth.signOut().then(()=>window.location.reload(), ()=>window.location.reload()); return; }
+    window.location.reload();
+  };
 
   // derived
   const teamActs  = useMemo(()=>isAdmin ? acts : acts.filter(a=>a.team===(user?.team)),[acts,user,isAdmin]);
@@ -8491,7 +8806,7 @@ function PortalApp({initialUser, allUsersInit}) {
           username:mForm.name.toLowerCase().replace(/\s+/g,"."),
           password:"Member@123",status:"Active",lastLogin:null,mustReset:true,costPerHour:55};
         setAllUsers(p=>[...p,nu]);
-        showToast(`${nu.name} added — default password: Member@123`);
+        showToast(CLOUD_ON ? (nu.name+" added - they activate their account on the login page") : `${nu.name} added — default password: Member@123`);
       }
       setMModal(null);
     };
@@ -10121,6 +10436,8 @@ function PortalApp({initialUser, allUsersInit}) {
           <Card>
             <div style={{fontWeight:700,fontSize:13,marginBottom:4}}>💾 Data Management</div>
             <div style={{fontSize:12,color:"var(--text-3)",marginBottom:16}}>Manage and persist application data</div>
+            {cloud && <CloudDataPanel cloud={cloud} syncState={syncState} syncErr={syncErr}/>}
+            {!cloud && (<>
             <div style={{background:"#f0fdf4",border:"1px solid #86efac",borderRadius:"var(--radius-md)",padding:14,marginBottom:16}}>
               <div style={{fontSize:12,fontWeight:600,color:"#15803d",marginBottom:6}}>✓ Data Persistence Enabled</div>
               <div style={{fontSize:11,color:"#4b5563"}}>All users, teams, and settings are automatically saved to your browser's local storage and persist across sessions.</div>
@@ -10147,6 +10464,7 @@ function PortalApp({initialUser, allUsersInit}) {
                 </div>
               </div>
             </div>
+            </>)}
           </Card>
         )}
       </div>
@@ -11811,7 +12129,7 @@ function PortalApp({initialUser, allUsersInit}) {
     const saveUser = () => {
       if(!uForm.name.trim())  { showToast("Full name is required","err"); return; }
       if(!uForm.email.trim()) { showToast("Email is required","err");     return; }
-      if(!uTarget && !uForm.password) { showToast("Password required for new users","err"); return; }
+      if(!uTarget && !uForm.password && !CLOUD_ON) { showToast("Password required for new users","err"); return; }
       if(isMgr && uForm.role!=="member") { showToast("Managers can only add Members","err"); return; }
       if(uTarget) {
         const update = {...uTarget,...uForm};
@@ -11823,7 +12141,7 @@ function PortalApp({initialUser, allUsersInit}) {
         const newU={id:uid("USR"),name:uForm.name.trim(),email:uForm.email.trim(),username:uForm.email.split("@")[0].replace(/[^a-z0-9.]/gi,"."),password:uForm.password,title:uForm.title,team:uForm.team||null,role:uForm.role,status:"Active",costPerHour:uForm.costPerHour||0,engineerLevel:uForm.engineerLevel||"L2",lastLogin:null,mustReset:false};
         setAllUsers(p=>[...p,newU]);
         addAudit("Created user",newU.name,"Role: "+newU.role+" · Level: "+newU.engineerLevel+" · Team: "+(newU.team||"None"));
-        showToast(newU.name+" created");
+        showToast(CLOUD_ON ? (newU.name+" added - ask them to choose Activate account on the login page") : (newU.name+" created"));
       }
       setUModal(false);
     };
@@ -12111,7 +12429,7 @@ function PortalApp({initialUser, allUsersInit}) {
               </div>
               <Lbl t="Job Title"><input style={iS2} value={uForm.title||""} onChange={e=>setUForm(p=>({...p,title:e.target.value}))} placeholder="e.g. Network Engineer"/></Lbl>
               <Lbl t="Email *"><input style={iS2} type="email" value={uForm.email} onChange={e=>setUForm(p=>({...p,email:e.target.value}))} placeholder="john@company.com"/></Lbl>
-              {!uTarget && (
+              {!uTarget && !CLOUD_ON && (
                 <Lbl t="Password *"><input style={iS2} type="password" value={uForm.password||""} onChange={e=>setUForm(p=>({...p,password:e.target.value}))} placeholder="Min 6 chars"/></Lbl>
               )}
               <Lbl t={isMgr?"Team (fixed)":"Team"}>
@@ -12294,13 +12612,21 @@ function PortalApp({initialUser, allUsersInit}) {
     const strengthColor = ["","#ef4444","#f97316","#eab308","#22c55e","#16a34a"][strength];
     const allRules = rules.every(r=>r.ok);
 
-    const save = () => {
+    const save = async () => {
       setErr("");
       if(!cur){ setErr("Enter your current password"); return; }
-      if(user.password !== cur){ setErr("Current password is incorrect"); return; }
+      if(!cloud && user.password !== cur){ setErr("Current password is incorrect"); return; }
       if(!allRules){ setErr("New password does not meet all requirements"); return; }
       if(np !== cp){ setErr("Passwords do not match"); return; }
       if(np === cur){ setErr("New password must be different from current password"); return; }
+      if(cloud) {
+        const chk = await cloud.sb.auth.signInWithPassword({email:user.email, password:cur});
+        if(chk.error){ setErr("Current password is incorrect"); return; }
+        const upd = await cloud.sb.auth.updateUser({password:np});
+        if(upd.error){ setErr(upd.error.message); return; }
+        setDone(true);
+        return;
+      }
       setAllUsers(p=>p.map(u=>u.id===user.id?{...u,password:np,mustReset:false}:u));
       setUser(p=>({...p,password:np}));
       setDone(true);
@@ -15707,6 +16033,12 @@ function PortalApp({initialUser, allUsersInit}) {
   return (
     <div style={{display:"flex",height:"100vh",fontFamily:"var(--font-sans)",background:"var(--surface-3)",overflow:"hidden",position:"relative"}}>
 
+      {cloud && (
+        <div title={syncErr} style={{position:"absolute",right:16,bottom:12,zIndex:900,padding:"4px 12px",borderRadius:20,fontSize:11,fontWeight:600,boxShadow:"var(--shadow-md)",
+          background:syncState==="error"?"#fef2f2":"#fff",border:"1px solid "+(syncState==="error"?"#fecaca":"var(--border)"),color:syncState==="error"?"#b91c1c":syncState==="saving"?"#b45309":"#15803d"}}>
+          {syncState==="saving" ? "Saving..." : syncState==="error" ? "Not saved - " + syncErr : "Cloud synced"}
+        </div>
+      )}
       {/* == SIDEBAR == */}
       <div style={{width:"var(--sidebar-w)",minWidth:"var(--sidebar-w)",height:"100vh",background:"var(--sidebar-bg)",display:"flex",flexDirection:"column",overflow:"visible",flexShrink:0,borderRight:"1px solid var(--border)",boxShadow:"1px 0 8px rgba(16,24,40,.04)",zIndex:100}}>
 
@@ -16471,7 +16803,7 @@ function PortalApp({initialUser, allUsersInit}) {
 // == APP ENTRY POINT ==========================
 // Thin wrapper: shows Login or the full Portal
 // Keeping login OUTSIDE PortalApp avoids React hook #310 error
-export default function App() {
+function LocalApp() {
   const [authUser, setAuthUser] = useState(() => {
     try {
       const sid = sessionStorage.getItem('isms_session');
@@ -16516,4 +16848,8 @@ export default function App() {
   }
 
   return <PortalApp initialUser={authUser} allUsersInit={allUsersForLogin}/>;
+}
+
+export default function App() {
+  return CLOUD_ON ? <CloudApp/> : <LocalApp/>;
 }
