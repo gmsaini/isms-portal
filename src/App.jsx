@@ -6089,7 +6089,9 @@ async function cloudLoadAll(sb) {
   }
   return out;
 }
-const cloudSnap = (name, items) => new Map(items.map(it=>[CLOUD_COLL[name].key(it), JSON.stringify(it)]));
+const _canon = (v) => JSON.stringify(v, (k, x) => (x && typeof x === "object" && !Array.isArray(x)) ? Object.keys(x).sort().reduce((o, kk) => { o[kk] = x[kk]; return o; }, {}) : x);
+const cloudSnap = (name, items) => new Map(items.map(it=>[CLOUD_COLL[name].key(it), _canon(it)]));
+const cloudSnapSame = (a, b) => { if(a.size !== b.size) return false; for(const [k,v] of a) { if(b.get(k) !== v) return false; } return true; };
 // Sends only what changed since the last sync (snap = Map key -> JSON string)
 async function cloudPush(sb, name, items, snap) {
   const c = CLOUD_COLL[name];
@@ -6097,7 +6099,7 @@ async function cloudPush(sb, name, items, snap) {
   const seen = new Set();
   items.forEach(it=>{
     const k = c.key(it); seen.add(k);
-    const j = JSON.stringify(it);
+    const j = _canon(it);
     if(snap.get(k) !== j) up.push({k:k, j:j, row:c.row(it)});
   });
   const del = [];
@@ -6235,17 +6237,45 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
   const [syncState, setSyncState] = useState("idle");
   const [syncErr,   setSyncErr]   = useState("");
   const syncTimers = React.useRef({});
+  const syncDirty = React.useRef({});
   const cloudSave = (name, items) => {
     if(!cloud) return;
+    if(cloudSnapSame(cloudSnap(name, items), cloud.snaps[name])) return;   // nothing changed
     clearTimeout(syncTimers.current[name]);
-    syncTimers.current[name] = setTimeout(async ()=>{
+    syncDirty.current[name] = true;
+    const mine = setTimeout(async ()=>{
       try {
         setSyncState("saving");
         await cloudPush(cloud.sb, name, items, cloud.snaps[name]);
+        if(syncTimers.current[name] === mine) syncDirty.current[name] = false;
         setSyncState("saved"); setSyncErr("");
       } catch(e) { console.error("Cloud sync failed:", e); setSyncErr(e.message || String(e)); setSyncState("error"); }
     }, 700);
+    syncTimers.current[name] = mine;
   };
+  // Pull changes made by other people (new activities, logs, members) every 30s and when the tab regains focus
+  React.useEffect(()=>{
+    if(!cloud) return;
+    let stop = false, busy = false;
+    const setters = {users:setAllUsers, teams:setTeams, acts:setActs, mis:setMis, logs:setLogs};
+    const pull = async () => {
+      if(stop || busy || document.hidden) return;
+      if(Object.values(syncDirty.current).some(Boolean)) return;   // unsaved local edits - do not overwrite
+      busy = true;
+      try {
+        const fresh = await cloudLoadAll(cloud.sb);
+        if(Object.values(syncDirty.current).some(Boolean)) { busy = false; return; }
+        Object.keys(setters).forEach(k=>{
+          const ns = cloudSnap(k, fresh[k]);
+          if(!cloudSnapSame(ns, cloud.snaps[k])) { cloud.snaps[k] = ns; setters[k](fresh[k]); }
+        });
+      } catch(e) { console.warn("Cloud refresh failed:", e); }
+      busy = false;
+    };
+    const iv = setInterval(pull, 30000);
+    window.addEventListener("focus", pull);
+    return ()=>{ stop = true; clearInterval(iv); window.removeEventListener("focus", pull); };
+  }, []);
   React.useEffect(()=>{ cloudSave("users", allUsers); }, [allUsers]);
   React.useEffect(()=>{ cloudSave("teams", teams);    }, [teams]);
   React.useEffect(()=>{ cloudSave("acts",  acts);     }, [acts]);
@@ -6639,7 +6669,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
         const n = parseInt((a.id||"").replace("ACT-",""),10)||0;
         return n>max?n:max;
       },0)+1;
-      const nextId = `ACT-${String(nextN).padStart(3,"0")}`;
+      const nextId = CLOUD_ON ? uid("ACT") : `ACT-${String(nextN).padStart(3,"0")}`;
       setActs(p=>[{...aForm,id:nextId,team:aForm.team||user.team,date:today()},...p]);
       showToast(`"${aForm.name}" created`);
     }
