@@ -6687,7 +6687,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     if(!lForm.actId){ showToast("Select an activity","err"); return; }
     if(lForm.mins<1){ showToast("Enter minutes > 0","err"); return; }
     const act = acts.find(a=>a.id===lForm.actId) || mis.find(m=>m.id===lForm.actId); if(!act) return;
-    const ticketRef  = lForm.ticketRef||"";
+    const ticketRef  = (lForm.ticketRef||"").trim() || act.ticketNo || act.jira || "";
     const nature     = lForm.nature||"Proactive";
     const workType   = lForm.workType||"Project";
     const workNature = lForm.workNature||"Change";
@@ -7082,7 +7082,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
 
                         {/* Log button */}
                         <td style={{padding:"10px 14px",whiteSpace:"nowrap"}}>
-                          <button onClick={()=>{setLForm({...bLog,actId:a.id});setModal("log");}}
+                          <button onClick={()=>{setLForm({...bLog,actId:a.id,cat:a.cat||"",ticketRef:a.ticketNo||a.jira||""});setModal("log");}}
                             style={{padding:"8px 16px",borderRadius:"var(--radius-md)",
                               background:`linear-gradient(135deg,${col},${col}cc)`,
                               color:"#fff",border:"none",fontWeight:700,fontSize:12,
@@ -8460,7 +8460,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
               </div>
             )}
             <div style={{background:"var(--brand-light)",border:"1px solid #bfdbfe",borderRadius:"var(--radius-md)",padding:"8px 14px",fontSize:13,fontWeight:700,color:"var(--brand)"}}>{fmtM(total)} · {viewLogs.length} entries</div>
-            {!isAdmin && <Btn onClick={()=>{setLForm(bLog);setModal("logtbl");}}>⏱ Log Time</Btn>}
+            {!isAdmin && <Btn onClick={()=>{setTarget(null);setLForm(bLog);setModal("log");}}>⏱ Log Time</Btn>}
           </div>
         </div>
 
@@ -8586,7 +8586,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
                   <SortTH col="cat"        label="Category"/>
                   <SortTH col="mins"       label="Time" right/>
                   <th style={{padding:"10px 12px",textAlign:"left",fontSize:11,fontWeight:700,color:"var(--text-4)",textTransform:"uppercase",letterSpacing:.7,background:"var(--surface-2)",borderBottom:"2px solid var(--border)"}}>Notes</th>
-                  {isMgrOrAdmin && <th style={{padding:"10px 12px",textAlign:"left",fontSize:11,fontWeight:700,color:"var(--text-4)",textTransform:"uppercase",letterSpacing:.7,background:"var(--surface-2)",borderBottom:"2px solid var(--border)"}}/>}
+                  <th style={{padding:"10px 12px",textAlign:"left",fontSize:11,fontWeight:700,color:"var(--text-4)",textTransform:"uppercase",letterSpacing:.7,background:"var(--surface-2)",borderBottom:"2px solid var(--border)"}}/>
                 </tr>
               </thead>
               <tbody>
@@ -8626,7 +8626,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
                         <div style={{fontSize:9,color:"var(--text-4)",fontFamily:"var(--font-mono)"}}>{l.mins}m</div>
                       </TD>
                       <TD s={{fontSize:11,color:"var(--text-3)",maxWidth:180,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{l.notes||"—"}</TD>
-                      {isMgrOrAdmin && <TD><div style={{display:"flex",gap:5}}><Btn sm v="sec" onClick={()=>openEditL(l)}>✏️</Btn><Btn sm v="dan" onClick={()=>delLog(l.id)}>🗑</Btn></div></TD>}
+                      <TD>{(isMgrOrAdmin || l.userId===user.id) && <div style={{display:"flex",gap:5}}><Btn sm v="sec" onClick={()=>openEditL(l)}>✏️ Edit</Btn><Btn sm v="dan" onClick={()=>{ if(window.confirm("Delete this time entry?")) delLog(l.id); }}>🗑</Btn></div>}</TD>
                     </tr>
                   );
                 })}
@@ -15927,7 +15927,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       : allOptions;
 
     const selectAct = (a) => {
-      setLForm(f=>({...f, actId:a.id, cat:a.cat||""}));
+      setLForm(f=>({...f, actId:a.id, cat:a.cat||"", ticketRef: f.ticketRef || a.ticketNo || a.jira || ""}));
       setActSearch(a.name);
       setActOpen(false);
     };
@@ -16245,7 +16245,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
               Live
             </div>
             {isMgrOrAdmin && page==="activities" && <Btn sm onClick={()=>{setAForm({...bAct,team:isAdmin?"":user.team});setTarget(null);setModal("act");}}>+ Activity</Btn>}
-            {!isAdmin && <Btn sm v="sec" onClick={()=>{setLForm(bLog);setModal("logtbl");}}>⏱ Log Time</Btn>}
+            {!isAdmin && <Btn sm v="sec" onClick={()=>{setTarget(null);setLForm(bLog);setModal("log");}}>⏱ Log Time</Btn>}
             {isMgr && <Btn sm v="sec" onClick={()=>goPage("members")}>+ Member</Btn>}
           </div>
         </div>
@@ -16671,7 +16671,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
               team:a.team, actId:a.id, activity:a.name, type:a.type, cat:a.cat,
               mins:+row.mins, notes:row.notes,
               ticketRef:row.ticketRef||a.ticketNo||a.jira||"",
-              nature:"Proactive", workType:"Project", workNature:"Request",
+              nature:a.nature||"Proactive", workType:a.type||"Project", workNature:a.workNature||"Request",
             },...p]);
           }}
         />
