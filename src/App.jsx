@@ -15242,9 +15242,12 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
 
   // == MAJOR INCIDENTS ==============================================
   const PageMajorIncidents = () => {
-    const [miTab, setMiTab] = React.useState("dashboard");
+    const [miTab, _setMiTab] = React.useState(window.__miTab||"dashboard");
+    const setMiTab = (t)=>{ window.__miTab=t; _setMiTab(t); };
     const [createOpen, setCreateOpen] = React.useState(false);
     const [miForm, setMiForm] = React.useState({incidentNo:"",name:"",severity:"Sev1",impactedServices:"",teamsInvolved:[],desc:""});
+    const [flow, setFlow] = React.useState(null);          // {mi, mode: "resolve" | "close" | "reopen" | "view"}
+    const [flowForm, setFlowForm] = React.useState({summary:"", root:"", when:"", note:""});
 
     const miActs  = mis;
     const allMiLogs = logs.filter(l=>mis.some(m=>m.id===l.actId));
@@ -15255,7 +15258,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       return Math.round((new Date(mi.resolvedAt)-new Date(mi.startedAt))/60000);
     };
     const fmt = m => m==null?"Open":m<60?`${m}m`:m<1440?`${Math.floor(m/60)}h ${m%60>0?m%60+"m":""}`.trim():`${(m/1440).toFixed(1)}d`;
-    const resolved = miActs.filter(m=>m.status==="Resolved");
+    const resolved = miActs.filter(m=>m.status==="Resolved"||m.status==="Closed");
     const open     = miActs.filter(m=>m.status==="Open");
     const sev1     = miActs.filter(m=>m.severity==="Sev1");
     const sev2     = miActs.filter(m=>m.severity==="Sev2");
@@ -15314,9 +15317,34 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       showToast(`Major Incident ${miForm.incidentNo} raised`);
     };
 
-    const closeMI = mi => {
-      setMis(p=>p.map(m=>m.id===mi.id?{...m,status:"Resolved",resolvedAt:new Date().toISOString()}:m));
-      showToast(`${mi.incidentNo} marked as Resolved`);
+    // == Resolve -> Close -> Reopen workflow ==
+    const nowLocal = () => { const d = new Date(); d.setMinutes(d.getMinutes()-d.getTimezoneOffset()); return d.toISOString().slice(0,16); };
+    const openFlow = (mi, mode) => {
+      setFlow({mi:mi, mode:mode});
+      setFlowForm({summary:mi.resolutionSummary||"", root:(mi.rootCause&&!/under investigation/i.test(mi.rootCause))?mi.rootCause:"", when:nowLocal(), note:""});
+    };
+    const submitFlow = () => {
+      const mi = flow.mi, mode = flow.mode, nowIso = new Date().toISOString();
+      const addHist = (m, action, note) => ([...(m.history||[]), {ts:nowIso, by:user.name, action:action, note:note||""}]);
+      if(mode==="resolve") {
+        if(!flowForm.summary.trim()) { showToast("Describe how the incident was resolved","err"); return; }
+        const when = flowForm.when ? new Date(flowForm.when) : new Date();
+        if(isNaN(when.getTime())) { showToast("Enter a valid resolved time","err"); return; }
+        if(mi.startedAt && when < new Date(mi.startedAt)) { showToast("Resolved time cannot be before the incident started","err"); return; }
+        setMis(p=>p.map(m=>m.id===mi.id?{...m, status:"Resolved", resolvedAt:when.toISOString(), resolvedBy:user.name,
+          resolutionSummary:flowForm.summary.trim(), rootCause:flowForm.root.trim()||m.rootCause, history:addHist(m,"Resolved",flowForm.summary.trim())}:m));
+        showToast(mi.incidentNo+" marked as Resolved");
+      } else if(mode==="close") {
+        setMis(p=>p.map(m=>m.id===mi.id?{...m, status:"Closed", closedAt:nowIso, closedBy:user.name,
+          closeNote:flowForm.note.trim(), history:addHist(m,"Closed",flowForm.note.trim())}:m));
+        showToast(mi.incidentNo+" closed");
+      } else if(mode==="reopen") {
+        if(!flowForm.note.trim()) { showToast("Give a reason for reopening","err"); return; }
+        setMis(p=>p.map(m=>m.id===mi.id?{...m, status:"Open", resolvedAt:null, resolvedBy:null, closedAt:null, closedBy:null,
+          reopenCount:(m.reopenCount||0)+1, history:addHist(m,"Reopened",flowForm.note.trim())}:m));
+        showToast(mi.incidentNo+" reopened");
+      }
+      setFlow(null);
     };
 
     const SevBadge = ({sev}) => (
@@ -15328,8 +15356,8 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
 
     const StatusBadge = ({s}) => (
       <span style={{fontSize:11,fontWeight:700,padding:"2px 10px",borderRadius:4,
-        background:s==="Open"?"#fff7ed":"#f0fdf4",
-        color:s==="Open"?"#ea580c":"#16a34a"}}>{s==="Open"?"🔴 Open":"✅ Resolved"}</span>
+        background:s==="Open"?"#fff7ed":s==="Closed"?"#f1f5f9":"#f0fdf4",
+        color:s==="Open"?"#ea580c":s==="Closed"?"#475569":"#16a34a"}}>{s==="Open"?"🔴 Open":s==="Closed"?"🔒 Closed":"✅ Resolved"}</span>
     );
 
     const TEAMS_ALL = SEED_TEAMS.map(t=>t.name);
@@ -15370,7 +15398,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
           {[
             {icon:"🚨",label:"Total MIs",       val:miActs.length,         c:"var(--text-1)",bg:"var(--surface-2)"},
             {icon:"🔴",label:"Open",             val:open.length,           c:"#dc2626",      bg:"#fef2f2"},
-            {icon:"✅",label:"Resolved",         val:resolved.length,       c:"#16a34a",      bg:"#f0fdf4"},
+            {icon:"✅",label:"Resolved / Closed", val:resolved.length,       c:"#16a34a",      bg:"#f0fdf4"},
             {icon:"💀",label:"Sev1",             val:sev1.length,           c:"#dc2626",      bg:"#fff1f2"},
             {icon:"⚠️",label:"Sev2",             val:sev2.length,           c:"#d97706",      bg:"#fffbeb"},
             {icon:"⏱",label:"Avg MTTR (Sev1)",  val:fmt(avgMttrSev1),      c:"#7c3aed",      bg:"#f5f3ff"},
@@ -15487,7 +15515,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
                         {[
                           ["Avg MTTR",         fmt(avgMttr),              color],
                           ["MTTR Target",       target,                    "var(--text-3)"],
-                          ["Resolved",          `${items.filter(m=>m.status==="Resolved").length}/${items.length}`, "#16a34a"],
+                          ["Resolved",          `${items.filter(m=>m.status==="Resolved"||m.status==="Closed").length}/${items.length}`, "#16a34a"],
                           ["Open",              `${items.filter(m=>m.status==="Open").length}`,  items.some(m=>m.status==="Open")?"#dc2626":"var(--text-3)"],
                           ["Total Cost",        `£${totalC.toLocaleString()}`,color],
                           ["Avg Cost/Incident", `£${avgC.toLocaleString()}`,  "var(--text-2)"],
@@ -15525,8 +15553,8 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
                   )}
                   {miDetail.map(mi=>(
                     <tr key={mi.id} className="trow-hover">
-                      <TD><code style={{fontFamily:"var(--font-mono)",fontWeight:700,fontSize:12,color:"var(--brand)"}}>{mi.incidentNo}</code></TD>
-                      <TD><div style={{fontWeight:700,color:"var(--text-1)",maxWidth:200}}>{mi.name}</div></TD>
+                      <TD><code onClick={()=>openFlow(mi,"view")} title="View details and history" style={{fontFamily:"var(--font-mono)",fontWeight:700,fontSize:12,color:"var(--brand)",cursor:"pointer",textDecoration:"underline"}}>{mi.incidentNo}</code></TD>
+                      <TD><div onClick={()=>openFlow(mi,"view")} style={{fontWeight:700,color:"var(--text-1)",maxWidth:200,cursor:"pointer"}}>{mi.name}</div></TD>
                       <TD><SevBadge sev={mi.severity}/></TD>
                       <TD><StatusBadge s={mi.status}/></TD>
                       <TD s={{fontSize:11,color:"var(--text-3)",fontFamily:"var(--font-mono)"}}>
@@ -15547,9 +15575,11 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
                       <TD s={{fontWeight:700,color:"#dc2626",fontFamily:"var(--font-mono)"}}>£{mi.cost.toLocaleString()}</TD>
                       <TD s={{fontSize:11,color:"var(--text-3)",maxWidth:160}}>{mi.impactedServices||"—"}</TD>
                       {isMgrOrAdmin && (
-                        <TD>
-                          <div style={{display:"flex",gap:5}}>
-                            {mi.status==="Open" && <Btn sm v="dan" onClick={()=>closeMI(mi)}>✅ Resolve</Btn>}
+                        <TD s={{position:"sticky",right:0,background:"var(--surface)",boxShadow:"-8px 0 8px -8px rgba(16,24,40,.18)"}}>
+                          <div style={{display:"flex",gap:5,flexDirection:"column",alignItems:"stretch",minWidth:96}}>
+                            {mi.status==="Open" && <Btn sm v="dan" onClick={()=>openFlow(mi,"resolve")}>✅ Resolve</Btn>}
+                            {mi.status==="Resolved" && <Btn sm onClick={()=>openFlow(mi,"close")}>🔒 Close</Btn>}
+                            {(mi.status==="Resolved"||mi.status==="Closed") && <Btn sm v="sec" onClick={()=>openFlow(mi,"reopen")}>↩ Reopen</Btn>}
                             <Btn sm v="sec" onClick={()=>{ setLForm(f=>({...f,actId:mi.id,cat:mi.cat||""})); setTarget(null); setModal("log"); }}>⏱ Log Time</Btn>
                           </div>
                         </TD>
@@ -15727,6 +15757,79 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
             <MFoot onClose={()=>setCreateOpen(false)} onSave={saveMI} label="🚨 Raise Incident"/>
           </ModalWrap>
         )}
+
+        {flow && (() => {
+          const mi = flow.mi, mode = flow.mode;
+          const cur = mis.find(m=>m.id===mi.id) || mi;
+          const fmtDT = (v) => v ? new Date(v).toLocaleString("en-GB",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}) : "-";
+          const titles = {resolve:"Resolve incident", close:"Close incident", reopen:"Reopen incident", view:"Incident details"};
+          const row = (k, v) => (
+            <div style={{display:"flex",gap:12,padding:"7px 0",borderBottom:"1px solid var(--surface-3)",fontSize:12.5}}>
+              <div style={{width:130,color:"var(--text-4)",flexShrink:0}}>{k}</div>
+              <div style={{flex:1,color:"var(--text-1)",whiteSpace:"pre-wrap"}}>{v || "-"}</div>
+            </div>
+          );
+          return (
+            <ModalWrap title={titles[mode] + " - " + cur.incidentNo} onClose={()=>setFlow(null)} wide>
+              <div style={{marginBottom:14}}>
+                <div style={{fontWeight:700,fontSize:14,color:"var(--text-1)"}}>{cur.name}</div>
+                <div style={{display:"flex",gap:8,marginTop:6,alignItems:"center"}}><SevBadge sev={cur.severity}/><StatusBadge s={cur.status}/></div>
+              </div>
+
+              {mode==="resolve" && (
+                <div style={{display:"grid",gap:14}}>
+                  <InfoBanner color="#166534" bg="#f0fdf4" border="#bbf7d0" icon="✅">Resolving stops new time being logged against this incident. You can close it later once the review is done, or reopen it if it comes back.</InfoBanner>
+                  <Lbl t="How was it resolved? *"><textarea style={{...iS,minHeight:80,resize:"vertical"}} value={flowForm.summary} onChange={e=>setFlowForm(f=>({...f,summary:e.target.value}))} placeholder="Fix applied, workaround, who did what"/></Lbl>
+                  <Lbl t="Root cause"><textarea style={{...iS,minHeight:60,resize:"vertical"}} value={flowForm.root} onChange={e=>setFlowForm(f=>({...f,root:e.target.value}))} placeholder="Leave blank if still being investigated"/></Lbl>
+                  <Lbl t="Resolved at"><input type="datetime-local" style={iS} value={flowForm.when} onChange={e=>setFlowForm(f=>({...f,when:e.target.value}))}/></Lbl>
+                </div>
+              )}
+              {mode==="close" && (
+                <div style={{display:"grid",gap:14}}>
+                  <InfoBanner color="#334155" bg="#f1f5f9" border="#cbd5e1" icon="🔒">Closing records that the post-incident review is complete. A closed incident can still be reopened.</InfoBanner>
+                  {row("Resolution", cur.resolutionSummary)}
+                  {row("Root cause", cur.rootCause)}
+                  <Lbl t="Closure note (optional)"><textarea style={{...iS,minHeight:70,resize:"vertical"}} value={flowForm.note} onChange={e=>setFlowForm(f=>({...f,note:e.target.value}))} placeholder="Post-incident review outcome, follow-up actions"/></Lbl>
+                </div>
+              )}
+              {mode==="reopen" && (
+                <div style={{display:"grid",gap:14}}>
+                  <InfoBanner color="#9a3412" bg="#fff7ed" border="#fed7aa" icon="↩">The incident goes back to Open and members can log time against it again.</InfoBanner>
+                  <Lbl t="Reason for reopening *"><textarea style={{...iS,minHeight:70,resize:"vertical"}} value={flowForm.note} onChange={e=>setFlowForm(f=>({...f,note:e.target.value}))} placeholder="What happened, why it is not fixed"/></Lbl>
+                </div>
+              )}
+              {mode==="view" && (
+                <div>
+                  {row("Started", fmtDT(cur.startedAt))}
+                  {row("Resolved", cur.resolvedAt ? (fmtDT(cur.resolvedAt) + (cur.resolvedBy ? " by " + cur.resolvedBy : "")) : "")}
+                  {row("Time to resolve", cur.resolvedAt ? fmt(mttr(cur)) : "")}
+                  {row("Closed", cur.closedAt ? (fmtDT(cur.closedAt) + (cur.closedBy ? " by " + cur.closedBy : "")) : "")}
+                  {row("Impacted services", cur.impactedServices)}
+                  {row("Resolution", cur.resolutionSummary)}
+                  {row("Root cause", cur.rootCause)}
+                  {row("Closure note", cur.closeNote)}
+                  {row("Times reopened", cur.reopenCount ? String(cur.reopenCount) : "")}
+                  <div style={{fontWeight:700,fontSize:12,color:"var(--text-3)",textTransform:"uppercase",letterSpacing:.5,margin:"16px 0 8px"}}>History</div>
+                  {(cur.history||[]).length===0
+                    ? <div style={{fontSize:12.5,color:"var(--text-4)"}}>No status changes recorded yet.</div>
+                    : [...cur.history].reverse().map((h,i)=>(
+                      <div key={i} style={{display:"flex",gap:10,padding:"8px 0",borderBottom:"1px solid var(--surface-3)",fontSize:12.5}}>
+                        <div style={{width:150,color:"var(--text-4)",flexShrink:0}}>{fmtDT(h.ts)}</div>
+                        <div style={{flex:1}}><strong>{h.action}</strong>{" by " + h.by}{h.note ? <div style={{color:"var(--text-3)",marginTop:2,whiteSpace:"pre-wrap"}}>{h.note}</div> : null}</div>
+                      </div>
+                    ))}
+                  <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:16}}>
+                    {isMgrOrAdmin && cur.status==="Open" && <Btn v="dan" onClick={()=>openFlow(cur,"resolve")}>✅ Resolve</Btn>}
+                    {isMgrOrAdmin && cur.status==="Resolved" && <Btn onClick={()=>openFlow(cur,"close")}>🔒 Close</Btn>}
+                    {isMgrOrAdmin && (cur.status==="Resolved"||cur.status==="Closed") && <Btn v="sec" onClick={()=>openFlow(cur,"reopen")}>↩ Reopen</Btn>}
+                    <Btn v="sec" onClick={()=>setFlow(null)}>Close window</Btn>
+                  </div>
+                </div>
+              )}
+              {mode!=="view" && <MFoot onClose={()=>setFlow(null)} onSave={submitFlow} label={mode==="resolve"?"Mark resolved":mode==="close"?"Close incident":"Reopen incident"}/>}
+            </ModalWrap>
+          );
+        })()}
       </div>
     );
   };
@@ -15759,7 +15862,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
         totalTeams:     teams.length,
         totalMIs:       miActs.length,
         openMIs:        miActs.filter(m=>m.status==="Open").length,
-        resolvedMIs:    miActs.filter(m=>m.status==="Resolved").length,
+        resolvedMIs:    miActs.filter(m=>m.status==="Resolved"||m.status==="Closed").length,
         reactivePct:    logs.length ? Math.round(reactiveEntries/logs.length*100) : 0,
         changeEntries:  logs.filter(l=>l.workNature==="Change").length,
         srEntries:      logs.filter(l=>l.workNature==="Service Request").length,
