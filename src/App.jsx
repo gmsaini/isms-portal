@@ -5072,6 +5072,29 @@ const fmtM   = m => { if (!m && m !== 0) return "—"; const h = Math.floor(m/60
 const tCol_module = t => SEED_TEAMS.find(x=>x.name===t)?.color || "var(--text-3)";
 const uCol   = p => p>85?"#dc2626":p>70?"#f59e0b":"#16a34a";
 let   seq    = 300;
+// Values pre-filled in the Log Time form from an activity's own settings
+const logDefaultsFrom = (a, f) => ({
+  actId: a.id,
+  cat: a.cat || "",
+  ticketRef: (f && f.ticketRef) || a.ticketNo || a.jira || "",
+  nature: a.nature || (f && f.nature) || "Proactive",
+  workType: a.type==="Project" ? "Project" : a.type==="BAU" ? "BAU" : ((f && f.workType) || "Project"),
+  workNature: a.workNature==="Request" ? "Service Request" : (a.workNature || (f && f.workNature) || "Change"),
+  priority: a.priority || (f && f.priority) || "Medium"
+});
+// Simple activity IDs: ACT-<TEAM3>-<NNN>, numbered per team (e.g. ACT-NET-007)
+const nextActId = (team, pool) => {
+  const code = ((team||"").replace(/[^A-Za-z]/g,"").slice(0,3).toUpperCase()) || "GEN";
+  const prefix = "ACT-" + code + "-";
+  const taken = new Set(pool.map(a=>a.id));
+  let n = pool.reduce((m,a)=>{
+    if(!(a.id||"").startsWith(prefix)) return m;
+    const k = parseInt(a.id.slice(prefix.length),10)||0;
+    return k>m?k:m;
+  },0) + 1;
+  while(taken.has(prefix + String(n).padStart(3,"0"))) n++;
+  return prefix + String(n).padStart(3,"0");
+};
 const uid    = p => CLOUD_ON ? (p + "-" + Date.now().toString(36) + Math.random().toString(36).slice(2,6)) : `${p}-${++seq}`;
 const today  = () => new Date().toISOString().slice(0,10);
 const currentMonthLabel = () => new Date().toLocaleDateString("en-GB",{month:"long",year:"numeric"});
@@ -6551,11 +6574,9 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
 
       if(newActs.length) {
         setActs(p=>{
-          const startN = p.reduce((max,a)=>{
-            const n = parseInt((a.id||"").replace("ACT-",""),10)||0;
-            return n>max?n:max;
-          },0);
-          return [...newActs.map((a,i)=>({...a,id:`ACT-${String(startN+i+1).padStart(3,"0")}`})),...p];
+          const pool = [...p];
+          const made = newActs.map(a=>{ const id = nextActId(a.team, pool); const row = {...a,id:id}; pool.push(row); return row; });
+          return [...made,...p];
         });
       }
       setImportResult({created, skipped, dupe, total:importRows.length});
@@ -6592,7 +6613,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
   };
 
   // forms
-  const bAct = {name:"",team:"",type:"BAU",cat:"Infrastructure Build",estMins:480,status:"Active",taskSize:"",complexity:"",level:"",desc:"",progress:0};
+  const bAct = {name:"",team:"",type:"BAU",cat:"Infrastructure Build",estMins:480,status:"Active",priority:"Medium",nature:"Proactive",workNature:"Change",ticketNo:"",jira:"",taskSize:"",complexity:"",level:"",desc:"",progress:0};
   const bLog = {actId:"",mins:30,notes:"",date:today(),ticketRef:"",nature:"Proactive",workType:"Project",workNature:"Change",cat:"",priority:"Medium"};
   const [aForm, setAForm] = useState(bAct);
   const [lForm, setLForm] = useState(bLog);
@@ -6672,12 +6693,9 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       setActs(p=>p.map(a=>a.id===target.id?{...target,...aForm}:a));
       showToast(`"${aForm.name}" updated`);
     } else {
-      const nextN = acts.reduce((max,a)=>{
-        const n = parseInt((a.id||"").replace("ACT-",""),10)||0;
-        return n>max?n:max;
-      },0)+1;
-      const nextId = CLOUD_ON ? uid("ACT") : `ACT-${String(nextN).padStart(3,"0")}`;
-      setActs(p=>[{...aForm,id:nextId,team:aForm.team||user.team,date:today()},...p]);
+      const actTeam = aForm.team || user.team || "";
+      const nextId = nextActId(actTeam, acts);
+      setActs(p=>[{...aForm,id:nextId,team:actTeam,date:today()},...p]);
       showToast(`"${aForm.name}" created`);
     }
     closeM();
@@ -6705,7 +6723,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
 
   const delAct    = id => { setActs(p=>p.filter(a=>a.id!==id)); showToast("Activity removed"); };
   const delLog    = id => { setLogs(p=>p.filter(l=>l.id!==id)); showToast("Entry deleted"); };
-  const openEditA = a => { setTarget(a); setAForm({name:a.name,team:a.team,type:a.type,cat:a.cat,estMins:a.estMins,status:a.status,taskSize:a.taskSize||"",complexity:a.complexity||"",level:a.level||"",desc:a.desc,progress:a.progress||0}); setModal("act"); };
+  const openEditA = a => { setTarget(a); setAForm({name:a.name,team:a.team,type:a.type,cat:a.cat,estMins:a.estMins,status:a.status,priority:a.priority||"Medium",nature:a.nature||"Proactive",workNature:a.workNature||"Change",ticketNo:a.ticketNo||"",jira:a.jira||"",taskSize:a.taskSize||"",complexity:a.complexity||"",level:a.level||"",desc:a.desc,progress:a.progress||0}); setModal("act"); };
   const openEditL = l  => { setTarget(l); setLForm({actId:l.actId,mins:l.mins,notes:l.notes,date:l.date,ticketRef:l.ticketRef||"",nature:l.nature||"Proactive",workType:l.workType||"Project",workNature:l.workNature||"Change",cat:l.cat||"",priority:l.priority||"Medium"}); setModal("log"); };
 
   // Re-ID all non-MI activities in alphabetical order (ACT-001, ACT-002, ...)
@@ -7082,7 +7100,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
 
                         {/* Log button */}
                         <td style={{padding:"10px 14px",whiteSpace:"nowrap"}}>
-                          <button onClick={()=>{setLForm({...bLog,actId:a.id,cat:a.cat||"",ticketRef:a.ticketNo||a.jira||""});setModal("log");}}
+                          <button onClick={()=>{setLForm({...bLog,...logDefaultsFrom(a, bLog)});setModal("log");}}
                             style={{padding:"8px 16px",borderRadius:"var(--radius-md)",
                               background:`linear-gradient(135deg,${col},${col}cc)`,
                               color:"#fff",border:"none",fontWeight:700,fontSize:12,
@@ -11535,6 +11553,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
         }));
 
         const newLogs=[];
+        const actPool=[...acts];
         allRows.forEach(row=>{
           if(!row.member||row.mins<1){ skipped++; return; }
           // Find matching user (case-insensitive first name or full name)
@@ -11546,11 +11565,13 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
           // Find or create a matching activity by ticketNo
           let act = acts.find(a=>a.ticketNo&&a.ticketNo===row.ticketNo);
           if(!act){
-            const newAct={id:uid("ACT"),name:row.activity,team:matchUser.team||row.team||"Network",
+            const actTeamX=matchUser.team||row.team||"Network";
+            const newAct={id:nextActId(actTeamX,actPool),name:row.activity,team:actTeamX,
               type:row.type,cat:row.cat,estMins:row.mins*2,priority:"Medium",status:"Active",
               nature:row.nature,workNature:row.type==="Incident"?"Incident":row.type==="Change"?"Change":"Request",
               ticketNo:row.ticketNo,jira:row.ticketNo,date:row.date,desc:row.notes};
             setActs(p=>[...p,newAct]);
+            actPool.push(newAct);
             act=newAct; created++;
           } else { updated++; }
           newLogs.push({id:uid("TL"),date:row.date,userId:matchUser.id,member:matchUser.name,
@@ -15968,7 +15989,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       : allOptions;
 
     const selectAct = (a) => {
-      setLForm(f=>({...f, actId:a.id, cat:a.cat||"", ticketRef: f.ticketRef || a.ticketNo || a.jira || ""}));
+      setLForm(f=>({...f, ...logDefaultsFrom(a, f)}));
       setActSearch(a.name);
       setActOpen(false);
     };
@@ -16303,7 +16324,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
           <InfoBanner color="#1e40af" bg="var(--brand-light)" border="#bfdbfe" icon="📌">
             {isAdmin
               ? "This activity will appear in the selected team's catalogue. Members pick it when logging time."
-              : <>This activity will appear in <strong>{user.team}</strong>'s catalogue. Members select it when logging time and enter their ticket number at that point.</>}
+              : <>This activity will appear in <strong>{user.team}</strong>'s catalogue. Members select it when logging time; the ticket and type values you set here are pre-filled for them.</>}
           </InfoBanner>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
 
@@ -16338,12 +16359,44 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
               </select>
             </Lbl>
 
+            {/* Priority */}
+            <Lbl t="Priority">
+              <select style={sS} value={aForm.priority||"Medium"} onChange={e=>setAForm(f=>({...f,priority:e.target.value}))}>
+                {["Critical","High","Medium","Low"].map(o=><option key={o}>{o}</option>)}
+              </select>
+            </Lbl>
+
+            {/* Nature */}
+            <Lbl t="Proactive or Reactive">
+              <select style={sS} value={aForm.nature||"Proactive"} onChange={e=>setAForm(f=>({...f,nature:e.target.value}))}>
+                {["Proactive","Reactive"].map(o=><option key={o}>{o}</option>)}
+              </select>
+            </Lbl>
+
+            {/* Work nature */}
+            <Lbl t="Change, Incident or Request">
+              <select style={sS} value={aForm.workNature||"Change"} onChange={e=>setAForm(f=>({...f,workNature:e.target.value}))}>
+                {["Change","Incident","Request"].map(o=><option key={o}>{o}</option>)}
+              </select>
+            </Lbl>
+
+            {/* Ticket number */}
+            <Lbl t="Ticket / Reference No.">
+              <input style={{...iS,fontFamily:"var(--font-mono)",fontWeight:600}} value={aForm.ticketNo||""} onChange={e=>setAForm(f=>({...f,ticketNo:e.target.value}))} placeholder="e.g. CHG-4521"/>
+            </Lbl>
+
+            {/* JIRA / project key */}
+            <Lbl t="JIRA / Project Key (optional)">
+              <input style={{...iS,fontFamily:"var(--font-mono)",fontWeight:600}} value={aForm.jira||""} onChange={e=>setAForm(f=>({...f,jira:e.target.value}))} placeholder="e.g. NET-087"/>
+            </Lbl>
+
             {/* Status */}
             <Lbl t="Status">
               <div style={{display:"flex",gap:8,marginTop:4}}>
                 {[
                   {val:"Active",    bg:"#d1fae5", fg:"#065f46", desc:"Available for time logging"},
                   {val:"Suspended", bg:"#fef3c7", fg:"#92400e", desc:"Hidden from time log selection"},
+                  {val:"Done",      bg:"#e0e7ff", fg:"#3730a3", desc:"Completed"},
                 ].map(s=>(
                   <button key={s.val} onClick={()=>setAForm(f=>({...f,status:s.val}))}
                     style={{flex:1,padding:"9px 8px",borderRadius:"var(--radius-sm)",cursor:"pointer",textAlign:"center",
@@ -16421,7 +16474,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
             <div style={{gridColumn:"1/-1",background:"#f0fdf4",border:"1px solid #a7f3d0",borderRadius:"var(--radius-md)",padding:"10px 14px",display:"flex",gap:10,alignItems:"flex-start"}}>
               <span style={{fontSize:16,flexShrink:0}}>💡</span>
               <div style={{fontSize:12,color:"#065f46",lineHeight:1.6}}>
-                <strong>Ticket numbers are entered at log time, not here.</strong> When a member logs time against this activity they will enter their ticket number, change/incident reference, and work nature for that specific entry. This keeps the activity catalogue clean and reusable.
+                <strong>Defaults for time logging.</strong> The ticket number, priority, proactive/reactive and change/incident/request values set here are pre-filled when a member logs time on this activity. Members can still change them for each entry.
               </div>
             </div>
 
