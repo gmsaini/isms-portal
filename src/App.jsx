@@ -5072,6 +5072,7 @@ const fmtM   = m => { if (!m && m !== 0) return "—"; const h = Math.floor(m/60
 const tCol_module = t => SEED_TEAMS.find(x=>x.name===t)?.color || "var(--text-3)";
 const uCol   = p => p>85?"#dc2626":p>70?"#f59e0b":"#16a34a";
 let   seq    = 300;
+const DEFAULT_CATEGORIES = ["Infrastructure Build","Maintenance","Security & Compliance","Automation & Scripting","Monitoring & Alerting","Documentation"].map(n=>({name:n, active:true}));
 // Values pre-filled in the Log Time form from an activity's own settings
 const logDefaultsFrom = (a, f) => ({
   actId: a.id,
@@ -6093,7 +6094,8 @@ const CLOUD_COLL = {
   teams:{table:"teams", pk:"name", sel:"data", key:t=>t.name, out:r=>r.data, row:t=>({name:t.name, data:t})},
   acts: {table:"activities", pk:"id", sel:"data", key:a=>a.id, out:r=>r.data, row:a=>({id:a.id, team:a.team||null, data:a})},
   logs: {table:"time_logs", pk:"id", sel:"data", key:l=>l.id, out:r=>r.data, row:l=>({id:l.id, user_id:l.userId||null, team:l.team||null, log_date:l.date||null, data:l})},
-  mis:  {table:"major_incidents", pk:"id", sel:"data", key:m=>m.id, out:r=>r.data, row:m=>({id:m.id, data:m})}
+  mis:  {table:"major_incidents", pk:"id", sel:"data", key:m=>m.id, out:r=>r.data, row:m=>({id:m.id, data:m})},
+  settings:{table:"app_settings", pk:"key", sel:"data", optional:true, key:s=>s.key, out:r=>r.data, row:s=>({key:s.key, data:s})}
 };
 async function cloudLoadAll(sb) {
   const out = {};
@@ -6103,7 +6105,10 @@ async function cloudLoadAll(sb) {
     let from = 0;
     for(;;) {
       const res = await sb.from(c.table).select(c.sel).order("seq",{ascending:true}).range(from, from+999);
-      if(res.error) throw res.error;
+      if(res.error) {
+        if(c.optional) { console.warn("Optional table " + c.table + " not available:", res.error.message); rows.length = 0; break; }
+        throw res.error;
+      }
       res.data.forEach(r=>rows.push(c.out(r)));
       if(res.data.length < 1000) break;
       from += 1000;
@@ -6263,6 +6268,24 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
   React.useEffect(()=>{ if(cloud) return; try{ localStorage.setItem('isms_mis',  JSON.stringify(mis));  }catch(e){} }, [mis]);
   React.useEffect(()=>{ if(cloud) return; try{ localStorage.setItem('isms_logs', JSON.stringify(logs)); }catch(e){} }, [logs]);
 
+  // Activity categories: admin can add and switch them in use / not in use (no rename or delete)
+  const [categories, setCategories] = useState(()=>{
+    if(cloud) {
+      const row = (cloud.data.settings||[]).find(x=>x.key==="categories");
+      return (row && Array.isArray(row.items) && row.items.length) ? row.items : DEFAULT_CATEGORIES;
+    }
+    try { const sv = localStorage.getItem('isms_categories'); if(sv) { const a = JSON.parse(sv); if(Array.isArray(a) && a.length) return a; } } catch(e) {}
+    return DEFAULT_CATEGORIES;
+  });
+  const [newCat, setNewCat] = useState("");
+  const catsDirty = React.useRef(false);
+  const updateCategories = (next) => { catsDirty.current = true; setCategories(next); };
+  const catOptions = (cur) => {
+    const act = categories.filter(c=>c.active!==false).map(c=>c.name);
+    return (cur && !act.includes(cur)) ? [cur, ...act] : act;
+  };
+  React.useEffect(()=>{ if(cloud) return; try{ localStorage.setItem('isms_categories', JSON.stringify(categories)); }catch(e){} }, [categories]);
+
   // Cloud sync: debounced diff-upload of each collection to Supabase
   const [syncState, setSyncState] = useState("idle");
   const [syncErr,   setSyncErr]   = useState("");
@@ -6287,7 +6310,8 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
   React.useEffect(()=>{
     if(!cloud) return;
     let stop = false, busy = false;
-    const setters = {users:setAllUsers, teams:setTeams, acts:setActs, mis:setMis, logs:setLogs};
+    const setters = {users:setAllUsers, teams:setTeams, acts:setActs, mis:setMis, logs:setLogs,
+      settings:(arr)=>{ const r = arr.find(x=>x.key==="categories"); if(r && Array.isArray(r.items) && r.items.length) setCategories(r.items); }};
     const pull = async () => {
       if(stop || busy || document.hidden) return;
       if(Object.values(syncDirty.current).some(Boolean)) return;   // unsaved local edits - do not overwrite
@@ -6311,6 +6335,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
   React.useEffect(()=>{ cloudSave("acts",  acts);     }, [acts]);
   React.useEffect(()=>{ cloudSave("mis",   mis);      }, [mis]);
   React.useEffect(()=>{ cloudSave("logs",  logs);     }, [logs]);
+  React.useEffect(()=>{ if(catsDirty.current) cloudSave("settings", [{key:"categories", items:categories}]); }, [categories]);
   const [modal,      setModal]      = useState(null);
   const [target,     setTarget]     = useState(null);
   const [toast,      setToast]      = useState(null);
@@ -6613,7 +6638,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
   };
 
   // forms
-  const bAct = {name:"",team:"",type:"BAU",cat:"Infrastructure Build",estMins:480,status:"Active",priority:"Medium",nature:"Proactive",workNature:"Change",ticketNo:"",jira:"",taskSize:"",complexity:"",level:"",desc:"",progress:0};
+  const bAct = {name:"",team:"",type:"BAU",cat:(categories.find(c=>c.active!==false)||{name:"Infrastructure Build"}).name,estMins:480,status:"Active",priority:"Medium",nature:"Proactive",workNature:"Change",ticketNo:"",jira:"",taskSize:"",complexity:"",level:"",desc:"",progress:0};
   const bLog = {actId:"",mins:30,notes:"",date:today(),ticketRef:"",nature:"Proactive",workType:"Project",workNature:"Change",cat:"",priority:"Medium"};
   const [aForm, setAForm] = useState(bAct);
   const [lForm, setLForm] = useState(bLog);
@@ -7425,7 +7450,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       color:tCol(m.team||user.team)
     }));
 
-    const logsByCat = ["Infrastructure Build","Maintenance","Security & Compliance","Automation & Scripting","Monitoring & Alerting"].map(cat=>({
+    const logsByCat = categories.map(c=>c.name).map(cat=>({
       label:cat.split(" ")[0].slice(0,6),
       fullLabel:cat,
       val:Math.round(dashLogs.filter(l=>l.cat===cat).reduce((s,l)=>s+l.mins,0)/60),
@@ -10200,24 +10225,59 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
 
         {/* == TYPES & CATEGORIES == */}
         {settingsTab==="cats" && (
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
-            {[["Activity Types",["📦 Project","🚨 Incident","🔄 Change","⚙️ BAU","📚 Training","💬 Meeting"]],
-              ["Categories",["Infrastructure Build","Maintenance","Security & Compliance","Automation & Scripting","Monitoring & Alerting","Documentation"]]
-            ].map(([title,items])=>(
-              <Card key={title}>
-                <div style={{fontWeight:700,fontSize:13,marginBottom:12}}>{title}</div>
-                {items.map(item=>(
-                  <div key={item} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"1px solid #f3f4f6",fontSize:13}}>
-                    <span>{item}</span>
-                    <button style={{padding:"2px 8px",borderRadius:5,border:"1px solid var(--border-2)",background:"var(--surface)",cursor:"pointer",fontSize:11}}>×</button>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(340px,1fr))",gap:16,alignItems:"start"}}>
+            <Card>
+              <div style={{fontWeight:700,fontSize:13,marginBottom:4}}>Categories</div>
+              <div style={{fontSize:12,color:"var(--text-3)",marginBottom:14,lineHeight:1.5}}>
+                Switch a category off to stop it being offered for new activities and time entries. Existing activities and logs keep their category, and you can switch it back on at any time.
+              </div>
+              {categories.map(c=>{
+                const on = c.active!==false;
+                const nAct = acts.filter(a=>a.cat===c.name).length;
+                const nLog = logs.filter(l=>l.cat===c.name).length;
+                return (
+                  <div key={c.name} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:"1px solid var(--surface-3)"}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:600,color:on?"var(--text-1)":"var(--text-4)"}}>{c.name}</div>
+                      <div style={{fontSize:11,color:"var(--text-4)",marginTop:2}}>{nAct + " activities · " + nLog + " time entries"}</div>
+                    </div>
+                    <span style={{fontSize:11,fontWeight:600,color:on?"#15803d":"var(--text-4)",width:68,textAlign:"right"}}>{on?"In use":"Not in use"}</span>
+                    <button disabled={!isAdmin} title={isAdmin?"Switch in use / not in use":"Only an administrator can change this"}
+                      onClick={()=>updateCategories(categories.map(x=>x.name===c.name?{...x,active:!on}:x))}
+                      style={{width:42,height:24,borderRadius:12,border:"none",cursor:isAdmin?"pointer":"not-allowed",position:"relative",background:on?"var(--brand)":"#cbd5e1",flexShrink:0,opacity:isAdmin?1:.6}}>
+                      <span style={{position:"absolute",top:3,left:on?21:3,width:18,height:18,borderRadius:"50%",background:"#fff",transition:"left .15s",boxShadow:"0 1px 3px rgba(0,0,0,.3)"}}/>
+                    </button>
                   </div>
-                ))}
-                <div style={{display:"flex",gap:8,marginTop:12}}>
-                  <input placeholder="Add new…" style={{flex:1,padding:"7px 10px",borderRadius:7,border:"1px solid var(--border-2)",fontSize:12}}/>
-                  <Btn sm onClick={()=>showToast("Added!")}>Add</Btn>
+                );
+              })}
+              {isAdmin ? (
+                <div style={{display:"flex",gap:8,marginTop:14}}>
+                  <input value={newCat} maxLength={40} placeholder="New category name" onChange={e=>setNewCat(e.target.value)}
+                    onKeyDown={e=>{ if(e.key==="Enter") document.getElementById("add-cat-btn").click(); }}
+                    style={{flex:1,padding:"8px 10px",borderRadius:7,border:"1px solid var(--border-2)",fontSize:13}}/>
+                  <button id="add-cat-btn" onClick={()=>{
+                      const nm = newCat.trim().replace(/\s+/g," ");
+                      if(!nm) { showToast("Enter a category name","err"); return; }
+                      if(categories.some(c=>c.name.toLowerCase()===nm.toLowerCase())) { showToast("That category already exists","err"); return; }
+                      updateCategories([...categories,{name:nm,active:true}]);
+                      setNewCat(""); showToast("Category added");
+                    }}
+                    style={{padding:"8px 18px",borderRadius:7,border:"none",background:"var(--brand)",color:"#fff",fontWeight:600,fontSize:13,cursor:"pointer"}}>Add</button>
                 </div>
-              </Card>
-            ))}
+              ) : (
+                <div style={{marginTop:14,fontSize:12,color:"var(--text-4)"}}>Only an administrator can add or change categories.</div>
+              )}
+            </Card>
+
+            <Card>
+              <div style={{fontWeight:700,fontSize:13,marginBottom:4}}>Activity types</div>
+              <div style={{fontSize:12,color:"var(--text-3)",marginBottom:14,lineHeight:1.5}}>Types drive reports and logging rules, so this list is fixed.</div>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                {["Project","Incident","Change","BAU","Training","Meeting"].map(t=>(
+                  <span key={t} style={{padding:"5px 12px",borderRadius:20,background:"var(--surface-2)",border:"1px solid var(--border)",fontSize:12.5,color:"var(--text-2)",fontWeight:600}}>{t}</span>
+                ))}
+              </div>
+            </Card>
           </div>
         )}
 
@@ -16355,7 +16415,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
             {/* Category */}
             <Lbl t="Category">
               <select style={sS} value={aForm.cat} onChange={e=>setAForm(f=>({...f,cat:e.target.value}))}>
-                {["Infrastructure Build","Maintenance","Security & Compliance","Automation & Scripting","Monitoring & Alerting","Documentation"].map(o=><option key={o}>{o}</option>)}
+                {catOptions(aForm.cat).map(o=><option key={o}>{o}</option>)}
               </select>
             </Lbl>
 
@@ -16488,7 +16548,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
         const selAct  = lForm.actId ? (acts.find(a=>a.id===lForm.actId) || mis.find(m=>m.id===lForm.actId)) : null;
         const logSrc  = loggable;
         const isEdit  = !!target;
-        const CATS    = ["Infrastructure Build","Maintenance","Security & Compliance","Automation & Scripting","Monitoring & Alerting","Documentation"];
+        const CATS    = catOptions(lForm.cat);
 
         // Step readiness
         const s1 = !!lForm.actId;
