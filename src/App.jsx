@@ -5523,6 +5523,39 @@ function CloudLogin({sb, onSignedIn, startMode, note}) {
   );
 }
 
+function SplashLoader({label}) {
+  const steps = ["Connecting to cloud","Verifying access","Loading your workspace"];
+  const [i,setI] = React.useState(0);
+  React.useEffect(()=>{ const t=setInterval(()=>setI(x=>(x+1)%steps.length),1400); return ()=>clearInterval(t); },[]);
+  return (
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"linear-gradient(160deg,#f8fafc,#eef2ff)",fontFamily:"var(--font-sans, system-ui, sans-serif)"}}>
+      <style>{`
+        @keyframes spl_ring{to{transform:rotate(360deg)}}
+        @keyframes spl_ring2{to{transform:rotate(-360deg)}}
+        @keyframes spl_pulse{0%,100%{transform:scale(1);box-shadow:0 8px 24px rgba(37,99,235,.25)}50%{transform:scale(1.07);box-shadow:0 12px 34px rgba(37,99,235,.4)}}
+        @keyframes spl_bar{0%{transform:translateX(-100%)}100%{transform:translateX(250%)}}
+        @keyframes spl_in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+        @keyframes spl_txt{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+      `}</style>
+      <div style={{textAlign:"center",animation:"spl_in .5s ease both"}}>
+        <div style={{position:"relative",width:116,height:116,margin:"0 auto 22px"}}>
+          <div style={{position:"absolute",inset:0,borderRadius:"50%",border:"3px solid rgba(37,99,235,.12)",borderTopColor:"#2563eb",animation:"spl_ring 1.1s linear infinite"}}/>
+          <div style={{position:"absolute",inset:12,borderRadius:"50%",border:"3px solid rgba(124,58,237,.12)",borderBottomColor:"#7c3aed",animation:"spl_ring2 1.6s linear infinite"}}/>
+          <div style={{position:"absolute",inset:30,borderRadius:18,background:"linear-gradient(135deg,#2563eb,#4f46e5)",display:"flex",alignItems:"center",justifyContent:"center",animation:"spl_pulse 1.8s ease-in-out infinite"}}>
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 7h.01M7 17h.01M11 7h6M11 17h6"/></svg>
+          </div>
+        </div>
+        <div style={{fontSize:22,fontWeight:800,letterSpacing:".5px",color:"#0f172a"}}>ISMS</div>
+        <div style={{fontSize:12,color:"#64748b",marginTop:2}}>Infrastructure Service Management System</div>
+        <div style={{width:180,height:4,borderRadius:4,background:"rgba(37,99,235,.12)",margin:"18px auto 10px",overflow:"hidden"}}>
+          <div style={{width:"40%",height:"100%",borderRadius:4,background:"linear-gradient(90deg,#2563eb,#7c3aed)",animation:"spl_bar 1.3s ease-in-out infinite"}}/>
+        </div>
+        <div key={i} style={{fontSize:12,color:"#475569",animation:"spl_txt .4s ease both"}}>{label||steps[i]}...</div>
+      </div>
+    </div>
+  );
+}
+
 function CloudDataPanel({cloud, syncState, syncErr}) {
   const [busy, setBusy] = React.useState(false);
   const [msg,  setMsg]  = React.useState("");
@@ -5616,7 +5649,7 @@ function CloudApp() {
   }, []);
 
   const center = {minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"var(--font-sans)",color:"var(--text-3)",fontSize:14,textAlign:"center",padding:20};
-  if(phase==="boot" || phase==="loading") return <div style={center}>Loading ISMS...</div>;
+  if(phase==="boot" || phase==="loading") return <SplashLoader/>;
   if(phase==="error") return (
     <div style={center}><div>
       <div style={{fontSize:16,fontWeight:700,color:"#b91c1c",marginBottom:8}}>Could not connect to the cloud database</div>
