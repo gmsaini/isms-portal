@@ -5079,7 +5079,7 @@ const logDefaultsFrom = (a, f) => ({
   cat: a.cat || "",
   ticketRef: (f && f.ticketRef) || a.ticketNo || a.jira || "",
   nature: a.nature || (f && f.nature) || "Proactive",
-  workType: a.type==="Project" ? "Project" : a.type==="BAU" ? "BAU" : ((f && f.workType) || "Project"),
+  workType: a.type==="Project" ? "Project" : (a.type==="BAU"||a.type==="Service Request") ? "BAU" : ((f && f.workType) || "Project"),
   workNature: a.workNature==="Request" ? "Service Request" : (a.workNature || (f && f.workNature) || "Change"),
   priority: a.priority || (f && f.priority) || "Medium"
 });
@@ -5923,7 +5923,7 @@ function LogTimeTable({ loggable, logs, user, onClose, onLog, showToast }) {
             style={{flex:1,minWidth:180,padding:"7px 11px",borderRadius:"var(--radius-sm)",
               border:"1px solid var(--border-2)",fontSize:12}}/>
           {[
-            ["type",["","Project","Change","BAU","Training","Meeting"],"All Types"],
+            ["type",["","Project","Change","BAU","Service Request","Training","Meeting"],"All Types"],
             ["nature",["","Proactive","Reactive"],"All Natures"],
             ["workNature",["","Request","Change","Incident"],"All Work Types"],
           ].map(([k,opts,ph])=>(
@@ -6551,6 +6551,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
              : /chg|change/i.test(rawType)?"Change"
              : /train/i.test(rawType)?"Training"
              : /meet/i.test(rawType)?"Meeting"
+             : /^sr$|serv(ice)?\s*req|^req/i.test(rawType)?"Service Request"
              : rawType?"BAU":"BAU";
     const rawEst = r[fieldMap.estMins]||"";
     const estNum = parseFloat(rawEst)||0;
@@ -6589,6 +6590,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
                  : /chg|change/i.test(rawType)?"Change"
                  : /train/i.test(rawType)?"Training"
                  : /meet/i.test(rawType)?"Meeting"
+                 : /^sr$|serv(ice)?\s*req|^req/i.test(rawType)?"Service Request"
                  : "BAU";
 
         // Estimate: if value ≤24 treat as hours (convert to mins), else already minutes
@@ -7479,9 +7481,9 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     };
 
     // == Activity breakdown data ==================================
-    const actByType  = ["Project","Change","BAU","Training","Meeting"].map(t=>({
+    const actByType  = ["Project","Change","BAU","Service Request","Training","Meeting"].map(t=>({
       label:t.slice(0,4), val:dashActs.filter(a=>a.type===t).length,
-      color:{Project:"#2563eb",Change:"#06b6d4",BAU:"#059669",Incident:"#dc2626",Training:"#d97706",Meeting:"#7c3aed"}[t]
+      color:{Project:"#2563eb",Change:"#06b6d4",BAU:"#059669","Service Request":"#8b5cf6",Incident:"#dc2626",Training:"#d97706",Meeting:"#7c3aed"}[t]
     })).filter(d=>d.val>0);
 
     const logsByMember = members.slice(0,isAdmin?6:members.length).map(m=>({
@@ -7766,7 +7768,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
             <LollipopChart
               data={actByType.map(d=>({
                 ...d,
-                label:["Project","Change","BAU","Training","Meeting"].find(t=>t.slice(0,4)===d.label)||d.label
+                label:["Project","Change","BAU","Service Request","Training","Meeting"].find(t=>t.slice(0,4)===d.label)||d.label
               }))}
               onClick={(d)=>setDashDrill({type:"acts",label:(d.label+" Activities"),data:dashActs.filter(a=>a.type===d.label)})}
             />
@@ -8238,7 +8240,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
             {teams.map(t=><option key={t.name}>{t.name}</option>)}
           </select>
         )}
-        {[["type",["","Project","Change","BAU","Training","Meeting"],"All Types"],
+        {[["type",["","Project","Change","BAU","Service Request","Training","Meeting"],"All Types"],
           ["status",["","Active","Suspended"],"All Status"]
         ].map(([k,opts,ph])=>(
           <select key={k} value={actF[k]} onChange={e=>setActF(f=>({...f,[k]:e.target.value}))} style={{padding:"6px 10px",borderRadius:7,border:"1px solid var(--border-2)",fontSize:12,background:"var(--surface-2)"}}>
@@ -9684,7 +9686,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
               <Card>
                 <div style={{fontWeight:700,fontSize:13,color:"var(--text-1)",marginBottom:4}}>Cost Breakdown by Type</div>
                 <div style={{fontSize:11,color:"var(--text-3)",marginBottom:14}}>Total spend per activity type this period</div>
-                {["Incident","Change","Project","BAU","Training","Meeting"].map(t=>{
+                {["Incident","Change","Project","BAU","Service Request","Training","Meeting"].map(t=>{
                   const tLogs=scopeLogs2.filter(l=>l.type===t);
                   const tCost=calcCost(tLogs);
                   const tActs=[...new Set(tLogs.map(l=>l.actId))].length;
@@ -10313,7 +10315,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
               <div style={{fontWeight:700,fontSize:13,marginBottom:4}}>Activity types</div>
               <div style={{fontSize:12,color:"var(--text-3)",marginBottom:14,lineHeight:1.5}}>Types drive reports and logging rules, so this list is fixed.</div>
               <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                {["Project","Incident","Change","BAU","Training","Meeting"].map(t=>(
+                {["Project","Incident","Change","BAU","Service Request","Training","Meeting"].map(t=>(
                   <span key={t} style={{padding:"5px 12px",borderRadius:20,background:"var(--surface-2)",border:"1px solid var(--border)",fontSize:12.5,color:"var(--text-2)",fontWeight:600}}>{t}</span>
                 ))}
               </div>
@@ -11563,7 +11565,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       const s = String(v).toLowerCase();
       if(s.includes("inc")) return "Incident";
       if(s.includes("chg")||s.includes("change")) return "Change";
-      if(s.includes("req")||s.includes("request")||s.includes("sr")) return "BAU";
+      if(s.includes("req")||s.includes("request")||s.includes("sr")) return "Service Request";
       if(s.includes("proj")) return "Project";
       return "BAU";
     };
@@ -16872,8 +16874,8 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
 
             {/* Task Type */}
             <Lbl t="Task Type">
-              <select style={sS} value={aForm.type} onChange={e=>setAForm(f=>({...f,type:e.target.value}))}>
-                {["BAU","Project","Change","Training","Meeting"].map(o=><option key={o}>{o}</option>)}
+              <select style={sS} value={aForm.type} onChange={e=>setAForm(f=>({...f,type:e.target.value,...(e.target.value==="Service Request"?{workNature:"Request"}:{})}))}>
+                {["BAU","Service Request","Project","Change","Training","Meeting"].map(o=><option key={o}>{o}</option>)}
               </select>
             </Lbl>
 
