@@ -14307,6 +14307,13 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     const [dismissed, _setDismissed] = React.useState(()=>{ try { return JSON.parse(localStorage.getItem("isms_ac_dismissed")||"{}"); } catch(e) { return {}; } });
     const setDismissed = fn => _setDismissed(prev=>{ const n = typeof fn==="function"?fn(prev):fn; try { localStorage.setItem("isms_ac_dismissed", JSON.stringify(n)); } catch(e) {} return n; });
 
+    const [aiOut, _setAiOut] = React.useState(window.__aiOut || null);      // {text, provider, model, q}
+    const setAiOut = v => { window.__aiOut = v; _setAiOut(v); };
+    const [aiBusy, setAiBusy] = React.useState(false);
+    const [aiErr, setAiErr]   = React.useState("");
+    const [aiQ, setAiQ]       = React.useState("");
+    const [aiMask, _setAiMask] = React.useState(window.__aiMask!==false);
+    const setAiMask = v => { window.__aiMask = v; _setAiMask(v); };
     const dayMs = 86400000;
     const toD = s => s ? new Date(String(s).slice(0,10)+"T00:00:00") : null;
     const fmtH = m => (Math.round(m/6)/10)+"h";
@@ -14511,6 +14518,37 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       w.document.close(); setTimeout(()=>w.print(),400);
     };
 
+    const runAI = async (mode, question) => {
+      if(!cloud || !cloud.sb || !cloud.sb.functions) { setAiErr("AI insights need the cloud (Supabase) mode and the 'ai' Edge Function. See cloud/AI_SETUP.md."); return; }
+      setAiBusy(true); setAiErr("");
+      try {
+        const people = (isAdmin ? allUsers.filter(u=>u.team) : allUsers.filter(u=>u.team===user.team)).map(u=>u.name).filter(Boolean).sort((a,b)=>b.length-a.length);
+        const alias = {}; people.forEach((n,i)=>{ alias[n] = "Engineer "+(i<26?String.fromCharCode(65+i):(i+1)); });
+        const snap = {
+          asOf: model.anchorStr, scope: isAdmin ? "all teams" : user.team+" team",
+          avgTeamScore: org, openFindings: {critical:cnt("critical"),high:cnt("high"),medium:cnt("medium"),info:cnt("info")},
+          teams: model.scorecard.map(t=>({team:t.team,score:t.score,engineers:t.hc,utilisationPct:Math.round(t.util),reactivePct:Math.round(t.re),suspendedActivities:t.sp,overEstimate:t.over,openIncidents:t.openMi,hoursLogged:Math.round(t.hrs),effortCostUSD:Math.round(t.cost)})),
+          findings: active.slice(0,25).map(f=>({severity:f.sev,area:f.domain,title:f.title,detail:f.detail})),
+          monthly: model.series.map(x=>({month:x.mk,hours:Math.round(x.hrs),reactiveHours:Math.round(x.react),costUSD:Math.round(x.cost)})),
+          forecast: model.projHrs!==null ? {nextMonthHours:Math.round(model.projHrs),capacityHours:model.totalCap} : null,
+        };
+        let txt = JSON.stringify(snap);
+        if(aiMask) people.forEach(n=>{ txt = txt.split(n).join(alias[n]); });
+        const { data, error } = await cloud.sb.functions.invoke("ai", { body:{ mode, question: question||"", snapshot: JSON.parse(txt) } });
+        if(error) {
+          let msg = error.message || String(error);
+          try { if(error.context && error.context.json) { const j = await error.context.json(); if(j && j.error) msg = j.error; } } catch(e) {}
+          if(/not found|404|Failed to send/i.test(msg)) msg = "AI function is not deployed yet. Follow cloud/AI_SETUP.md. ("+msg+")";
+          throw new Error(msg);
+        }
+        if(!data || data.error) throw new Error((data && data.error) || "Empty response");
+        let out = String(data.text||"");
+        if(aiMask) people.forEach(n=>{ out = out.split(alias[n]).join(n); });
+        setAiOut({text:out, provider:data.provider, model:data.model, q: mode==="ask"?question:"Executive summary", at:new Date().toLocaleTimeString()});
+      } catch(e) { setAiErr(e.message || String(e)); }
+      setAiBusy(false);
+    };
+
     const TabBtn = ({id,label}) => (
       <button onClick={()=>setTab(id)} style={{padding:"9px 16px",border:"none",background:"transparent",cursor:"pointer",fontSize:13,fontWeight:600,fontFamily:"inherit",
         color:tab===id?"var(--brand)":"var(--text-3)",borderBottom:"2px solid "+(tab===id?"var(--brand)":"transparent"),marginBottom:-2}}>{label}</button>
@@ -14540,7 +14578,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
         </div>
 
         <div style={{display:"flex",borderBottom:"2px solid var(--border)",marginBottom:16}}>
-          <TabBtn id="actions" label={"Recommended actions ("+active.length+")"}/><TabBtn id="score" label="Team scorecard"/><TabBtn id="forecast" label="Forecast & trend"/><TabBtn id="summary" label="Executive summary"/>
+          <TabBtn id="actions" label={"Recommended actions ("+active.length+")"}/><TabBtn id="score" label="Team scorecard"/><TabBtn id="forecast" label="Forecast & trend"/><TabBtn id="summary" label="Executive summary"/><TabBtn id="ai" label="✨ AI insights"/>
         </div>
 
         {tab==="actions" && (<div>
@@ -14613,6 +14651,39 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
               <button onClick={printReport} style={{padding:"6px 12px",fontSize:12,borderRadius:"var(--radius-md)",border:"none",background:"var(--brand)",color:"#fff",cursor:"pointer"}}>🖨 Print / PDF</button></div></div>
           <pre style={{whiteSpace:"pre-wrap",fontFamily:"inherit",fontSize:13,lineHeight:1.6,margin:0,color:"var(--text-1)"}}>{narrative()}</pre>
         </Card>)}
+
+        {tab==="ai" && (<div style={{display:"grid",gap:12}}>
+          <Card>
+            <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",alignItems:"center"}}>
+              <div><div style={{fontWeight:700}}>✨ AI insights</div>
+                <div style={{fontSize:12,color:"var(--text-3)",marginTop:2}}>An AI model reads an aggregated snapshot of the findings, scorecard and trend above, then writes a summary or answers your question. It cannot change any data.</div></div>
+              <label style={{fontSize:12,color:"var(--text-2)",display:"flex",gap:6,alignItems:"center",cursor:"pointer"}}>
+                <input type="checkbox" checked={aiMask} onChange={e=>setAiMask(e.target.checked)}/> Hide engineer names from the AI</label>
+            </div>
+            <div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>
+              <button disabled={aiBusy} onClick={()=>runAI("summary")} style={{padding:"8px 16px",borderRadius:"var(--radius-md)",border:"none",background:"var(--brand)",color:"#fff",fontWeight:700,fontSize:13,cursor:aiBusy?"wait":"pointer",opacity:aiBusy?.6:1}}>{aiBusy?"Thinking...":"Generate AI summary"}</button>
+            </div>
+            <div style={{display:"flex",gap:8,marginTop:12}}>
+              <input value={aiQ} onChange={e=>setAiQ(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter" && aiQ.trim() && !aiBusy) runAI("ask",aiQ); }}
+                placeholder="Ask about your data, e.g. Which team is at most risk and why?" style={{flex:1,padding:"9px 12px",border:"1px solid var(--border)",borderRadius:"var(--radius-md)",fontSize:13,fontFamily:"inherit",background:"var(--surface)",color:"var(--text-1)"}}/>
+              <button disabled={aiBusy||!aiQ.trim()} onClick={()=>runAI("ask",aiQ)} style={{padding:"8px 16px",borderRadius:"var(--radius-md)",border:"1px solid var(--brand)",background:"var(--brand-light)",color:"var(--brand)",fontWeight:700,fontSize:13,cursor:"pointer",opacity:(aiBusy||!aiQ.trim())?.5:1}}>Ask</button>
+            </div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
+              {["Which team is at most risk and why?","What should I do first this week?","Where can we reduce reactive work?","Is next month's demand a capacity problem?"].map(x=>(
+                <button key={x} onClick={()=>{ setAiQ(x); runAI("ask",x); }} disabled={aiBusy} style={{fontSize:11,padding:"4px 10px",borderRadius:20,border:"1px solid var(--border)",background:"var(--surface)",color:"var(--text-2)",cursor:"pointer"}}>{x}</button>))}
+            </div>
+          </Card>
+          {aiErr && <Card style={{borderColor:"#fecaca",background:"#fef2f2"}}><div style={{fontSize:13,color:"#b91c1c",fontWeight:600}}>Could not get an AI answer</div><div style={{fontSize:12,color:"#7f1d1d",marginTop:4,wordBreak:"break-word"}}>{aiErr}</div></Card>}
+          {aiOut && <Card>
+            <div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap",marginBottom:8}}>
+              <div style={{fontWeight:700,fontSize:13}}>{aiOut.q}</div>
+              <div style={{fontSize:11,color:"var(--text-3)"}}>{aiOut.provider} · {aiOut.model} · {aiOut.at}</div></div>
+            <pre style={{whiteSpace:"pre-wrap",fontFamily:"inherit",fontSize:13,lineHeight:1.65,margin:0,color:"var(--text-1)"}}>{aiOut.text}</pre>
+            <div style={{display:"flex",gap:8,marginTop:12,alignItems:"center"}}>
+              <button onClick={()=>{ try{navigator.clipboard.writeText(aiOut.text);}catch(e){} showToast("Copied"); }} style={{padding:"5px 12px",fontSize:12,borderRadius:"var(--radius-md)",border:"1px solid var(--border)",background:"var(--surface)",cursor:"pointer"}}>📋 Copy</button>
+              <span style={{fontSize:11,color:"var(--text-3)"}}>AI can make mistakes - check important figures against the tabs above.</span></div>
+          </Card>}
+        </div>)}
       </div>
     );
   };
