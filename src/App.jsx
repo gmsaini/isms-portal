@@ -14495,7 +14495,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     const exportScore = () => { dl("isms_team_scorecard_"+model.anchorStr+".csv", ["Team,Score,Headcount,Utilisation %,Reactive %,Suspended,Over estimate,Open incidents,Hours,Cost"].concat(model.scorecard.map(t=>[t.team,t.score,t.hc,Math.round(t.util),Math.round(t.re),t.sp,t.over,t.openMi,Math.round(t.hrs),Math.round(t.cost)].join(","))).join("\n")); showToast("Scorecard exported"); };
     const narrative = () => {
       const top = active.slice(0,5);
-      const lines = ["ISMS Executive Summary - data as of "+model.anchorStr, "", "Overall health score: "+org+"/100 across "+model.scorecard.length+" team(s), "+model.nUsers+" engineers, "+model.nAct+" activities.",
+      const lines = ["ISMS Executive Summary - data as of "+model.anchorStr, "", "Average team score: "+org+"/100 across "+model.scorecard.length+" team(s), "+model.nUsers+" engineers, "+model.nAct+" activities.",
         "Open findings: "+cnt("critical")+" critical, "+cnt("high")+" high, "+cnt("medium")+" medium, "+cnt("info")+" informational.", ""];
       if(model.scorecard.length){ const w=model.scorecard[0], b=model.scorecard[model.scorecard.length-1]; lines.push("Strongest team: "+b.team+" ("+b.score+"). Needs most attention: "+w.team+" ("+w.score+").",""); }
       if(model.projHrs!==null) lines.push("Forecast: about "+Math.round(model.projHrs)+"h of effort next month vs "+model.totalCap+"h capacity ("+Math.round(model.projHrs/Math.max(1,model.totalCap)*100)+"%).","");
@@ -14505,7 +14505,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     const printReport = () => {
       const w = window.open("","_blank"); if(!w){ showToast("Allow pop-ups to print","err"); return; }
       const esc = s=>String(s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
-      w.document.write("<html><head><title>ISMS Executive Summary</title><style>body{font-family:system-ui,Arial;margin:32px;color:#0f172a}h1{margin:0}table{border-collapse:collapse;width:100%;margin:12px 0}td,th{border:1px solid #cbd5e1;padding:6px 8px;font-size:12px;text-align:left}th{background:#f1f5f9}.s{font-weight:700}</style></head><body><h1>Infrastructure Service Management System</h1><div>Executive summary - data as of "+esc(model.anchorStr)+"</div><h2>Health score: "+org+"/100</h2><pre style='font-family:inherit;white-space:pre-wrap'>"+esc(narrative())+"</pre><h3>Team scorecard</h3><table><tr><th>Team</th><th>Score</th><th>Util %</th><th>Reactive %</th><th>Suspended</th><th>Over est.</th><th>Open inc.</th></tr>"+model.scorecard.map(t=>"<tr><td>"+esc(t.team)+"</td><td class=s>"+t.score+"</td><td>"+Math.round(t.util)+"</td><td>"+Math.round(t.re)+"</td><td>"+t.sp+"</td><td>"+t.over+"</td><td>"+t.openMi+"</td></tr>").join("")+"</table><h3>Open findings</h3><table><tr><th>Severity</th><th>Area</th><th>Finding</th><th>Detail</th></tr>"+active.map(f=>"<tr><td>"+sevMeta[f.sev].l+"</td><td>"+esc(f.domain)+"</td><td>"+esc(f.title)+"</td><td>"+esc(f.detail)+"</td></tr>").join("")+"</table></body></html>");
+      w.document.write("<html><head><title>ISMS Executive Summary</title><style>body{font-family:system-ui,Arial;margin:32px;color:#0f172a}h1{margin:0}table{border-collapse:collapse;width:100%;margin:12px 0}td,th{border:1px solid #cbd5e1;padding:6px 8px;font-size:12px;text-align:left}th{background:#f1f5f9}.s{font-weight:700}</style></head><body><h1>Infrastructure Service Management System</h1><div>Executive summary - data as of "+esc(model.anchorStr)+"</div><h2>Average team score: "+org+"/100</h2><pre style='font-family:inherit;white-space:pre-wrap'>"+esc(narrative())+"</pre><h3>Team scorecard</h3><table><tr><th>Team</th><th>Score</th><th>Util %</th><th>Reactive %</th><th>Suspended</th><th>Over est.</th><th>Open inc.</th></tr>"+model.scorecard.map(t=>"<tr><td>"+esc(t.team)+"</td><td class=s>"+t.score+"</td><td>"+Math.round(t.util)+"</td><td>"+Math.round(t.re)+"</td><td>"+t.sp+"</td><td>"+t.over+"</td><td>"+t.openMi+"</td></tr>").join("")+"</table><h3>Open findings</h3><table><tr><th>Severity</th><th>Area</th><th>Finding</th><th>Detail</th></tr>"+active.map(f=>"<tr><td>"+sevMeta[f.sev].l+"</td><td>"+esc(f.domain)+"</td><td>"+esc(f.title)+"</td><td>"+esc(f.detail)+"</td></tr>").join("")+"</table></body></html>");
       w.document.close(); setTimeout(()=>w.print(),400);
     };
 
@@ -14530,7 +14530,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
             <button onClick={exportActions} style={{padding:"7px 14px",borderRadius:"var(--radius-md)",border:"1px solid rgba(255,255,255,.35)",background:"rgba(255,255,255,.18)",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>⬇ Export actions</button>
             <button onClick={printReport} style={{padding:"7px 14px",borderRadius:"var(--radius-md)",border:"none",background:"#fff",color:"var(--brand)",fontSize:12,fontWeight:700,cursor:"pointer"}}>🖨 Executive summary</button></div>}/>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12,margin:"16px 0"}}>
-          <Tile label="Health score" val={org+"/100"} color={scoreCol(org)} sub={model.scorecard.length+" team(s)"}/>
+          <Tile label="Avg team score" val={org+"/100"} color={scoreCol(org)} sub="same as Overview"/>
           <Tile label="Critical" val={cnt("critical")} color={cnt("critical")?"#b91c1c":"#16a34a"} sub="act now"/>
           <Tile label="High" val={cnt("high")} color={cnt("high")?"#c2410c":"#16a34a"} sub="this week"/>
           <Tile label="Medium / Info" val={cnt("medium")+" / "+cnt("info")} sub="plan & watch"/>
@@ -14975,7 +14975,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
               </div>
               <div style={{textAlign:"center",background:"rgba(255,255,255,.12)",borderRadius:"var(--radius-lg)",padding:"12px 24px",border:"1px solid rgba(255,255,255,.15)",backdropFilter:"blur(8px)"}}>
                 <div style={{fontSize:42,fontWeight:900,color:"#fff",lineHeight:1}}>{overallGrade}</div>
-                <div style={{fontSize:10,color:"rgba(255,255,255,.7)",fontWeight:700,letterSpacing:1.5,marginTop:2}}>OVERALL GRADE</div>
+                <div style={{fontSize:10,color:"rgba(255,255,255,.7)",fontWeight:700,letterSpacing:1.5,marginTop:2}}>BENCHMARK GRADE</div>
                 <div style={{fontSize:11,color:"rgba(255,255,255,.5)",marginTop:2}}>{overallScore}/100</div>
               </div>
             </div>
@@ -15010,7 +15010,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
             {/* Top KPI row */}
             <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:16}}>
               {[
-                {label:"Overall Health Score",  val:`${overallScore}/100`,  sub:overallGrade+" Grade",    icon:"🏆",c:gradeColor,bg:gradeColor+"15",           tab:"benchmarks",  hint:"View full scorecard"},
+                {label:"Benchmark Score (ITIL/DORA/SRE)",  val:`${overallScore}/100`,  sub:overallGrade+" Grade",    icon:"🏆",c:gradeColor,bg:gradeColor+"15",           tab:"benchmarks",  hint:"View full scorecard"},
                 {label:"Critical Issues",        val:critCount,               sub:"require immediate action",icon:"🚨",c:"#dc2626",bg:"#fef2f2",                tab:"deep",         hint:"See root cause analysis"},
                 {label:"Benchmarks Met",         val:`${eliteCount+goodCount}/${metrics.length}`,sub:"vs industry targets",icon:"🎯",c:"#059669",bg:"#f0fdf4", tab:"benchmarks",  hint:"View all benchmarks"},
                 {label:"Potential Hours Saved",  val:`${Math.round((reactivePct+Math.max(0,incidentPct-15)+Math.max(0,meetingPct-10))/100*totalHrs)}h`,sub:"if targets achieved",icon:"⚡",c:"#7c3aed",bg:"#f5f3ff", tab:"action", hint:"View 90-day action plan"},
