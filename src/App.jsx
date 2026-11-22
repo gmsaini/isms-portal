@@ -14473,12 +14473,12 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
         let score=100; if(util>90) score-=Math.min(25,(util-90)*1.2); if(util<55) score-=Math.min(20,(55-util)*0.6);
         score-=Math.max(0,re-35)*0.5; score-=sp*3; score-=Math.min(20,over*2); score-=openMi*6;
         const noTk=tl.filter(l=>!(l.ticketRef||"").trim()&&["Incident","Change"].includes(l.type)).length; score-=Math.min(8,noTk);
-        return {team:t,hc,util,re,sp,over,openMi,score:Math.max(0,Math.round(score)),hrs:tot/60,cost:tl.reduce((s,l)=>s+l.mins/60*cost(l.userId),0)};
+        const ps=(prodData.teamStats||[]).find(x=>x.name===t); return {team:t,hc,util,re,sp,over,openMi,score:ps?ps.score:Math.max(0,Math.round(score)),hrs:tot/60,cost:tl.reduce((s,l)=>s+l.mins/60*cost(l.userId),0)};
       }).sort((a,b)=>a.score-b.score);
 
       F.sort((a,b)=>b.score-a.score);
       return {F, series, projHrs, scorecard, anchorStr, monthKey, totalCap, nAct:sAct.length, nUsers:sUsers.length, nLogs:sLog.length};
-    }, [acts, logs, mis, allUsers, isAdmin, user]);
+    }, [acts, logs, mis, allUsers, isAdmin, user, prodData]);
 
     const sevMeta = {critical:{c:"#b91c1c",bg:"#fef2f2",l:"Critical"}, high:{c:"#c2410c",bg:"#fff7ed",l:"High"}, medium:{c:"#a16207",bg:"#fefce8",l:"Medium"}, info:{c:"#1d4ed8",bg:"#eff6ff",l:"Info"}};
     const domains = ["All", ...Array.from(new Set(model.F.map(f=>f.domain)))];
@@ -14583,7 +14583,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
               <div style={{height:6,background:"var(--surface-2,#f1f5f9)",borderRadius:4,marginTop:10,overflow:"hidden"}}><div style={{width:t.score+"%",height:"100%",background:scoreCol(t.score)}}/></div>
             </Card>))}
           </div>
-          <div style={{fontSize:11,color:"var(--text-3)",marginTop:10}}>Score starts at 100 and loses points for utilisation outside 55-90%, reactive work above 35%, suspended and over-estimate activities, open incidents and missing ticket references.</div>
+          <div style={{fontSize:11,color:"var(--text-3)",marginTop:10}}>Same score as Productivity Overview: 100 minus reactive %, incident %, suspended and stale activities and utilisation above 90%. The other columns are extra context.</div>
         </div>)}
 
         {tab==="forecast" && (<Card>
