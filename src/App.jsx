@@ -5100,6 +5100,227 @@ const SlaChip = ({mi, targets}) => {
   return <div title={"Resolution target "+fmtDur(x.target)} style={{display:"inline-block",marginTop:4,padding:"2px 8px",borderRadius:10,fontSize:10.5,fontWeight:700,color:map.c,background:map.bg,border:"1px solid "+map.b,whiteSpace:"nowrap"}}>{map.t}</div>;
 };
 
+// ===== Stage 3 helpers: smart assignment, change risk, what-if, data assistant =====
+const LVL_NUM = {L1:1, Junior:1, L2:2, Mid:2, L3:3, Senior:3, SME:4};
+const monthOfLatest = logs => { const ms=[...new Set(logs.map(l=>(l.date||"").slice(0,7)).filter(Boolean))].sort(); return ms[ms.length-1]||""; };
+
+// Rank team members for a piece of work: availability, level fit, past experience
+function rankAssignees(form, users, logs, acts, selfActId) {
+  if(!form || !form.team) return [];
+  const mk = monthOfLatest(logs);
+  const need = LVL_NUM[form.level] || (form.complexity==="High"?3:form.complexity==="Low"?1:2);
+  const actById = {}; acts.forEach(a=>{ actById[a.id]=a; });
+  const members = users.filter(u=>u.team===form.team && u.status==="Active" && u.role!=="admin");
+  const rows = members.map(u=>{
+    const mine = logs.filter(l=>l.userId===u.id);
+    const monthMins = mine.filter(l=>(l.date||"").startsWith(mk)).reduce((s,l)=>s+l.mins,0);
+    const util = Math.round(monthMins/9600*100);
+    const exp = mine.filter(l=>{ if(l.actId===selfActId) return true; const a=actById[l.actId]; return (l.type===form.type && l.cat===form.cat) || (a && a.type===form.type && a.cat===form.cat); }).reduce((s,l)=>s+l.mins,0);
+    const lv = LVL_NUM[u.engineerLevel] || 2;
+    const d = lv-need;
+    const fit = d===0?100 : d===1?85 : d>=2?55 : d===-1?50 : 20;
+    return {u, util, expH:Math.round(exp/6)/10, lv:u.engineerLevel||"-", fit, availability:Math.max(0,100-util)};
+  });
+  const maxExp = Math.max(1, ...rows.map(r=>r.expH));
+  rows.forEach(r=>{
+    r.expScore = Math.round(r.expH/maxExp*100);
+    r.score = Math.round(r.availability*0.4 + r.expScore*0.4 + r.fit*0.2);
+    const why = [];
+    why.push(r.util<=60?"has capacity ("+r.util+"% used)":r.util>=90?"heavily loaded ("+r.util+"% used)":r.util+"% used");
+    why.push(r.expH>0?r.expH+"h on similar "+form.type+" work":"no similar work yet");
+    why.push(r.fit>=85?"level "+r.lv+" fits":r.fit<=50?"level "+r.lv+" is a stretch":"level "+r.lv);
+    r.why = why.join(" · ");
+  });
+  return rows.sort((a,b)=>b.score-a.score);
+}
+
+const AssigneeSuggest = ({form, users, logs, acts, selfActId}) => {
+  const rows = useMemo(()=>rankAssignees(form, users, logs, acts, selfActId).slice(0,3), [form.team, form.type, form.cat, form.level, form.complexity, users, logs, acts, selfActId]);
+  if(!form.team) return null;
+  if(!rows.length) return <div style={{fontSize:11,color:"var(--text-4)"}}>🎯 Best-fit suggestion: no active members in {form.team}.</div>;
+  return (
+    <div data-testid="assignee-suggest" style={{padding:"10px 12px",borderRadius:8,background:"#faf5ff",border:"1px solid #e9d5ff",fontSize:12}}>
+      <div style={{fontWeight:700,color:"#6b21a8",marginBottom:6}}>🎯 Best fit to take this on <span style={{fontWeight:400,color:"var(--text-4)"}}>(availability 40% · experience 40% · level fit 20%)</span></div>
+      {rows.map((r,i)=>(
+        <div key={r.u.id} style={{display:"flex",gap:8,alignItems:"baseline",padding:"3px 0"}}>
+          <span style={{fontWeight:800,color:i===0?"#7e22ce":"var(--text-3)",minWidth:18}}>{i+1}.</span>
+          <span style={{fontWeight:600,minWidth:120}}>{r.u.name}</span>
+          <span style={{fontWeight:700,color:"#7e22ce",minWidth:34}}>{r.score}</span>
+          <span style={{color:"var(--text-3)",fontSize:11}}>{r.why}</span>
+        </div>))}
+    </div>);
+};
+
+// Change risk: how likely is this Change/Project to cause trouble? Transparent factor model.
+function changeRiskRows(acts, logs, mis, users, anchorStr) {
+  const sizeW = {Small:0, Medium:8, Large:16, XL:24};
+  const anchor = new Date((anchorStr||new Date().toISOString().slice(0,10))+"T00:00:00").getTime();
+  const mk = monthOfLatest(logs);
+  const teamUtil = {}; 
+  const teams = [...new Set(users.filter(u=>u.team).map(u=>u.team))];
+  teams.forEach(t=>{ const hc=users.filter(u=>u.team===t&&u.status!=="Inactive"&&u.role!=="admin").length||1; const m=logs.filter(l=>l.team===t&&(l.date||"").startsWith(mk)).reduce((s,l)=>s+l.mins,0); teamUtil[t]=Math.round(m/(hc*9600)*100); });
+  const incs90 = {}; teams.forEach(t=>{ incs90[t]=mis.filter(m=>{ const st=new Date((m.startedAt||m.date||"").slice(0,10)+"T00:00:00").getTime(); return anchor-st<=90*86400000 && anchor-st>=0 && (m.team===t||(m.teamsInvolved||[]).includes(t)); }).length; });
+  const byAct = {}; logs.forEach(l=>{ byAct[l.actId]=(byAct[l.actId]||0)+l.mins; });
+  const histOver = {}; teams.forEach(t=>{ const ch=acts.filter(a=>a.team===t&&(a.type==="Change"||a.type==="Project")&&a.estMins>0&&byAct[a.id]>0); histOver[t]= ch.length>=3 ? Math.round(ch.filter(a=>byAct[a.id]>a.estMins*1.2).length/ch.length*100) : null; });
+  return acts.filter(a=>a.status==="Active" && (a.type==="Change"||a.type==="Project")).map(a=>{
+    const f = [];
+    const s = sizeW[a.taskSize]||0; if(s) f.push({pts:s, t:"Size "+a.taskSize});
+    const c = a.complexity==="High"?20:a.complexity==="Medium"?8:0; if(c) f.push({pts:c, t:a.complexity+" complexity"});
+    const lv = a.level==="L3"||a.level==="Senior"?6:0; if(lv) f.push({pts:lv, t:"Needs "+a.level+" skills"});
+    const inc = incs90[a.team]||0; const ip = Math.min(24, inc*8); if(ip) f.push({pts:ip, t:inc+" major incident(s) in this team, last 90d"});
+    const u = teamUtil[a.team]||0; const up = u>=95?16:u>=85?10:u>=75?4:0; if(up) f.push({pts:up, t:"Team at "+u+"% utilisation"});
+    const ho = histOver[a.team]; const hp = ho===null||ho===undefined?0:ho>=50?14:ho>=30?8:0; if(hp) f.push({pts:hp, t:ho+"% of this team's past changes overran"});
+    const done = byAct[a.id]||0; if(a.estMins>0 && done>a.estMins*1.2){ f.push({pts:12, t:"Already "+Math.round(done/a.estMins*100)+"% of estimate"}); }
+    if(a.nature==="Reactive"){ f.push({pts:6, t:"Reactive (unplanned)"}); }
+    const score = Math.min(100, f.reduce((x,y)=>x+y.pts,0));
+    const band = score>=60?"High":score>=35?"Medium":"Low";
+    const safer = [];
+    if(band!=="Low"){ if(c||s>=16) safer.push("split into smaller steps"); if(inc>=2||u>=85) safer.push("schedule outside peak load, with rollback plan"); if(lv) safer.push("pair with an experienced engineer"); }
+    return {a, score, band, factors:f.sort((x,y)=>y.pts-x.pts), safer, util:u};
+  }).sort((x,y)=>y.score-x.score);
+}
+
+// What-if capacity planner: pure arithmetic on live capacity, no AI
+const WhatIfPlanner = ({caps, teamNames}) => {
+  const [team, setTeam] = useState(teamNames[0]||"");
+  const [dEng, setDEng] = useState(0);
+  const [leaveDays, setLeaveDays] = useState(0);
+  const [projH, setProjH] = useState(0);
+  const [growth, setGrowth] = useState(0);
+  const cap = caps.find(c=>c.team===team);
+  if(!cap) return null;
+  const perEng = 9600;
+  const hc = Math.max(1, Math.round(cap.availMins/perEng));
+  const netNow = cap.availMins - cap.vacMins;
+  const pctNow = Math.round(cap.utilMins/Math.max(netNow,1)*100);
+  const netNew = Math.max(0, (hc+dEng)*perEng - cap.vacMins - leaveDays*480);
+  const demandNew = cap.utilMins*(1+growth/100) + projH*60;
+  const pctNew = Math.round(demandNew/Math.max(netNew,1)*100);
+  const col = p => p>=95?"#b91c1c":p>=85?"#c2410c":p>=70?"#a16207":"#16a34a";
+  // engineers needed to land at or under 85%
+  const target = 0.85;
+  const needNet = demandNew/target;
+  const engNeeded = Math.ceil((needNet + cap.vacMins + leaveDays*480)/perEng);
+  const delta = engNeeded - (hc+dEng);
+  const verdict = pctNew>=95 ? "Over capacity: this scenario cannot be delivered without more people or less work."
+    : pctNew>=85 ? "Tight: little room for incidents or leave."
+    : pctNew>=70 ? "Healthy but busy." : "Comfortable headroom.";
+  const inp = {padding:"6px 8px",border:"1px solid var(--border-2)",borderRadius:6,width:90,fontSize:13};
+  const Row = ({l,children,hint}) => (<label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,marginBottom:8}}><span style={{minWidth:190,fontWeight:600}}>{l}</span>{children}{hint&&<span style={{color:"var(--text-4)",fontSize:11}}>{hint}</span>}</label>);
+  return (
+    <Card style={{marginTop:20}} >
+      <div style={{fontWeight:700,fontSize:13,marginBottom:2}}>🧪 What-if planner</div>
+      <div style={{fontSize:11,color:"var(--text-3)",marginBottom:12}}>Try a scenario against this team's live capacity. Nothing is saved.</div>
+      <div data-testid="whatif" style={{display:"grid",gridTemplateColumns:"minmax(280px,1fr) minmax(280px,1fr)",gap:24}}>
+        <div>
+          <Row l="Team"><select value={team} onChange={e=>setTeam(e.target.value)} style={{...inp,width:150}}>{teamNames.map(t=><option key={t}>{t}</option>)}</select></Row>
+          <Row l="Engineers added / lost" hint={"now "+hc}><input type="number" step="1" min={-(hc-1)} style={inp} value={dEng} onChange={e=>setDEng(+e.target.value||0)}/></Row>
+          <Row l="Extra leave (days, total)"><input type="number" min="0" style={inp} value={leaveDays} onChange={e=>setLeaveDays(Math.max(0,+e.target.value||0))}/></Row>
+          <Row l="New project (hours / month)"><input type="number" min="0" style={inp} value={projH} onChange={e=>setProjH(Math.max(0,+e.target.value||0))}/></Row>
+          <Row l="Existing workload change %"><input type="number" style={inp} value={growth} onChange={e=>setGrowth(+e.target.value||0)}/></Row>
+        </div>
+        <div>
+          <div style={{display:"flex",gap:14,alignItems:"center",marginBottom:10}}>
+            <div style={{textAlign:"center"}}><div style={{fontSize:11,color:"var(--text-4)"}}>Now</div><div style={{fontSize:26,fontWeight:800,color:col(pctNow)}}>{pctNow}%</div></div>
+            <div style={{fontSize:22,color:"var(--text-4)"}}>→</div>
+            <div style={{textAlign:"center"}}><div style={{fontSize:11,color:"var(--text-4)"}}>Scenario</div><div data-testid="whatif-pct" style={{fontSize:26,fontWeight:800,color:col(pctNew)}}>{pctNew}%</div></div>
+          </div>
+          <div style={{fontSize:12,fontWeight:600,marginBottom:6,color:col(pctNew)}}>{verdict}</div>
+          <div style={{fontSize:11,color:"var(--text-3)",lineHeight:1.6}}>
+            Net capacity {fmtM(netNow)} → {fmtM(netNew)}<br/>Demand {fmtM(cap.utilMins)} → {fmtM(Math.round(demandNew))}<br/>
+            {delta>0 ? <span>To stay at or under 85% you would need <strong>{delta} more engineer{delta>1?"s":""}</strong> (or trim about {Math.round((demandNew-netNew*target)/60)}h of work).</span> : <span>You could absorb about <strong>{Math.max(0,Math.round((netNew*target-demandNew)/60))}h</strong> more work a month and stay at or under 85%.</span>}
+          </div>
+        </div>
+      </div>
+    </Card>);
+};
+
+// ===== Ask your data: AI turns a question into a query spec; the browser runs it on local data =====
+const QSCHEMA = {
+  activities: {team:"str",type:"str",cat:"str",priority:"str",status:"str",nature:"str",workNature:"str",taskSize:"str",complexity:"str",level:"str",date:"date",estMins:"num"},
+  time_logs:  {member:"str",team:"str",type:"str",cat:"str",activity:"str",nature:"str",workNature:"str",priority:"str",date:"date",month:"str",mins:"num"},
+  incidents:  {incidentNo:"str",name:"str",severity:"str",status:"str",team:"str",date:"date",month:"str",hoursToResolve:"num",reopenCount:"num"},
+  users:      {name:"str",team:"str",role:"str",title:"str",engineerLevel:"str",status:"str",costPerHour:"num"},
+};
+function runQuerySpec(spec, tables) {
+  if(!spec || typeof spec!=="object") throw new Error("No query returned");
+  if(spec.error) throw new Error(spec.error);
+  const sch = QSCHEMA[spec.table]; if(!sch) throw new Error("Unknown table: "+spec.table);
+  let rows = tables[spec.table] || [];
+  (spec.filters||[]).forEach(f=>{
+    const ty = sch[f.field]; if(!ty) throw new Error("Unknown field: "+f.field);
+    const ok = ["=","!=",">",">=","<","<=","contains","in"]; if(!ok.includes(f.op)) throw new Error("Unsupported operator: "+f.op);
+    rows = rows.filter(r=>{
+      let v = r[f.field]; let w = f.value;
+      if(ty==="num"){ v=+v; w=Array.isArray(w)?w.map(Number):+w; }
+      else { v=String(v==null?"":v).toLowerCase(); w=Array.isArray(w)?w.map(x=>String(x).toLowerCase()):String(w).toLowerCase(); }
+      if(f.op==="=") return v===w; if(f.op==="!=") return v!==w; if(f.op===">") return v>w; if(f.op===">=") return v>=w; if(f.op==="<") return v<w; if(f.op==="<=") return v<=w;
+      if(f.op==="contains") return String(v).includes(String(w)); if(f.op==="in") return Array.isArray(w)&&w.includes(v); return true; });
+  });
+  const m = spec.metric||{agg:"count"}; const agg = ["count","sum","avg"].includes(m.agg)?m.agg:"count";
+  if(agg!=="count" && sch[m.field]!=="num") throw new Error("Cannot "+agg+" field "+m.field);
+  if(spec.groupBy && !sch[spec.groupBy]) throw new Error("Unknown group field: "+spec.groupBy);
+  const groups = {};
+  rows.forEach(r=>{ const k = spec.groupBy ? String(r[spec.groupBy]==null||r[spec.groupBy]===""?"(none)":r[spec.groupBy]) : "Total"; const g=groups[k]||(groups[k]={n:0,s:0}); g.n++; if(agg!=="count") g.s+=(+r[m.field]||0); });
+  let out = Object.keys(groups).map(k=>({label:k, n:groups[k].n, value: agg==="count"?groups[k].n : agg==="sum"?groups[k].s : groups[k].s/Math.max(1,groups[k].n)}));
+  out.sort((a,b)=> spec.sort==="asc" ? a.value-b.value : b.value-a.value);
+  if(spec.groupBy==="month"||spec.groupBy==="date") out.sort((a,b)=>a.label<b.label?-1:1);
+  const lim = Math.min(25, Math.max(1, +spec.limit||10)); 
+  return {rows: out.slice(0,lim), total: out.length, matched: rows.length, agg, field: m.field||null};
+}
+
+const DataAssistant = ({cloud, tables, names, scopeLabel}) => {
+  const [q,setQ] = useState(""); const [busy,setBusy] = useState(false); const [err,setErr] = useState(""); const [res,setRes] = useState(null);
+  const ask = async (question) => {
+    const text = (question||q).trim(); if(!text) return;
+    setQ(text); setBusy(true); setErr(""); setRes(null);
+    try {
+      const schema = {}; Object.keys(QSCHEMA).forEach(t=>{ schema[t]=Object.keys(QSCHEMA[t]).map(f=>f+":"+QSCHEMA[t][f]); });
+      const plan = await callAiFn(cloud, {mode:"query", question:text, snapshot:{schema, today:new Date().toISOString().slice(0,10), note:"month is YYYY-MM"}});
+      let spec; try { spec = JSON.parse(String(plan.text).replace(/^```(?:json)?/i,"").replace(/```$/,"").trim()); } catch(e) { throw new Error("The AI reply was not a valid query. Try rephrasing."); }
+      const out = runQuerySpec(spec, tables);
+      setRes({spec, out, plan:plan.text, explain:"", question:text});
+      // explain: aliases for names, only the aggregated rows are sent
+      const alias = {}; names.forEach((n,i)=>{ alias[n]="Engineer "+(i<26?String.fromCharCode(65+i):(i+1)); });
+      let snap = JSON.stringify({question:text, whatWasMeasured:spec.explain||spec.title, metric:out.agg+(out.field?" of "+out.field:""), rowsMatched:out.matched, groups:out.total, results:out.rows.map(r=>({label:r.label,value:Math.round(r.value*10)/10,records:r.n}))});
+      names.slice().sort((a,b)=>b.length-a.length).forEach(n=>{ snap=snap.split(n).join(alias[n]); });
+      try {
+        const ex = await callAiFn(cloud, {mode:"ask", question:"In 2 to 3 sentences, answer the user's question from these results and point out one thing worth acting on.", snapshot:JSON.parse(snap)});
+        let t = ex.text; Object.keys(alias).forEach(n=>{ t=t.split(alias[n]).join(n); });
+        setRes(r=>r&&{...r, explain:t});
+      } catch(e) {}
+    } catch(e) { setErr(e.message||String(e)); }
+    setBusy(false);
+  };
+  const eg = ["How many hours did each team log per month?","Which members logged the most hours?","Average hours to resolve incidents by severity","How many active activities per type?"];
+  const mx = res ? Math.max(1,...res.out.rows.map(r=>r.value)) : 1;
+  return (
+    <div data-testid="data-assistant" style={{display:"grid",gap:12}}>
+      <Card>
+        <div style={{fontWeight:700,fontSize:13,marginBottom:4}}>💬 Ask your data</div>
+        <div style={{fontSize:11,color:"var(--text-3)",marginBottom:10}}>Ask in plain English about activities, time logs, incidents and people ({scopeLabel}). The AI only sees your question and the field names; the numbers are calculated in your browser.</div>
+        <div style={{display:"flex",gap:8}}>
+          <input value={q} onChange={e=>setQ(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") ask(); }} placeholder="e.g. Which team logged the most reactive hours?" style={{flex:1,padding:"9px 12px",border:"1px solid var(--border-2)",borderRadius:8,fontSize:13}}/>
+          <Btn onClick={()=>ask()} disabled={busy||!q.trim()}>{busy?"Thinking…":"Ask"}</Btn>
+        </div>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>{eg.map(x=><button key={x} onClick={()=>ask(x)} disabled={busy} style={{fontSize:11,padding:"3px 10px",borderRadius:14,border:"1px solid var(--border-2)",background:"var(--surface-2)",cursor:"pointer"}}>{x}</button>)}</div>
+        {err && <div style={{marginTop:10,fontSize:12,color:"#b91c1c",background:"#fef2f2",border:"1px solid #fecaca",padding:"8px 10px",borderRadius:8}}>{err}</div>}
+      </Card>
+      {res && (<Card>
+        <div style={{fontWeight:700,fontSize:14}}>{res.spec.title||res.question}</div>
+        <div style={{fontSize:11,color:"var(--text-4)",marginBottom:10}}>{res.spec.explain} · {res.out.matched} records matched{res.out.total>res.out.rows.length?" · showing top "+res.out.rows.length+" of "+res.out.total:""}</div>
+        <div data-testid="query-result">{res.out.rows.map(r=>(
+          <div key={r.label} style={{display:"flex",alignItems:"center",gap:8,fontSize:12,marginBottom:5}}>
+            <span style={{minWidth:150,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.label}</span>
+            <div style={{flex:1,height:12,background:"var(--surface-3)",borderRadius:6,overflow:"hidden"}}><div style={{height:"100%",width:Math.max(2,r.value/mx*100)+"%",background:"var(--brand)",borderRadius:6}}/></div>
+            <span style={{minWidth:70,textAlign:"right",fontWeight:700}}>{Math.round(r.value*10)/10}</span>
+          </div>))}</div>
+        {res.explain && <div style={{marginTop:10,padding:"10px 12px",background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:8,fontSize:12,color:"#0c4a6e",whiteSpace:"pre-wrap"}}>{res.explain}</div>}
+        <details style={{marginTop:8}}><summary style={{fontSize:11,color:"var(--text-4)",cursor:"pointer"}}>Show the query that was run</summary><pre style={{fontSize:11,background:"var(--surface-2)",padding:8,borderRadius:6,overflow:"auto"}}>{JSON.stringify(res.spec,null,2)}</pre></details>
+      </Card>)}
+    </div>);
+};
+
 const DEFAULT_CATEGORIES = ["Infrastructure Build","Maintenance","Security & Compliance","Automation & Scripting","Monitoring & Alerting","Documentation"].map(n=>({name:n, active:true}));
 // Values pre-filled in the Log Time form from an activity's own settings
 const logDefaultsFrom = (a, f) => ({
@@ -10260,6 +10481,8 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
           ))}
         </Card>
       </div>
+      <WhatIfPlanner caps={isAdmin?LIVE_CAPACITY:LIVE_CAPACITY.filter(c=>c.team===user.team)} teamNames={(isAdmin?teams:teams.filter(t=>t.name===user.team)).map(t=>t.name)}/>
+      <div style={{height:20}}/>
       <Card>
         <div style={{fontWeight:700,fontSize:13,marginBottom:14}}>Q2 Bandwidth Plan — Apr to Jun 2025</div>
         <div style={{overflowX:"auto"}}>
@@ -14801,7 +15024,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
         </div>
 
         <div style={{display:"flex",borderBottom:"2px solid var(--border)",marginBottom:16}}>
-          <TabBtn id="actions" label={"Recommended actions ("+active.length+")"}/><TabBtn id="score" label="Team scorecard"/><TabBtn id="forecast" label="Forecast & trend"/><TabBtn id="roi" label="Automation ROI"/><TabBtn id="summary" label="Executive summary"/><TabBtn id="ai" label="✨ AI insights"/>
+          <TabBtn id="actions" label={"Recommended actions ("+active.length+")"}/><TabBtn id="score" label="Team scorecard"/><TabBtn id="forecast" label="Forecast & trend"/><TabBtn id="risk" label="Change risk"/><TabBtn id="roi" label="Automation ROI"/><TabBtn id="summary" label="Executive summary"/><TabBtn id="ai" label="✨ AI insights"/><TabBtn id="data" label="💬 Ask your data"/>
         </div>
 
         {tab==="actions" && (<div>
@@ -14865,6 +15088,42 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
             <thead><tr style={{textAlign:"left",color:"var(--text-3)"}}><th style={{padding:6}}>Month</th><th>Hours</th><th>Reactive h</th><th>Reactive %</th><th>Effort cost</th></tr></thead>
             <tbody>{model.series.map(s=>(<tr key={s.mk} style={{borderTop:"1px solid var(--border)"}}><td style={{padding:6}}>{s.mk}</td><td>{Math.round(s.hrs)}</td><td>{Math.round(s.react)}</td><td>{Math.round(s.react/Math.max(1,s.hrs)*100)}%</td><td>{money(s.cost)}</td></tr>))}</tbody></table>}
         </Card>)}
+
+        {tab==="risk" && (() => {
+          const scope = isAdmin ? acts : acts.filter(a=>a.team===user.team);
+          const susers = isAdmin ? allUsers : allUsers.filter(u=>u.team===user.team);
+          const rowsR = changeRiskRows(scope, isAdmin?logs:logs.filter(l=>l.team===user.team), isAdmin?mis:mis.filter(m=>m.team===user.team||(m.teamsInvolved||[]).includes(user.team)), susers, model.anchorStr);
+          const bc = b => b==="High"?["#b91c1c","#fef2f2","#fecaca"]:b==="Medium"?["#a16207","#fffbeb","#fde68a"]:["#166534","#f0fdf4","#bbf7d0"];
+          return (<div data-testid="change-risk">
+            <div style={{fontSize:12,color:"var(--text-3)",marginBottom:10}}>Active Change and Project work scored 0-100 from size, complexity, skill level, the team's recent major incidents, current load and its history of overruns. The factors are listed so you can challenge the score.</div>
+            {rowsR.length===0 && <Card style={{textAlign:"center",padding:30,fontSize:13}}>No active Change or Project activities in scope.</Card>}
+            {rowsR.slice(0,25).map(r=>{ const [c,bg,bd]=bc(r.band); return (
+              <Card key={r.a.id} style={{marginBottom:8}}>
+                <div style={{display:"flex",gap:12,alignItems:"flex-start"}}>
+                  <div style={{minWidth:64,textAlign:"center",padding:"6px 0",borderRadius:8,background:bg,border:"1px solid "+bd,color:c}}><div style={{fontSize:20,fontWeight:800}}>{r.score}</div><div style={{fontSize:10,fontWeight:700}}>{r.band}</div></div>
+                  <div style={{flex:1}}>
+                    <div style={{fontWeight:700,fontSize:13}}>{r.a.name} <span style={{fontWeight:400,color:"var(--text-4)",fontSize:11}}>· {r.a.team} · {r.a.type}</span></div>
+                    <div style={{fontSize:11,color:"var(--text-3)",marginTop:3}}>{r.factors.length?r.factors.map(f=>"+"+f.pts+" "+f.t).join("  ·  "):"No risk factors found."}</div>
+                    {r.safer.length>0 && <div style={{fontSize:11,color:"#0c4a6e",marginTop:4}}>💡 To lower risk: {r.safer.join("; ")}.</div>}
+                  </div>
+                </div>
+              </Card>); })}
+          </div>);
+        })()}
+
+        {tab==="data" && (()=>{
+          const scopeActs = isAdmin ? acts : acts.filter(a=>a.team===user.team);
+          const scopeLogs = isAdmin ? logs : logs.filter(l=>l.team===user.team);
+          const scopeMis = (isAdmin ? mis : mis.filter(m=>m.team==="Cross-Team"||m.team===user.team||(m.teamsInvolved||[]).includes(user.team)));
+          const scopeUsers = (isAdmin ? allUsers.filter(u=>u.team) : allUsers.filter(u=>u.team===user.team));
+          const tables = {
+            activities: scopeActs,
+            time_logs: scopeLogs.map(l=>({...l, month:(l.date||"").slice(0,7)})),
+            incidents: scopeMis.map(m=>{ const s=m.startedAt?new Date(m.startedAt).getTime():0, e=m.resolvedAt?new Date(m.resolvedAt).getTime():0; return {incidentNo:m.incidentNo||m.id, name:m.name, severity:m.severity, status:m.status, team:m.team, date:(m.startedAt||m.date||"").slice(0,10), month:(m.startedAt||m.date||"").slice(0,7), hoursToResolve:(s&&e)?Math.round((e-s)/360000)/10:null, reopenCount:(m.history||[]).filter(h=>h.status==="Reopened"||h==="Reopened").length}; }),
+            users: scopeUsers,
+          };
+          return <DataAssistant cloud={cloud} tables={tables} names={scopeUsers.map(u=>u.name).filter(Boolean)} scopeLabel={isAdmin?"all teams":user.team+" team"}/>;
+        })()}
 
         {tab==="roi" && (() => {
           const rate = model.avgRate || 0;
@@ -17434,6 +17693,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
               </div>
             </Lbl>
 
+            <div style={{gridColumn:"1/-1"}}><AssigneeSuggest form={aForm} users={allUsers} logs={logs} acts={acts} selfActId={target&&target.id}/></div>
             {/* Description */}
             <div style={{gridColumn:"1/-1"}}>
               <Lbl t="Description (shown to members when they log time)">
