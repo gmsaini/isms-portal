@@ -6857,6 +6857,13 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
 
     // == Productivity ==========================================
     {
+      id:"action_center", icon:"🎯", label:"Action Center",
+      mgrSec:"Productivity",
+      role:"mgr", guideGroup:"🚀 Productivity Intelligence", guideColor:"#0891b2", guideBg:"#ecfeff",
+      desc:"Rule-based intelligence engine that scans activities, time logs, incidents and capacity, ranks what needs attention, and offers one-click actions, a team health scorecard, a demand forecast and an executive summary.",
+      benefits:["Turns raw data into a prioritised to-do list with one-click fixes","Detects overruns, idle work, overload, recurring toil, open incidents and audit gaps","Team health scorecard and next-month forecast","Executive summary export (CSV / print to PDF)"],
+    },
+    {
       id:"prod_overview", icon:"🚀", label:"Overview",
       mgrSec:"Productivity",
       role:"mgr", guideGroup:"🚀 Productivity Intelligence", guideColor:"#0891b2", guideBg:"#ecfeff",
@@ -14287,6 +14294,327 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     );
   };
 
+  // ==========================================================================
+  // ACTION CENTER - rule based intelligence engine: findings -> one-click actions -> reports
+  // ==========================================================================
+  const PageActionCenter = () => {
+    const [tab, _setTab] = React.useState(window.__acTab || "actions");
+    const setTab = t => { window.__acTab = t; _setTab(t); };
+    const [domain, setDomain] = React.useState("All");
+    const [showDismissed, setShowDismissed] = React.useState(false);
+    const [dismissed, _setDismissed] = React.useState(()=>{ try { return JSON.parse(localStorage.getItem("isms_ac_dismissed")||"{}"); } catch(e) { return {}; } });
+    const setDismissed = fn => _setDismissed(prev=>{ const n = typeof fn==="function"?fn(prev):fn; try { localStorage.setItem("isms_ac_dismissed", JSON.stringify(n)); } catch(e) {} return n; });
+
+    const dayMs = 86400000;
+    const toD = s => s ? new Date(String(s).slice(0,10)+"T00:00:00") : null;
+    const fmtH = m => (Math.round(m/6)/10)+"h";
+    const money = n => "$"+Math.round(n).toLocaleString();
+
+    const model = React.useMemo(()=>{
+      const sAct  = isAdmin ? acts : acts.filter(a=>a.team===user.team);
+      const sLog  = isAdmin ? logs : logs.filter(l=>l.team===user.team);
+      const sUsers= (isAdmin ? allUsers.filter(u=>u.team) : allUsers.filter(u=>u.team===user.team)).filter(u=>u.status!=="Inactive");
+      const sMis  = isAdmin ? mis : mis.filter(m=>m.team==="Cross-Team" || m.team===user.team || (m.teamsInvolved||[]).includes(user.team));
+      const teamNames = [...new Set(sUsers.map(u=>u.team))];
+
+      // anchor = newest data date (demo safe, works with historical data)
+      const dates = [...sLog.map(l=>l.date), ...sMis.map(m=>(m.startedAt||"").slice(0,10))].filter(Boolean).sort();
+      const anchorStr = dates[dates.length-1] || today();
+      const anchor = toD(anchorStr);
+      const monthKey = anchorStr.slice(0,7);
+      const monthLogs = sLog.filter(l=>(l.date||"").startsWith(monthKey));
+
+      const loggedByAct = {}; sLog.forEach(l=>{ loggedByAct[l.actId]=(loggedByAct[l.actId]||0)+l.mins; });
+      const lastByAct = {};  sLog.forEach(l=>{ if(!lastByAct[l.actId]||l.date>lastByAct[l.actId]) lastByAct[l.actId]=l.date; });
+      const lastByUser = {}; sLog.forEach(l=>{ if(!lastByUser[l.userId]||l.date>lastByUser[l.userId]) lastByUser[l.userId]=l.date; });
+      const monthByUser = {}; monthLogs.forEach(l=>{ monthByUser[l.userId]=(monthByUser[l.userId]||0)+l.mins; });
+      const cost = id => (allUsers.find(u=>u.id===id)||{}).costPerHour||0;
+
+      const F = [];
+      const add = f => F.push(f);
+
+      // -- 1. Incidents ------------------------------------------------------
+      sMis.filter(m=>m.status==="Open").forEach(m=>{
+        const ageH = Math.max(0,(anchor - new Date(m.startedAt))/3600000);
+        const sevW = m.severity==="Sev1"?100:m.severity==="Sev2"?85:60;
+        add({id:"mi-open-"+m.id, domain:"Incidents", sev: m.severity==="Sev1"||ageH>24?"critical":"high", score:sevW+Math.min(ageH,48)/2,
+          title:(m.incidentNo||m.id)+" "+m.name+" still open", detail:m.severity+" open for "+(ageH>=24?Math.round(ageH/24)+" day(s)":Math.round(ageH)+"h")+" · teams: "+((m.teamsInvolved||[]).join(", ")||m.team),
+          why:"Open major incidents breach restore-time targets quickly (DORA MTTR < 4h for Sev1/2).",
+          action:{label:"Open incident", run:()=>{ window.__miTab="incidents"; goPage("major_incidents"); }}});
+      });
+      sMis.filter(m=>m.status==="Resolved").forEach(m=>{
+        const dH = m.resolvedAt ? (anchor - new Date(m.resolvedAt))/3600000 : 0;
+        add({id:"mi-close-"+m.id, domain:"Incidents", sev:"medium", score:45+Math.min(dH,72)/4,
+          title:(m.incidentNo||m.id)+" resolved but not closed", detail:"Awaiting post-incident review and closure"+(dH>0?" · resolved "+Math.round(dH/24)+" day(s) ago":""),
+          why:"Closing incidents forces the PIR and keeps MTTR / recurrence reports accurate.",
+          action:{label:"Review & close", run:()=>{ window.__miTab="incidents"; goPage("major_incidents"); }}});
+      });
+
+      // -- 2. Activities ----------------------------------------------------
+      // BAU / Incident / Meeting work is recurring, so only Projects and Changes are budget-checked
+      const budgeted = sAct.filter(a=>a.status==="Active" && a.estMins>0 && (a.type==="Project"||a.type==="Change"))
+        .map(a=>({a, used:loggedByAct[a.id]||0, pct:(loggedByAct[a.id]||0)/a.estMins*100}));
+      const wild = budgeted.filter(x=>x.pct>400);
+      if(wild.length) add({id:"act-wild", domain:"Hygiene", sev:"medium", score:52,
+        title:wild.length+" activities used more than 4x their estimate", detail:"Estimates look like placeholders: "+wild.slice(0,4).map(x=>x.a.id).join(", ")+(wild.length>4?" ...":""),
+        why:"Recurring request buckets should be typed BAU or given realistic monthly estimates, otherwise budget tracking is meaningless.",
+        action:{label:"Review in Activities", run:()=>goPage("activities")}});
+      const overs = budgeted.filter(x=>x.pct>=100 && x.pct<=400).sort((x,y)=>y.pct-x.pct);
+      overs.slice(0,6).forEach(({a,used,pct})=>{
+        add({id:"act-over-"+a.id, domain:"Delivery", sev:pct>=150?"high":"medium", score:55+Math.min(pct-100,100)/4,
+          title:a.name+" is over its estimate", detail:a.id+" · "+a.team+" · logged "+fmtH(used)+" vs "+fmtH(a.estMins)+" ("+Math.round(pct)+"%)",
+          why:"Unmanaged overruns hide scope creep and distort capacity planning.",
+          action:{label:"Raise estimate +25%", run:()=>{ setActs(p=>p.map(x=>x.id===a.id?{...x,estMins:Math.round(a.estMins*1.25/30)*30}:x)); showToast("Estimate raised for "+a.id); }}});
+      });
+      if(overs.length>6) add({id:"act-over-more", domain:"Delivery", sev:"medium", score:50,
+        title:(overs.length-6)+" more Projects / Changes are over estimate", detail:overs.slice(6,10).map(x=>x.a.id).join(", ")+(overs.length>10?" ...":""),
+        why:"Review estimates in bulk during planning.", action:{label:"Open activities", run:()=>goPage("activities")}});
+      budgeted.filter(x=>x.pct>=85 && x.pct<100).sort((x,y)=>y.pct-x.pct).slice(0,4).forEach(({a,pct})=>{
+        add({id:"act-near-"+a.id, domain:"Delivery", sev:"info", score:35+pct/5,
+          title:a.name+" nearing its estimate", detail:a.id+" · "+a.team+" · "+Math.round(pct)+"% of budget used",
+          why:"Less than 15% of the budget remains - confirm remaining scope now.",
+          action:{label:"Open activities", run:()=>goPage("activities")}});
+      });
+      sAct.filter(a=>a.status==="Active" && a.type!=="Meeting").forEach(a=>{
+        const last = lastByAct[a.id]; const idle = last ? Math.round((anchor-toD(last))/dayMs) : null;
+        if(idle===null && (loggedByAct[a.id]||0)===0 && sLog.length>20 && a.date && Math.round((anchor-toD(a.date))/dayMs)>30)
+          add({id:"act-stale0-"+a.id, domain:"Hygiene", sev:"medium", score:40,
+            title:a.name+" has no time logged", detail:a.id+" · "+a.team+" · created "+a.date+", no effort recorded",
+            why:"Active items with zero effort clutter the register and waste log-time choices.",
+            action:{label:"Suspend activity", run:()=>{ setActs(p=>p.map(x=>x.id===a.id?{...x,status:"Suspended"}:x)); showToast(a.id+" suspended"); }}});
+        else if(idle!==null && idle>45 && a.type==="Project")
+          add({id:"act-idle-"+a.id, domain:"Hygiene", sev:"medium", score:42+Math.min(idle,120)/8,
+            title:a.name+" idle for "+idle+" days", detail:a.id+" · "+a.team+" · last effort logged "+last,
+            why:"Projects with no movement for 6+ weeks are usually blocked or abandoned.",
+            action:{label:"Suspend activity", run:()=>{ setActs(p=>p.map(x=>x.id===a.id?{...x,status:"Suspended"}:x)); showToast(a.id+" suspended"); }}});
+      });
+      const susp = sAct.filter(a=>a.status==="Suspended");
+      if(susp.length>=3) add({id:"act-susp", domain:"Hygiene", sev:"medium", score:38+susp.length,
+        title:susp.length+" activities are suspended", detail:susp.slice(0,4).map(a=>a.id).join(", ")+(susp.length>4?" ...":""),
+        why:"Lean/Kanban: more than 5% of items blocked indicates a governance gap.",
+        action:{label:"Review suspended", run:()=>goPage("activities")}});
+
+      // -- 3. People & capacity ---------------------------------------------
+      sUsers.forEach(u=>{
+        const m = monthByUser[u.id]||0, pct = m/MINS_PER_ENGINEER_MONTH*100;
+        if(pct>105) add({id:"u-over-"+u.id, domain:"People", sev:pct>125?"high":"medium", score:50+Math.min(pct-100,60)/2,
+          title:u.name+" is overloaded ("+Math.round(pct)+"%)", detail:u.team+" · "+fmtH(m)+" logged in "+monthKey+" vs 160h capacity",
+          why:"Sustained >100% load is the strongest predictor of burnout and incident errors.",
+          action:{label:"View load analysis", run:()=>goPage("prod_level")}});
+        else if(pct<40 && sLog.length>20 && (monthByUser[u.id]!==undefined || lastByUser[u.id])) add({id:"u-under-"+u.id, domain:"People", sev:"info", score:25+(40-pct)/3,
+          title:u.name+" has spare capacity ("+Math.round(pct)+"% used)", detail:u.team+" · only "+fmtH(m)+" logged in "+monthKey,
+          why:"Either effort is not being logged or there is headroom for backlog work.",
+          action:{label:"Copy reminder", run:()=>{ const t="Hi "+u.name.split(" ")[0]+", please make sure your time for "+monthKey+" is logged in ISMS, or let me know if you have capacity for more work."; try{navigator.clipboard.writeText(t);}catch(e){} showToast("Reminder text copied"); }}});
+        const lu = lastByUser[u.id]; const gap = lu ? Math.round((anchor-toD(lu))/dayMs) : null;
+        if(gap!==null && gap>=7 && u.role!=="admin") add({id:"u-gap-"+u.id, domain:"People", sev:"medium", score:36+Math.min(gap,30)/3,
+          title:u.name+" has not logged time for "+gap+" days", detail:u.team+" · last entry "+lu,
+          why:"Gaps break utilisation and cost reporting.",
+          action:{label:"Copy reminder", run:()=>{ const t="Hi "+u.name.split(" ")[0]+", I noticed no time logged since "+lu+". Please update ISMS today."; try{navigator.clipboard.writeText(t);}catch(e){} showToast("Reminder text copied"); }}});
+      });
+      teamNames.forEach(t=>{
+        const hc = sUsers.filter(u=>u.team===t).length, cap = hc*MINS_PER_ENGINEER_MONTH;
+        const vac = (LEAVE||[]).filter(l=>l.team===t).reduce((s,l)=>s+l.mins,0);
+        const used = monthLogs.filter(l=>l.team===t).reduce((s,l)=>s+l.mins,0);
+        const pct = used/Math.max(1,cap-vac)*100;
+        if(pct>95) add({id:"t-over-"+t, domain:"Capacity", sev:pct>110?"high":"medium", score:52+Math.min(pct-95,40)/2,
+          title:t+" team at "+Math.round(pct)+" % of available capacity", detail:fmtH(used)+" of "+fmtH(cap-vac)+" available ("+hc+" engineers, "+fmtH(vac)+" leave)",
+          why:"No buffer left for incidents or new demand - defer or re-balance work.",
+          action:{label:"Open capacity planning", run:()=>goPage("planning")}});
+      });
+
+      // -- 4. Work quality ----------------------------------------------------
+      teamNames.forEach(t=>{
+        const tl = monthLogs.filter(l=>l.team===t), tot = tl.reduce((s,l)=>s+l.mins,0);
+        if(tot<600) return;
+        const re = tl.filter(l=>l.nature==="Reactive").reduce((s,l)=>s+l.mins,0)/tot*100;
+        if(re>55) add({id:"t-react-"+t, domain:"Efficiency", sev:re>70?"high":"medium", score:44+(re-55)/2,
+          title:t+" is "+Math.round(re)+"% reactive", detail:"Target is under 30-40% (ITIL / SRE). "+fmtH(tot)+" logged in "+monthKey,
+          why:"High reactive ratio means firefighting is crowding out improvement work.",
+          action:{label:"See repeat patterns", run:()=>goPage("prod_repeat")}});
+      });
+      const byAct = {};
+      sLog.filter(l=>l.nature==="Reactive").forEach(l=>{ const k=l.actId; (byAct[k]=byAct[k]||{id:k,name:l.activity,team:l.team,n:0,mins:0,users:new Set(),cost:0}); const o=byAct[k]; o.n++; o.mins+=l.mins; o.users.add(l.userId); o.cost+=l.mins/60*cost(l.userId); });
+      Object.values(byAct).filter(o=>o.n>=5 && o.mins>=600).sort((a,b)=>b.mins-a.mins).slice(0,5).forEach(o=>{
+        const exists = sAct.some(a=>a.team===o.team && a.cat==="Automation & Scripting" && a.name.toLowerCase().includes((o.name||"").toLowerCase().slice(0,18)));
+        add({id:"rep-"+o.id, domain:"Efficiency", sev:"medium", score:48+Math.min(o.mins/600,12),
+          title:"Recurring toil: "+o.name, detail:o.team+" · "+o.n+" reactive entries · "+fmtH(o.mins)+" · approx "+money(o.cost)+" of effort",
+          why:"Repeated reactive effort is the best automation candidate (SRE toil reduction).",
+          action: exists ? {label:"Open activities", run:()=>goPage("activities")} :
+            {label:"Create automation task", run:()=>{ setActs(p=>[{id:nextActId(o.team,p), name:"Automate: "+o.name, team:o.team, type:"Project", cat:"Automation & Scripting", estMins:Math.min(2400,Math.round(o.mins*0.5/60)*60||480), priority:"Medium", status:"Active", ticketNo:"", jira:"", date:today(), nature:"Proactive", workNature:"Change", taskSize:"Medium", complexity:"Medium", level:"L2", desc:"Auto-created from Action Center: "+o.n+" reactive entries ("+fmtH(o.mins)+") on "+o.id}, ...p]); showToast("Automation task created for "+o.team); }}});
+      });
+      const noTicket = sLog.filter(l=>!(l.ticketRef||"").trim() && ["Incident","Change"].includes(l.type));
+      if(noTicket.length>=3) add({id:"log-ticket", domain:"Hygiene", sev:"medium", score:34+Math.min(noTicket.length,30)/3,
+        title:noTicket.length+" incident / change logs have no ticket reference", detail:"Audit trail gap for "+[...new Set(noTicket.map(l=>l.team))].join(", "),
+        why:"Change and incident effort without ticket IDs fails ITIL audit traceability.",
+        action:{label:"Open time log", run:()=>goPage("timelog")}});
+
+      // -- Monthly series + forecast ----------------------------------------
+      const months = [...new Set(sLog.map(l=>(l.date||"").slice(0,7)).filter(Boolean))].sort().slice(-6);
+      const series = months.map(mk=>{ const ml=sLog.filter(l=>l.date.startsWith(mk)); const tot=ml.reduce((s,l)=>s+l.mins,0);
+        return {mk, hrs:tot/60, react:ml.filter(l=>l.nature==="Reactive").reduce((s,l)=>s+l.mins,0)/60, cost:ml.reduce((s,l)=>s+l.mins/60*cost(l.userId),0)}; });
+      let projHrs = null;
+      if(series.length>=2){ const n=series.length, xs=series.map((_,i)=>i), ys=series.map(s=>s.hrs); const mx=xs.reduce((a,b)=>a+b)/n, my=ys.reduce((a,b)=>a+b)/n;
+        const den=xs.reduce((s,x)=>s+(x-mx)**2,0)||1; const slope=xs.reduce((s,x,i)=>s+(x-mx)*(ys[i]-my),0)/den; projHrs=Math.max(0,my+slope*(n-mx)); }
+      else if(series.length===1) projHrs = series[0].hrs;
+      const totalCap = sUsers.length*160;
+      if(projHrs!==null && totalCap && projHrs/totalCap>1.0) add({id:"fc-over", domain:"Capacity", sev:"high", score:70,
+        title:"Forecast: next month demand exceeds capacity", detail:"Projected "+Math.round(projHrs)+"h vs "+totalCap+"h available ("+Math.round(projHrs/totalCap*100)+"%)",
+        why:"Trend-based projection from the last "+series.length+" month(s) of logged effort.",
+        action:{label:"Open capacity planning", run:()=>goPage("planning")}});
+
+      // -- Team scorecard ---------------------------------------------------
+      const scorecard = teamNames.map(t=>{
+        const tl=monthLogs.filter(l=>l.team===t), tot=tl.reduce((s,l)=>s+l.mins,0);
+        const hc=sUsers.filter(u=>u.team===t).length, cap=Math.max(1,hc*MINS_PER_ENGINEER_MONTH-(LEAVE||[]).filter(l=>l.team===t).reduce((s,l)=>s+l.mins,0));
+        const util=tot/cap*100, re=tot?tl.filter(l=>l.nature==="Reactive").reduce((s,l)=>s+l.mins,0)/tot*100:0;
+        const ta=sAct.filter(a=>a.team===t), sp=ta.filter(a=>a.status==="Suspended").length;
+        const over=ta.filter(a=>a.status==="Active"&&a.estMins>0&&(a.type==="Project"||a.type==="Change")&&(loggedByAct[a.id]||0)>a.estMins&&(loggedByAct[a.id]||0)<=a.estMins*4).length;
+        const openMi=sMis.filter(m=>m.status==="Open"&&((m.teamsInvolved||[]).includes(t)||m.team===t)).length;
+        let score=100; if(util>90) score-=Math.min(25,(util-90)*1.2); if(util<55) score-=Math.min(20,(55-util)*0.6);
+        score-=Math.max(0,re-35)*0.5; score-=sp*3; score-=Math.min(20,over*2); score-=openMi*6;
+        const noTk=tl.filter(l=>!(l.ticketRef||"").trim()&&["Incident","Change"].includes(l.type)).length; score-=Math.min(8,noTk);
+        return {team:t,hc,util,re,sp,over,openMi,score:Math.max(0,Math.round(score)),hrs:tot/60,cost:tl.reduce((s,l)=>s+l.mins/60*cost(l.userId),0)};
+      }).sort((a,b)=>a.score-b.score);
+
+      F.sort((a,b)=>b.score-a.score);
+      return {F, series, projHrs, scorecard, anchorStr, monthKey, totalCap, nAct:sAct.length, nUsers:sUsers.length, nLogs:sLog.length};
+    }, [acts, logs, mis, allUsers, isAdmin, user]);
+
+    const sevMeta = {critical:{c:"#b91c1c",bg:"#fef2f2",l:"Critical"}, high:{c:"#c2410c",bg:"#fff7ed",l:"High"}, medium:{c:"#a16207",bg:"#fefce8",l:"Medium"}, info:{c:"#1d4ed8",bg:"#eff6ff",l:"Info"}};
+    const domains = ["All", ...Array.from(new Set(model.F.map(f=>f.domain)))];
+    const active = model.F.filter(f=>!dismissed[f.id]);
+    const shown = active.filter(f=>domain==="All"||f.domain===domain);
+    const dismissedList = model.F.filter(f=>dismissed[f.id]);
+    const cnt = s => active.filter(f=>f.sev===s).length;
+    const org = model.scorecard.length ? Math.round(model.scorecard.reduce((s,t)=>s+t.score,0)/model.scorecard.length) : 0;
+    const scoreCol = s => s>=80?"#16a34a":s>=60?"#d97706":"#dc2626";
+
+    const dl = (name, text, type) => { const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([text],{type:type||"text/csv"})); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),500); };
+    const q = v => '"'+String(v==null?"":v).replace(/"/g,'""')+'"';
+    const exportActions = () => { dl("isms_action_center_"+model.anchorStr+".csv", ["Severity,Domain,Title,Detail,Why it matters"].concat(active.map(f=>[f.sev,f.domain,f.title,f.detail,f.why].map(q).join(","))).join("\n")); showToast("Actions exported"); };
+    const exportScore = () => { dl("isms_team_scorecard_"+model.anchorStr+".csv", ["Team,Score,Headcount,Utilisation %,Reactive %,Suspended,Over estimate,Open incidents,Hours,Cost"].concat(model.scorecard.map(t=>[t.team,t.score,t.hc,Math.round(t.util),Math.round(t.re),t.sp,t.over,t.openMi,Math.round(t.hrs),Math.round(t.cost)].join(","))).join("\n")); showToast("Scorecard exported"); };
+    const narrative = () => {
+      const top = active.slice(0,5);
+      const lines = ["ISMS Executive Summary - data as of "+model.anchorStr, "", "Overall health score: "+org+"/100 across "+model.scorecard.length+" team(s), "+model.nUsers+" engineers, "+model.nAct+" activities.",
+        "Open findings: "+cnt("critical")+" critical, "+cnt("high")+" high, "+cnt("medium")+" medium, "+cnt("info")+" informational.", ""];
+      if(model.scorecard.length){ const w=model.scorecard[0], b=model.scorecard[model.scorecard.length-1]; lines.push("Strongest team: "+b.team+" ("+b.score+"). Needs most attention: "+w.team+" ("+w.score+").",""); }
+      if(model.projHrs!==null) lines.push("Forecast: about "+Math.round(model.projHrs)+"h of effort next month vs "+model.totalCap+"h capacity ("+Math.round(model.projHrs/Math.max(1,model.totalCap)*100)+"%).","");
+      lines.push("Top priorities:"); top.forEach((f,i)=>lines.push((i+1)+". ["+sevMeta[f.sev].l+"] "+f.title+" - "+f.detail));
+      return lines.join("\n");
+    };
+    const printReport = () => {
+      const w = window.open("","_blank"); if(!w){ showToast("Allow pop-ups to print","err"); return; }
+      const esc = s=>String(s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+      w.document.write("<html><head><title>ISMS Executive Summary</title><style>body{font-family:system-ui,Arial;margin:32px;color:#0f172a}h1{margin:0}table{border-collapse:collapse;width:100%;margin:12px 0}td,th{border:1px solid #cbd5e1;padding:6px 8px;font-size:12px;text-align:left}th{background:#f1f5f9}.s{font-weight:700}</style></head><body><h1>Infrastructure Service Management System</h1><div>Executive summary - data as of "+esc(model.anchorStr)+"</div><h2>Health score: "+org+"/100</h2><pre style='font-family:inherit;white-space:pre-wrap'>"+esc(narrative())+"</pre><h3>Team scorecard</h3><table><tr><th>Team</th><th>Score</th><th>Util %</th><th>Reactive %</th><th>Suspended</th><th>Over est.</th><th>Open inc.</th></tr>"+model.scorecard.map(t=>"<tr><td>"+esc(t.team)+"</td><td class=s>"+t.score+"</td><td>"+Math.round(t.util)+"</td><td>"+Math.round(t.re)+"</td><td>"+t.sp+"</td><td>"+t.over+"</td><td>"+t.openMi+"</td></tr>").join("")+"</table><h3>Open findings</h3><table><tr><th>Severity</th><th>Area</th><th>Finding</th><th>Detail</th></tr>"+active.map(f=>"<tr><td>"+sevMeta[f.sev].l+"</td><td>"+esc(f.domain)+"</td><td>"+esc(f.title)+"</td><td>"+esc(f.detail)+"</td></tr>").join("")+"</table></body></html>");
+      w.document.close(); setTimeout(()=>w.print(),400);
+    };
+
+    const TabBtn = ({id,label}) => (
+      <button onClick={()=>setTab(id)} style={{padding:"9px 16px",border:"none",background:"transparent",cursor:"pointer",fontSize:13,fontWeight:600,fontFamily:"inherit",
+        color:tab===id?"var(--brand)":"var(--text-3)",borderBottom:"2px solid "+(tab===id?"var(--brand)":"transparent"),marginBottom:-2}}>{label}</button>
+    );
+    const Tile = ({label,val,sub,color}) => (
+      <Card style={{padding:"14px 16px"}}><div style={{fontSize:11,color:"var(--text-3)",fontWeight:600,textTransform:"uppercase",letterSpacing:".04em"}}>{label}</div>
+        <div style={{fontSize:26,fontWeight:800,color:color||"var(--text-1)",lineHeight:1.2,marginTop:2}}>{val}</div>
+        {sub && <div style={{fontSize:11,color:"var(--text-3)",marginTop:2}}>{sub}</div>}</Card>
+    );
+
+    // chart data
+    const maxH = Math.max(1, ...model.series.map(s=>s.hrs), model.projHrs||0, model.totalCap||0);
+    const chartBars = [...model.series.map(s=>({k:s.mk,h:s.hrs,r:s.react,p:false})), ...(model.projHrs!==null?[{k:"Next",h:model.projHrs,r:0,p:true}]:[])];
+
+    return (
+      <div style={{animation:"fadeSlideIn .3s ease"}}>
+        <PageHero icon="🎯" title="Action Center" subtitle={"Smart findings from your live data · "+(isAdmin?"all teams":user.team+" team")+" · data as of "+model.anchorStr}
+          right={<div style={{display:"flex",gap:8}}>
+            <button onClick={exportActions} style={{padding:"7px 14px",borderRadius:"var(--radius-md)",border:"1px solid rgba(255,255,255,.35)",background:"rgba(255,255,255,.18)",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>⬇ Export actions</button>
+            <button onClick={printReport} style={{padding:"7px 14px",borderRadius:"var(--radius-md)",border:"none",background:"#fff",color:"var(--brand)",fontSize:12,fontWeight:700,cursor:"pointer"}}>🖨 Executive summary</button></div>}/>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12,margin:"16px 0"}}>
+          <Tile label="Health score" val={org+"/100"} color={scoreCol(org)} sub={model.scorecard.length+" team(s)"}/>
+          <Tile label="Critical" val={cnt("critical")} color={cnt("critical")?"#b91c1c":"#16a34a"} sub="act now"/>
+          <Tile label="High" val={cnt("high")} color={cnt("high")?"#c2410c":"#16a34a"} sub="this week"/>
+          <Tile label="Medium / Info" val={cnt("medium")+" / "+cnt("info")} sub="plan & watch"/>
+          <Tile label="Next month" val={model.projHrs!==null?Math.round(model.projHrs/Math.max(1,model.totalCap)*100)+"%":"-"} sub="forecast of capacity" color={model.projHrs!==null&&model.projHrs/Math.max(1,model.totalCap)>1?"#b91c1c":undefined}/>
+        </div>
+
+        <div style={{display:"flex",borderBottom:"2px solid var(--border)",marginBottom:16}}>
+          <TabBtn id="actions" label={"Recommended actions ("+active.length+")"}/><TabBtn id="score" label="Team scorecard"/><TabBtn id="forecast" label="Forecast & trend"/><TabBtn id="summary" label="Executive summary"/>
+        </div>
+
+        {tab==="actions" && (<div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12,alignItems:"center"}}>
+            {domains.map(d=>(<button key={d} onClick={()=>setDomain(d)} style={{padding:"5px 12px",borderRadius:20,fontSize:12,fontWeight:600,cursor:"pointer",border:"1px solid "+(domain===d?"var(--brand)":"var(--border)"),background:domain===d?"var(--brand-light)":"var(--surface)",color:domain===d?"var(--brand)":"var(--text-2)"}}>{d}{d!=="All"?" ("+active.filter(f=>f.domain===d).length+")":""}</button>))}
+            {dismissedList.length>0 && <button onClick={()=>setShowDismissed(v=>!v)} style={{marginLeft:"auto",fontSize:12,background:"none",border:"none",color:"var(--text-3)",cursor:"pointer",textDecoration:"underline"}}>{showDismissed?"Hide":"Show"} dismissed ({dismissedList.length})</button>}
+          </div>
+          {shown.length===0 && <Card style={{textAlign:"center",padding:40}}><div style={{fontSize:32}}>✅</div><div style={{fontWeight:700,marginTop:6}}>Nothing needs attention here</div><div style={{fontSize:12,color:"var(--text-3)"}}>The engine re-checks every time your data changes.</div></Card>}
+          <div style={{display:"grid",gap:10}}>
+            {shown.map(f=>{ const m=sevMeta[f.sev]; return (
+              <Card key={f.id} style={{padding:"14px 16px",borderLeft:"4px solid "+m.c,display:"flex",gap:14,alignItems:"center",flexWrap:"wrap"}}>
+                <div style={{flex:"1 1 320px",minWidth:0}}>
+                  <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                    <span style={{fontSize:10,fontWeight:800,padding:"2px 8px",borderRadius:10,background:m.bg,color:m.c,textTransform:"uppercase"}}>{m.l}</span>
+                    <span style={{fontSize:11,color:"var(--text-3)",fontWeight:600}}>{f.domain}</span>
+                  </div>
+                  <div style={{fontSize:14,fontWeight:700,color:"var(--text-1)",marginTop:4}}>{f.title}</div>
+                  <div style={{fontSize:12,color:"var(--text-2)",marginTop:2}}>{f.detail}</div>
+                  <div style={{fontSize:11,color:"var(--text-3)",marginTop:3}}>💡 {f.why}</div>
+                </div>
+                <div style={{display:"flex",flexDirection:"column",gap:6,alignItems:"stretch",minWidth:150}}>
+                  <button onClick={()=>{ f.action.run(); }} style={{padding:"8px 14px",borderRadius:"var(--radius-md)",border:"none",background:"var(--brand)",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}}>{f.action.label}</button>
+                  <button onClick={()=>setDismissed(p=>({...p,[f.id]:model.anchorStr}))} style={{padding:"5px 14px",borderRadius:"var(--radius-md)",border:"1px solid var(--border)",background:"var(--surface)",color:"var(--text-3)",fontSize:11,cursor:"pointer"}}>Dismiss</button>
+                </div>
+              </Card>); })}
+          </div>
+          {showDismissed && dismissedList.length>0 && <div style={{marginTop:16}}>
+            <div style={{fontSize:12,fontWeight:700,color:"var(--text-3)",marginBottom:6}}>Dismissed</div>
+            {dismissedList.map(f=>(<div key={f.id} style={{display:"flex",justifyContent:"space-between",gap:8,padding:"8px 12px",border:"1px dashed var(--border)",borderRadius:"var(--radius-md)",marginBottom:6,fontSize:12,color:"var(--text-3)"}}><span>{f.title}</span><button onClick={()=>setDismissed(p=>{const n={...p}; delete n[f.id]; return n;})} style={{background:"none",border:"none",color:"var(--brand)",cursor:"pointer",fontSize:12}}>Restore</button></div>))}</div>}
+        </div>)}
+
+        {tab==="score" && (<div>
+          <div style={{display:"flex",justifyContent:"flex-end",marginBottom:8}}><button onClick={exportScore} style={{padding:"6px 12px",fontSize:12,borderRadius:"var(--radius-md)",border:"1px solid var(--border)",background:"var(--surface)",cursor:"pointer"}}>⬇ Export CSV</button></div>
+          <div style={{display:"grid",gap:10}}>
+            {model.scorecard.map(t=>(<Card key={t.team} style={{padding:"14px 16px"}}>
+              <div style={{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
+                <div style={{width:54,height:54,borderRadius:"50%",border:"4px solid "+scoreCol(t.score),display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:17,color:scoreCol(t.score)}}>{t.score}</div>
+                <div style={{flex:1,minWidth:180}}><div style={{fontWeight:700,fontSize:15}}>{t.team}</div><div style={{fontSize:12,color:"var(--text-3)"}}>{t.hc} engineers · {Math.round(t.hrs)}h logged · {money(t.cost)}</div></div>
+                {[["Utilisation",Math.round(t.util)+"%",t.util>95||t.util<50],["Reactive",Math.round(t.re)+"%",t.re>45],["Suspended",t.sp,t.sp>2],["Over estimate",t.over,t.over>0],["Open incidents",t.openMi,t.openMi>0]].map(([l,v,bad])=>(
+                  <div key={l} style={{textAlign:"center",minWidth:76}}><div style={{fontSize:15,fontWeight:800,color:bad?"#c2410c":"var(--text-1)"}}>{v}</div><div style={{fontSize:10,color:"var(--text-3)"}}>{l}</div></div>))}
+              </div>
+              <div style={{height:6,background:"var(--surface-2,#f1f5f9)",borderRadius:4,marginTop:10,overflow:"hidden"}}><div style={{width:t.score+"%",height:"100%",background:scoreCol(t.score)}}/></div>
+            </Card>))}
+          </div>
+          <div style={{fontSize:11,color:"var(--text-3)",marginTop:10}}>Score starts at 100 and loses points for utilisation outside 55-90%, reactive work above 35%, suspended and over-estimate activities, open incidents and missing ticket references.</div>
+        </div>)}
+
+        {tab==="forecast" && (<Card>
+          <div style={{fontWeight:700,marginBottom:4}}>Effort trend and next-month projection</div>
+          <div style={{fontSize:12,color:"var(--text-3)",marginBottom:12}}>Total hours per month (dark = reactive share). Projection uses a linear trend of the last {model.series.length} month(s); dashed line is team capacity ({model.totalCap}h).</div>
+          {chartBars.length===0 ? <div style={{color:"var(--text-3)",fontSize:13}}>No time logs yet.</div> :
+          <svg viewBox={"0 0 "+(chartBars.length*90+40)+" 220"} style={{width:"100%",maxWidth:720,height:"auto"}}>
+            {chartBars.map((b,i)=>{ const x=30+i*90, h=b.h/maxH*160, rh=b.r/maxH*160; return (<g key={b.k}>
+              <rect x={x} y={180-h} width={52} height={h} rx={4} fill={b.p?"none":"#93c5fd"} stroke={b.p?"#2563eb":"none"} strokeDasharray={b.p?"5 3":"0"} strokeWidth={2}/>
+              {!b.p && <rect x={x} y={180-rh} width={52} height={rh} rx={4} fill="#1d4ed8"/>}
+              <text x={x+26} y={174-h} textAnchor="middle" fontSize="11" fontWeight="700" fill="#334155">{Math.round(b.h)}h</text>
+              <text x={x+26} y={198} textAnchor="middle" fontSize="11" fill="#64748b">{b.k}</text></g>); })}
+            {model.totalCap>0 && <g><line x1="20" x2={chartBars.length*90+30} y1={180-model.totalCap/maxH*160} y2={180-model.totalCap/maxH*160} stroke="#dc2626" strokeDasharray="6 4"/><text x={chartBars.length*90+30} y={174-model.totalCap/maxH*160} textAnchor="end" fontSize="10" fill="#dc2626">capacity</text></g>}
+          </svg>}
+          {model.series.length>0 && <table style={{width:"100%",borderCollapse:"collapse",marginTop:14,fontSize:12}}>
+            <thead><tr style={{textAlign:"left",color:"var(--text-3)"}}><th style={{padding:6}}>Month</th><th>Hours</th><th>Reactive h</th><th>Reactive %</th><th>Effort cost</th></tr></thead>
+            <tbody>{model.series.map(s=>(<tr key={s.mk} style={{borderTop:"1px solid var(--border)"}}><td style={{padding:6}}>{s.mk}</td><td>{Math.round(s.hrs)}</td><td>{Math.round(s.react)}</td><td>{Math.round(s.react/Math.max(1,s.hrs)*100)}%</td><td>{money(s.cost)}</td></tr>))}</tbody></table>}
+        </Card>)}
+
+        {tab==="summary" && (<Card>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,gap:8,flexWrap:"wrap"}}>
+            <div style={{fontWeight:700}}>Auto-generated executive summary</div>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>{ try{navigator.clipboard.writeText(narrative());}catch(e){} showToast("Summary copied"); }} style={{padding:"6px 12px",fontSize:12,borderRadius:"var(--radius-md)",border:"1px solid var(--border)",background:"var(--surface)",cursor:"pointer"}}>📋 Copy</button>
+              <button onClick={printReport} style={{padding:"6px 12px",fontSize:12,borderRadius:"var(--radius-md)",border:"none",background:"var(--brand)",color:"#fff",cursor:"pointer"}}>🖨 Print / PDF</button></div></div>
+          <pre style={{whiteSpace:"pre-wrap",fontFamily:"inherit",fontSize:13,lineHeight:1.6,margin:0,color:"var(--text-1)"}}>{narrative()}</pre>
+        </Card>)}
+      </div>
+    );
+  };
+
   const PageProdIntel = () => {
     const [activeTab, setActiveTab] = React.useState("executive");
     const [expandedRec, setExpandedRec] = React.useState(null);
@@ -16298,6 +16626,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     custreports: PageCustomReports,
     planning: PagePlanning,
     settings: PageSettings,
+    action_center: PageActionCenter,
     prod_overview: PageProdOverview,
     prod_flags: PageProdFlags,
     prod_heatmap: PageProdHeatmap,
