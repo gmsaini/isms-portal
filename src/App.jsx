@@ -14537,8 +14537,17 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
         const { data, error } = await cloud.sb.functions.invoke("ai", { body:{ mode, question: question||"", snapshot: JSON.parse(txt) } });
         if(error) {
           let msg = error.message || String(error);
-          try { if(error.context && error.context.json) { const j = await error.context.json(); if(j && j.error) msg = j.error; } } catch(e) {}
-          if(/not found|404|Failed to send/i.test(msg)) msg = "AI function is not deployed yet. Follow cloud/AI_SETUP.md. ("+msg+")";
+          try {
+            const c = error.context;
+            if(c && typeof c.text === "function") {
+              const st = c.status; const raw = await c.text(); let detail = raw;
+              try { const j = JSON.parse(raw); detail = j.error || j.message || j.msg || j.error_description || raw; } catch(e) {}
+              msg = "HTTP "+st+": "+String(detail).slice(0,400);
+              if(st===401) msg += "  -> In Supabase open Edge Functions > ai > Details and turn 'Verify JWT' OFF, then try again.";
+              if(st===404) msg = "AI function is not deployed yet (HTTP 404). Follow cloud/AI_SETUP.md.";
+            }
+          } catch(e) {}
+          if(/Failed to send|NetworkError|Failed to fetch/i.test(msg)) msg = "Could not reach the AI function. Check it is deployed with the exact name \"ai\". ("+msg+")";
           throw new Error(msg);
         }
         if(!data || data.error) throw new Error((data && data.error) || "Empty response");
