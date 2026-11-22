@@ -5321,6 +5321,31 @@ const DataAssistant = ({cloud, tables, names, scopeLabel}) => {
     </div>);
 };
 
+// Admin card: ServiceNow / SMAX incident preview + import (read-only pull through the "sync" Edge Function)
+const IntegrationsCard = ({cloud, existing, onImport}) => {
+  const [src,setSrc] = useState("servicenow"); const [busy,setBusy] = useState(false); const [err,setErr] = useState(""); const [list,setList] = useState(null); const [pick,setPick] = useState({});
+  const load = async () => { setBusy(true); setErr(""); setList(null);
+    try { const d = await callAiFn(cloud, {source:src}, "sync"); const l=(d.incidents||[]).filter(x=>x.incidentNo); setList(l); const p={}; l.forEach(x=>{ p[x.incidentNo]=!existing.includes(x.incidentNo); }); setPick(p); }
+    catch(e) { setErr(e.message||String(e)); } setBusy(false); };
+  const chosen = (list||[]).filter(x=>pick[x.incidentNo]);
+  return (<Card>
+    <div style={{fontWeight:700,fontSize:13,marginBottom:4}}>Ticket sync (ServiceNow / SMAX)</div>
+    <div style={{fontSize:12,color:"var(--text-3)",marginBottom:12,lineHeight:1.5}}>Read-only. Pulls open high-priority incidents so you can preview and import them as major incidents. Needs the <code>sync</code> Edge Function and its secrets (see cloud/AI_SETUP.md).</div>
+    <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:10}}>
+      <select value={src} onChange={e=>setSrc(e.target.value)} style={{padding:"6px 8px",borderRadius:7,border:"1px solid var(--border-2)",fontSize:13}}><option value="servicenow">ServiceNow</option><option value="smax">SMAX</option></select>
+      <Btn onClick={load} disabled={busy}>{busy?"Checking…":"Preview open incidents"}</Btn>
+    </div>
+    {err && <div style={{fontSize:12,color:"#b91c1c",background:"#fef2f2",border:"1px solid #fecaca",padding:"8px 10px",borderRadius:8}}>{err}</div>}
+    {list && (list.length===0 ? <div style={{fontSize:12,color:"var(--text-3)"}}>No matching incidents found.</div> : <div data-testid="sync-list">
+      {list.map(x=>(<label key={x.incidentNo} style={{display:"flex",gap:8,alignItems:"center",fontSize:12,padding:"4px 0",borderBottom:"1px solid var(--surface-3)"}}>
+        <input type="checkbox" checked={!!pick[x.incidentNo]} onChange={e=>setPick(p=>({...p,[x.incidentNo]:e.target.checked}))}/>
+        <strong style={{minWidth:90}}>{x.incidentNo}</strong><span style={{flex:1}}>{x.name}</span><span style={{color:"var(--text-4)"}}>{x.severity}</span>{existing.includes(x.incidentNo)&&<span style={{color:"#a16207",fontSize:11}}>already in ISMS</span>}
+      </label>))}
+      <div style={{marginTop:10}}><Btn onClick={()=>{ onImport(chosen); setList(null); }} disabled={!chosen.length}>Import {chosen.length} incident{chosen.length===1?"":"s"}</Btn></div>
+    </div>)}
+  </Card>);
+};
+
 const DEFAULT_CATEGORIES = ["Infrastructure Build","Maintenance","Security & Compliance","Automation & Scripting","Monitoring & Alerting","Documentation"].map(n=>({name:n, active:true}));
 // Values pre-filled in the Log Time form from an activity's own settings
 const logDefaultsFrom = (a, f) => ({
@@ -5841,9 +5866,9 @@ function pushToast(msg, type) {
 }
 
 // Calls the "ai" Supabase Edge Function. Throws Error with a readable message.
-async function callAiFn(cloud, body) {
+async function callAiFn(cloud, body, fn) {
   if(!cloud || !cloud.sb || !cloud.sb.functions) throw new Error("AI needs cloud (Supabase) mode and the 'ai' Edge Function. See cloud/AI_SETUP.md.");
-  const { data, error } = await cloud.sb.functions.invoke("ai", { body });
+  const { data, error } = await cloud.sb.functions.invoke(fn||"ai", { body });
   if(error) {
     let msg = error.message || String(error);
     try {
@@ -5853,7 +5878,7 @@ async function callAiFn(cloud, body) {
         try { const j = JSON.parse(raw); detail = j.error || j.message || j.msg || raw; } catch(e) {}
         msg = "HTTP "+st+": "+String(detail).slice(0,400);
         if(st===401) msg += " -> turn 'Verify JWT' OFF for the ai function.";
-        if(st===404) msg = "AI function is not deployed yet (HTTP 404). See cloud/AI_SETUP.md.";
+        if(st===404) msg = "The '"+(fn||"ai")+"' function is not deployed yet (HTTP 404). See cloud/AI_SETUP.md.";
       }
     } catch(e) {}
     throw new Error(msg);
@@ -10727,6 +10752,14 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
               ))}
               {!isAdmin && <div style={{marginTop:10,fontSize:12,color:"var(--text-4)"}}>Only an administrator can change targets.</div>}
             </Card>
+
+            {isAdmin && <IntegrationsCard cloud={cloud} existing={mis.map(m=>m.incidentNo)} onImport={list=>{
+              const now = today();
+              const add = list.map(x=>({ id:uid("MI"), incidentNo:x.incidentNo, name:x.name, severity:x.severity, status:"Open", startedAt:x.startedAt||new Date().toISOString(), resolvedAt:null,
+                impactedServices:"", teamsInvolved:[], rootCause:"", isMajorIncident:true, team:"Cross-Team", type:"Incident", cat:"Maintenance",
+                priority:x.severity==="Sev1"?"Critical":"High", nature:"Reactive", workNature:"Incident", estMins:null, date:(x.startedAt||now).slice(0,10), desc:(x.desc||"")+" [Imported from "+x.source+"]" }));
+              setMis(p=>[...add,...p]); showToast(add.length+" incident"+(add.length===1?"":"s")+" imported");
+            }}/>}
           </div>
         )}
 
@@ -14936,6 +14969,16 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
 
     const dl = (name, text, type) => { const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([text],{type:type||"text/csv"})); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),500); };
     const q = v => '"'+String(v==null?"":v).replace(/"/g,'""')+'"';
+    const [digestBusy, setDigestBusy] = React.useState(false);
+    const sendDigest = async () => {
+      const top = active.filter(f=>f.sev==="critical"||f.sev==="high").slice(0,15);
+      setDigestBusy(true);
+      try {
+        const d = await callAiFn(cloud, {title:"ISMS digest - "+model.anchorStr, intro:(isAdmin?"All teams":user.team+" team")+": "+cnt("critical")+" critical, "+cnt("high")+" high findings.", findings:top.map(f=>({severity:f.sev,title:f.title,detail:f.detail}))}, "notify");
+        showToast((d.sent&&d.sent.length?"Digest sent: "+d.sent.join(", "):"Nothing sent")+(d.skipped&&d.skipped.length?" (skipped "+d.skipped.join("; ")+")":""), d.sent&&d.sent.length?"ok":"err");
+      } catch(e) { showToast(e.message||"Could not send digest","err"); }
+      setDigestBusy(false);
+    };
     const exportActions = () => { dl("isms_action_center_"+model.anchorStr+".csv", ["Severity,Domain,Title,Detail,Why it matters"].concat(active.map(f=>[f.sev,f.domain,f.title,f.detail,f.why].map(q).join(","))).join("\n")); showToast("Actions exported"); };
     const exportScore = () => { dl("isms_team_scorecard_"+model.anchorStr+".csv", ["Team,Score,Headcount,Utilisation %,Reactive %,Suspended,Over estimate,Open incidents,Hours,Cost"].concat(model.scorecard.map(t=>[t.team,t.score,t.hc,Math.round(t.util),Math.round(t.re),t.sp,t.over,t.openMi,Math.round(t.hrs),Math.round(t.cost)].join(","))).join("\n")); showToast("Scorecard exported"); };
     const narrative = () => {
@@ -15012,6 +15055,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       <div style={{animation:"fadeSlideIn .3s ease"}}>
         <PageHero icon="🎯" title="Action Center" subtitle={"Smart findings from your live data · "+(isAdmin?"all teams":user.team+" team")+" · data as of "+model.anchorStr}
           right={<div style={{display:"flex",gap:8}}>
+            <button onClick={sendDigest} disabled={digestBusy} style={{padding:"7px 14px",borderRadius:"var(--radius-md)",border:"1px solid rgba(255,255,255,.35)",background:"rgba(255,255,255,.18)",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>{digestBusy?"Sending…":"📣 Send digest"}</button>
             <button onClick={exportActions} style={{padding:"7px 14px",borderRadius:"var(--radius-md)",border:"1px solid rgba(255,255,255,.35)",background:"rgba(255,255,255,.18)",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>⬇ Export actions</button>
             <button onClick={printReport} style={{padding:"7px 14px",borderRadius:"var(--radius-md)",border:"none",background:"#fff",color:"var(--brand)",fontSize:12,fontWeight:700,cursor:"pointer"}}>🖨 Executive summary</button></div>}/>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12,margin:"16px 0"}}>
