@@ -5238,7 +5238,7 @@ const iS = {
 };
 const sS = {...iS, background:"var(--surface-2)"};
 
-const Btn = ({children,v="pri",sm,onClick,style={}}) => {
+const Btn = ({children,v="pri",sm,onClick,style={},disabled}) => {
   const base = {
     display:"inline-flex",alignItems:"center",gap:5,
     padding:sm?"5px 13px":"9px 18px",
@@ -5257,7 +5257,7 @@ const Btn = ({children,v="pri",sm,onClick,style={}}) => {
     dan:{background:"#fff5f5",color:"#b91c1c",border:"1.5px solid #fecaca"},
     suc:{background:"#059669",color:"#fff",boxShadow:"0 1px 2px rgba(16,24,40,.12)"},
   };
-  return <button className="btn-primary" style={{...base,...vs[v]}} onClick={onClick}>{children}</button>;
+  return <button className="btn-primary" disabled={disabled} style={{...base,...vs[v],...(disabled?{opacity:.55,cursor:"wait"}:{})}} onClick={onClick}>{children}</button>;
 };
 
 const Lbl = ({t,children}) => (
@@ -5554,6 +5554,57 @@ function SplashLoader({label}) {
       </div>
     </div>
   );
+}
+
+// Toasts live in their own component so showing one does NOT re-render the whole portal (which reset open modals).
+let __toastSet = null, __toastTimer = null;
+function ToastHost() {
+  const [toast, setToast] = React.useState(null);
+  React.useEffect(()=>{ __toastSet = setToast; return ()=>{ __toastSet = null; }; }, []);
+  if(!toast) return null;
+  return (
+    <div style={{
+      position:"fixed",bottom:24,right:24,
+      background:toast.type==="err"?"#1e1010":toast.type==="warn"?"#1a1200":"#0d1a0f",
+      color:"#fff",borderRadius:12,padding:"13px 18px",fontSize:13,fontWeight:500,zIndex:9000,
+      display:"flex",alignItems:"center",gap:10,
+      boxShadow:"0 12px 32px rgba(0,0,0,.35), 0 2px 8px rgba(0,0,0,.2)",
+      borderLeft:`3px solid ${toast.type==="err"?"#f87171":toast.type==="warn"?"#fbbf24":"#4ade80"}`,
+      minWidth:260,maxWidth:380,animation:"toastIn .3s cubic-bezier(.22,1,.36,1) both",backdropFilter:"blur(8px)",fontFamily:"var(--font-sans)"
+    }}>
+      <span style={{fontSize:16,flexShrink:0}}>{toast.type==="err"?"⚠️":toast.type==="warn"?"⚡":"✓"}</span>
+      <span style={{flex:1,lineHeight:1.4}}>{toast.msg}</span>
+      <button onClick={()=>setToast(null)} style={{background:"none",border:"none",cursor:"pointer",color:"rgba(255,255,255,.4)",fontSize:18,padding:"0 0 0 8px",flexShrink:0,lineHeight:1}}>×</button>
+    </div>
+  );
+}
+function pushToast(msg, type) {
+  if(!__toastSet) return;
+  __toastSet({msg:msg, type:type||"ok"});
+  clearTimeout(__toastTimer);
+  __toastTimer = setTimeout(()=>{ if(__toastSet) __toastSet(null); }, 3000);
+}
+
+// Calls the "ai" Supabase Edge Function. Throws Error with a readable message.
+async function callAiFn(cloud, body) {
+  if(!cloud || !cloud.sb || !cloud.sb.functions) throw new Error("AI needs cloud (Supabase) mode and the 'ai' Edge Function. See cloud/AI_SETUP.md.");
+  const { data, error } = await cloud.sb.functions.invoke("ai", { body });
+  if(error) {
+    let msg = error.message || String(error);
+    try {
+      const c = error.context;
+      if(c && typeof c.text === "function") {
+        const st = c.status; const raw = await c.text(); let detail = raw;
+        try { const j = JSON.parse(raw); detail = j.error || j.message || j.msg || raw; } catch(e) {}
+        msg = "HTTP "+st+": "+String(detail).slice(0,400);
+        if(st===401) msg += " -> turn 'Verify JWT' OFF for the ai function.";
+        if(st===404) msg = "AI function is not deployed yet (HTTP 404). See cloud/AI_SETUP.md.";
+      }
+    } catch(e) {}
+    throw new Error(msg);
+  }
+  if(!data || data.error) throw new Error((data && data.error) || "Empty response");
+  return data;
 }
 
 function CloudDataPanel({cloud, syncState, syncErr}) {
@@ -6371,7 +6422,6 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
   React.useEffect(()=>{ if(catsDirty.current) cloudSave("settings", [{key:"categories", items:categories}]); }, [categories]);
   const [modal,      setModal]      = useState(null);
   const [target,     setTarget]     = useState(null);
-  const [toast,      setToast]      = useState(null);
   const [showSwitch, setShowSwitch] = useState(false);
   const [dashDrill,  setDashDrill]  = useState(null); // {type,label,data}
 
@@ -6684,7 +6734,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
   const tc    = user?.team ? tCol(user.team) : "#6366f1";
   const adminColor = "#6366f1";
 
-  const showToast = (msg,type="ok") => { setToast({msg,type}); setTimeout(()=>setToast(null),3000); };
+  const showToast = (msg,type="ok") => pushToast(msg,type);
   const closeM    = () => { setModal(null); setTarget(null); setAForm(bAct); setLForm(bLog); };
   const goPage    = p  => { setPage(p); setShowSwitch(false); try { sessionStorage.setItem('isms_page', p); } catch (e) {} };
 
@@ -15691,6 +15741,38 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     const [miForm, setMiForm] = React.useState({incidentNo:"",name:"",severity:"Sev1",impactedServices:"",teamsInvolved:[],desc:""});
     const [flow, setFlow] = React.useState(null);          // {mi, mode: "resolve" | "close" | "reopen" | "view"}
     const [flowForm, setFlowForm] = React.useState({summary:"", root:"", when:"", note:""});
+    const [aiBox, setAiBox] = React.useState({busy:false, err:"", kind:"", text:"", rca:null});
+    const runIncAI = async (kind, cur) => {
+      setAiBox({busy:true, err:"", kind:kind, text:"", rca:null});
+      try {
+        const people = allUsers.map(u=>u.name).filter(Boolean).sort((a,b)=>b.length-a.length);
+        const alias = {}; people.forEach((n,i)=>{ alias[n] = "Engineer "+(i<26?String.fromCharCode(65+i):(i+1)); });
+        const mask = t => { let x = String(t==null?"":t); people.forEach(n=>{ x = x.split(n).join(alias[n]); }); return x; };
+        const unmask = t => { let x = String(t||""); people.forEach(n=>{ x = x.split(alias[n]).join(n); }); return x; };
+        const il = logs.filter(l=>l.actId===cur.id);
+        const byTeam = {}; il.forEach(l=>{ byTeam[l.team] = (byTeam[l.team]||0) + l.mins/60; });
+        const dur = (cur.startedAt && cur.resolvedAt) ? Math.round((new Date(cur.resolvedAt)-new Date(cur.startedAt))/36000)/100 : null;
+        const words = String(cur.name||"").toLowerCase().split(/[^a-z0-9]+/).filter(w=>w.length>3);
+        const similar = mis.filter(m=>m.id!==cur.id && (m.status==="Resolved"||m.status==="Closed") && (m.rootCause||m.resolutionSummary) &&
+            (words.some(w=>(String(m.name||"")+" "+String(m.impactedServices||"")).toLowerCase().includes(w)) || (m.teamsInvolved||[]).some(t=>(cur.teamsInvolved||[]).includes(t))))
+          .slice(0,4).map(m=>({incident:m.incidentNo, name:m.name, severity:m.severity, rootCause:mask(m.rootCause), resolution:mask(m.resolutionSummary)}));
+        const snap = mask(JSON.stringify({
+          incident:cur.incidentNo, name:cur.name, severity:cur.severity, status:cur.status, started:cur.startedAt, resolved:cur.resolvedAt||null, hoursToResolve:dur,
+          impactedServices:cur.impactedServices, teamsInvolved:cur.teamsInvolved, description:cur.desc, rootCauseSoFar:cur.rootCause||"", resolutionSoFar:cur.resolutionSummary||"", closureNote:cur.closeNote||"",
+          timesReopened:cur.reopenCount||0,
+          history:(cur.history||[]).map(h=>({when:h.ts, action:h.action, note:h.note})),
+          effort:{entries:il.length, totalHours:Math.round(il.reduce((x,l)=>x+l.mins,0)/6)/10, hoursByTeam:Object.fromEntries(Object.entries(byTeam).map(([k,v])=>[k,Math.round(v*10)/10]))},
+          engineerNotes: il.slice(-15).map(l=>({date:l.date, team:l.team, note:l.notes})),
+          similarPastIncidents: similar,
+        }));
+        const data = await callAiFn(cloud, {mode:kind, snapshot:JSON.parse(snap)});
+        const out = unmask(data.text);
+        if(kind==="rca") {
+          let j = null; try { const m = out.match(/\{[\s\S]*\}/); j = m ? JSON.parse(m[0]) : null; } catch(e) {}
+          setAiBox({busy:false, err:"", kind:kind, text:out, rca:j, meta:(data.provider||"")+" · "+(data.model||"")});
+        } else setAiBox({busy:false, err:"", kind:kind, text:out, rca:null, meta:(data.provider||"")+" · "+(data.model||"")});
+      } catch(e) { setAiBox({busy:false, err:e.message||String(e), kind:kind, text:"", rca:null}); }
+    };
 
     const miActs  = mis;
     const allMiLogs = logs.filter(l=>mis.some(m=>m.id===l.actId));
@@ -15764,6 +15846,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     const nowLocal = () => { const d = new Date(); d.setMinutes(d.getMinutes()-d.getTimezoneOffset()); return d.toISOString().slice(0,16); };
     const openFlow = (mi, mode) => {
       setFlow({mi:mi, mode:mode});
+      setAiBox({busy:false, err:"", kind:"", text:"", rca:null});
       setFlowForm({summary:mi.resolutionSummary||"", root:(mi.rootCause&&!/under investigation/i.test(mi.rootCause))?mi.rootCause:"", when:nowLocal(), note:""});
     };
     const submitFlow = () => {
@@ -16225,6 +16308,24 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
                   <Lbl t="How was it resolved? *"><textarea style={{...iS,minHeight:80,resize:"vertical"}} value={flowForm.summary} onChange={e=>setFlowForm(f=>({...f,summary:e.target.value}))} placeholder="Fix applied, workaround, who did what"/></Lbl>
                   <Lbl t="Root cause"><textarea style={{...iS,minHeight:60,resize:"vertical"}} value={flowForm.root} onChange={e=>setFlowForm(f=>({...f,root:e.target.value}))} placeholder="Leave blank if still being investigated"/></Lbl>
                   <Lbl t="Resolved at"><input type="datetime-local" style={iS} value={flowForm.when} onChange={e=>setFlowForm(f=>({...f,when:e.target.value}))}/></Lbl>
+                  <div style={{border:"1px dashed #c4b5fd",borderRadius:10,padding:12,background:"#faf5ff"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                      <div style={{fontSize:12.5,color:"#5b21b6",fontWeight:600}}>✨ AI assist - suggest a likely root cause from incident history, effort notes and similar past incidents</div>
+                      <Btn sm v="sec" onClick={()=>runIncAI("rca",cur)} disabled={aiBox.busy}>{aiBox.busy&&aiBox.kind==="rca"?"Thinking...":"Suggest root cause"}</Btn>
+                    </div>
+                    {aiBox.err && aiBox.kind==="rca" && <div style={{marginTop:8,fontSize:12.5,color:"#b91c1c",wordBreak:"break-word"}}>AI error: {aiBox.err}</div>}
+                    {aiBox.kind==="rca" && !aiBox.busy && !aiBox.err && (aiBox.rca ? (
+                      <div style={{marginTop:10,fontSize:12.5,color:"var(--text-1)"}}>
+                        <div><strong>Root cause (hypothesis):</strong> {aiBox.rca.rootCause}</div>
+                        <div style={{marginTop:4}}><strong>Resolution:</strong> {aiBox.rca.resolution}</div>
+                        {Array.isArray(aiBox.rca.verify) && aiBox.rca.verify.length>0 && <div style={{marginTop:4}}><strong>Please verify:</strong><ul style={{margin:"2px 0 0 18px",padding:0}}>{aiBox.rca.verify.map((v,i)=><li key={i}>{v}</li>)}</ul></div>}
+                        <div style={{display:"flex",gap:8,alignItems:"center",marginTop:8}}>
+                          <Btn sm onClick={()=>{ setFlowForm(f=>({...f, root:aiBox.rca.rootCause||f.root, summary:f.summary.trim()?f.summary:(aiBox.rca.resolution||"")})); showToast("Suggestion copied into the form - review before saving"); }}>Use suggestion</Btn>
+                          <span style={{fontSize:11,color:"var(--text-3)"}}>AI suggestion · {aiBox.meta} · always verify</span>
+                        </div>
+                      </div>
+                    ) : <pre style={{whiteSpace:"pre-wrap",fontFamily:"inherit",fontSize:12.5,margin:"10px 0 0"}}>{aiBox.text}</pre>)}
+                  </div>
                 </div>
               )}
               {mode==="close" && (
@@ -16233,6 +16334,20 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
                   {row("Resolution", cur.resolutionSummary)}
                   {row("Root cause", cur.rootCause)}
                   <Lbl t="Closure note (optional)"><textarea style={{...iS,minHeight:70,resize:"vertical"}} value={flowForm.note} onChange={e=>setFlowForm(f=>({...f,note:e.target.value}))} placeholder="Post-incident review outcome, follow-up actions"/></Lbl>
+                  <div style={{border:"1px dashed #c4b5fd",borderRadius:10,padding:12,background:"#faf5ff"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                      <div style={{fontSize:12.5,color:"#5b21b6",fontWeight:600}}>✨ AI assist - draft a blameless post-incident review</div>
+                      <Btn sm v="sec" onClick={()=>runIncAI("pir",cur)} disabled={aiBox.busy}>{aiBox.busy?"Drafting...":"Draft PIR"}</Btn>
+                    </div>
+                    {aiBox.err && <div style={{marginTop:8,fontSize:12.5,color:"#b91c1c",wordBreak:"break-word"}}>AI error: {aiBox.err}</div>}
+                    {aiBox.kind==="pir" && aiBox.text && !aiBox.busy && (<div style={{marginTop:10}}>
+                      <pre style={{whiteSpace:"pre-wrap",fontFamily:"inherit",fontSize:12.5,lineHeight:1.55,margin:0,maxHeight:260,overflow:"auto",background:"#fff",border:"1px solid var(--border)",borderRadius:8,padding:10}}>{aiBox.text}</pre>
+                      <div style={{display:"flex",gap:8,alignItems:"center",marginTop:8,flexWrap:"wrap"}}>
+                        <Btn sm onClick={()=>{ setFlowForm(f=>({...f, note:aiBox.text})); showToast("PIR placed in the closure note - edit before closing"); }}>Use as closure note</Btn>
+                        <Btn sm v="sec" onClick={()=>{ try{navigator.clipboard.writeText(aiBox.text);}catch(e){} showToast("Copied"); }}>📋 Copy</Btn>
+                        <span style={{fontSize:11,color:"var(--text-3)"}}>AI draft · {aiBox.meta} · review before use</span>
+                      </div></div>)}
+                  </div>
                 </div>
               )}
               {mode==="reopen" && (
@@ -16261,6 +16376,27 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
                         <div style={{flex:1}}><strong>{h.action}</strong>{" by " + h.by}{h.note ? <div style={{color:"var(--text-3)",marginTop:2,whiteSpace:"pre-wrap"}}>{h.note}</div> : null}</div>
                       </div>
                     ))}
+                  {isMgrOrAdmin && (<div style={{border:"1px dashed #c4b5fd",borderRadius:10,padding:12,background:"#faf5ff",marginTop:16}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                      <div style={{fontSize:12.5,color:"#5b21b6",fontWeight:600}}>✨ AI assist</div>
+                      <div style={{display:"flex",gap:8}}>
+                        <Btn sm v="sec" onClick={()=>runIncAI("rca",cur)} disabled={aiBox.busy}>Suggest root cause</Btn>
+                        <Btn sm v="sec" onClick={()=>runIncAI("pir",cur)} disabled={aiBox.busy}>Draft PIR</Btn>
+                      </div>
+                    </div>
+                    {aiBox.busy && <div style={{marginTop:8,fontSize:12.5,color:"var(--text-3)"}}>Thinking...</div>}
+                    {aiBox.err && <div style={{marginTop:8,fontSize:12.5,color:"#b91c1c",wordBreak:"break-word"}}>AI error: {aiBox.err}</div>}
+                    {!aiBox.busy && !aiBox.err && aiBox.text && (<div style={{marginTop:10}}>
+                      {aiBox.kind==="rca" && aiBox.rca ? (<div style={{fontSize:12.5}}>
+                        <div><strong>Root cause (hypothesis):</strong> {aiBox.rca.rootCause}</div>
+                        <div style={{marginTop:4}}><strong>Resolution:</strong> {aiBox.rca.resolution}</div>
+                        {Array.isArray(aiBox.rca.verify) && <ul style={{margin:"4px 0 0 18px",padding:0}}>{aiBox.rca.verify.map((v,i)=><li key={i}>{v}</li>)}</ul>}
+                      </div>) : <pre style={{whiteSpace:"pre-wrap",fontFamily:"inherit",fontSize:12.5,lineHeight:1.55,margin:0,maxHeight:280,overflow:"auto",background:"#fff",border:"1px solid var(--border)",borderRadius:8,padding:10}}>{aiBox.text}</pre>}
+                      <div style={{display:"flex",gap:8,alignItems:"center",marginTop:8}}>
+                        <Btn sm v="sec" onClick={()=>{ try{navigator.clipboard.writeText(aiBox.text);}catch(e){} showToast("Copied"); }}>📋 Copy</Btn>
+                        <span style={{fontSize:11,color:"var(--text-3)"}}>AI draft · {aiBox.meta} · review before use</span>
+                      </div></div>)}
+                  </div>)}
                   <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:16}}>
                     {isMgrOrAdmin && cur.status==="Open" && <Btn v="dan" onClick={()=>openFlow(cur,"resolve")}>✅ Resolve</Btn>}
                     {isMgrOrAdmin && cur.status==="Resolved" && <Btn onClick={()=>openFlow(cur,"close")}>🔒 Close</Btn>}
@@ -17523,25 +17659,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       )}
 
       {/* == TOAST == */}
-      {toast && (
-        <div style={{
-          position:"fixed",bottom:24,right:24,
-          background:toast.type==="err"?"#1e1010":toast.type==="warn"?"#1a1200":"#0d1a0f",
-          color:"#fff",borderRadius:12,
-          padding:"13px 18px",fontSize:13,fontWeight:500,zIndex:9000,
-          display:"flex",alignItems:"center",gap:10,
-          boxShadow:"0 12px 32px rgba(0,0,0,.35), 0 2px 8px rgba(0,0,0,.2)",
-          borderLeft:`3px solid ${toast.type==="err"?"#f87171":toast.type==="warn"?"#fbbf24":"#4ade80"}`,
-          minWidth:260,maxWidth:380,
-          animation:"toastIn .3s cubic-bezier(.22,1,.36,1) both",
-          backdropFilter:"blur(8px)",
-          fontFamily:"var(--font-sans)"
-        }}>
-          <span style={{fontSize:16,flexShrink:0}}>{toast.type==="err"?"⚠️":toast.type==="warn"?"⚡":"✓"}</span>
-          <span style={{flex:1,lineHeight:1.4}}>{toast.msg}</span>
-          <button onClick={()=>setToast(null)} style={{background:"none",border:"none",cursor:"pointer",color:"rgba(255,255,255,.4)",fontSize:18,padding:"0 0 0 8px",flexShrink:0,lineHeight:1}}>×</button>
-        </div>
-      )}
+      <ToastHost/>
     </div>
   );
 }
