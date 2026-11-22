@@ -5072,6 +5072,34 @@ const fmtM   = m => { if (!m && m !== 0) return "—"; const h = Math.floor(m/60
 const tCol_module = t => SEED_TEAMS.find(x=>x.name===t)?.color || "var(--text-3)";
 const uCol   = p => p>85?"#dc2626":p>70?"#f59e0b":"#16a34a";
 let   seq    = 300;
+// Incident resolution targets (minutes) per severity. Editable by admins in Settings.
+const DEFAULT_SLA = { Sev1:{resolve:240}, Sev2:{resolve:480}, Sev3:{resolve:1440} };
+// state: ok | risk (75%+ of target used) | breached | met | missed | none
+const slaInfo = (mi, targets, nowMs) => {
+  const t = (targets && targets[mi.severity]) || DEFAULT_SLA[mi.severity];
+  if(!t || !mi.startedAt) return {state:"none", target:0, elapsed:0, pct:0};
+  const start = new Date(mi.startedAt).getTime();
+  const done = (mi.status==="Resolved"||mi.status==="Closed") && mi.resolvedAt;
+  const end = done ? new Date(mi.resolvedAt).getTime() : nowMs;
+  const elapsed = Math.max(0, Math.round((end - start)/60000));
+  const pct = elapsed / t.resolve * 100;
+  const state = done ? (elapsed <= t.resolve ? "met" : "missed") : (pct > 100 ? "breached" : pct >= 75 ? "risk" : "ok");
+  return {state, target:t.resolve, elapsed, pct, remaining:t.resolve-elapsed};
+};
+const fmtDur = m => { m = Math.abs(Math.round(m)); const d = Math.floor(m/1440), h = Math.floor((m%1440)/60), mm = m%60; return d ? d+"d "+h+"h" : h ? h+"h "+mm+"m" : mm+"m"; };
+const SlaChip = ({mi, targets}) => {
+  const x = slaInfo(mi, targets, Date.now());
+  if(x.state==="none") return null;
+  const map = {
+    ok:{c:"#166534",bg:"#f0fdf4",b:"#bbf7d0",t:"⏱ "+fmtDur(x.remaining)+" left"},
+    risk:{c:"#92400e",bg:"#fffbeb",b:"#fde68a",t:"⚠ "+fmtDur(x.remaining)+" left"},
+    breached:{c:"#b91c1c",bg:"#fef2f2",b:"#fecaca",t:"⛔ Breached by "+fmtDur(-x.remaining)},
+    met:{c:"#166534",bg:"#f0fdf4",b:"#bbf7d0",t:"✓ Target met · "+fmtDur(x.elapsed)},
+    missed:{c:"#b91c1c",bg:"#fef2f2",b:"#fecaca",t:"✗ Missed by "+fmtDur(-x.remaining)},
+  }[x.state];
+  return <div title={"Resolution target "+fmtDur(x.target)} style={{display:"inline-block",marginTop:4,padding:"2px 8px",borderRadius:10,fontSize:10.5,fontWeight:700,color:map.c,background:map.bg,border:"1px solid "+map.b,whiteSpace:"nowrap"}}>{map.t}</div>;
+};
+
 const DEFAULT_CATEGORIES = ["Infrastructure Build","Maintenance","Security & Compliance","Automation & Scripting","Monitoring & Alerting","Documentation"].map(n=>({name:n, active:true}));
 // Values pre-filled in the Log Time form from an activity's own settings
 const logDefaultsFrom = (a, f) => ({
@@ -5381,6 +5409,12 @@ function ForceResetForm({onDone, onSave}) {
 
 
 // == ERROR BOUNDARY ===========================
+// Pages are defined inside PortalApp, so their identity changes on every render. Rendering them as
+// <Page/> remounted them (closing modals, losing typed text). PageHost has a stable identity and just
+// CALLS the page function, so the page's hooks/state live in PageHost and survive re-renders.
+// key={page} on the parent resets it when the user navigates.
+function PageHost({render}) { return render(); }
+
 class ErrorBoundary extends React.Component {
   constructor(props) { super(props); this.state = {hasError:false, error:null}; }
   static getDerivedStateFromError(error) { return {hasError:true, error}; }
@@ -6361,6 +6395,13 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     try { const sv = localStorage.getItem('isms_categories'); if(sv) { const a = JSON.parse(sv); if(Array.isArray(a) && a.length) return a; } } catch(e) {}
     return DEFAULT_CATEGORIES;
   });
+  const [slaTargets, setSlaTargets] = useState(()=>{
+    if(cloud) { const row = (cloud.data.settings||[]).find(x=>x.key==="sla"); return (row && row.targets) ? {...DEFAULT_SLA, ...row.targets} : DEFAULT_SLA; }
+    try { const sv = localStorage.getItem('isms_sla'); if(sv) return {...DEFAULT_SLA, ...JSON.parse(sv)}; } catch(e) {}
+    return DEFAULT_SLA;
+  });
+  const updateSla = (next) => { catsDirty.current = true; setSlaTargets(next); };
+  React.useEffect(()=>{ if(cloud) return; try{ localStorage.setItem('isms_sla', JSON.stringify(slaTargets)); }catch(e){} }, [slaTargets]);
   const [newCat, setNewCat] = useState("");
   const catsDirty = React.useRef(false);
   const updateCategories = (next) => { catsDirty.current = true; setCategories(next); };
@@ -6395,7 +6436,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     if(!cloud) return;
     let stop = false, busy = false;
     const setters = {users:setAllUsers, teams:setTeams, acts:setActs, mis:setMis, logs:setLogs,
-      settings:(arr)=>{ const r = arr.find(x=>x.key==="categories"); if(r && Array.isArray(r.items) && r.items.length) setCategories(r.items); }};
+      settings:(arr)=>{ const r = arr.find(x=>x.key==="categories"); if(r && Array.isArray(r.items) && r.items.length) setCategories(r.items); const q = arr.find(x=>x.key==="sla"); if(q && q.targets) setSlaTargets({...DEFAULT_SLA, ...q.targets}); }};
     const pull = async () => {
       if(stop || busy || document.hidden) return;
       if(Object.values(syncDirty.current).some(Boolean)) return;   // unsaved local edits - do not overwrite
@@ -6419,7 +6460,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
   React.useEffect(()=>{ cloudSave("acts",  acts);     }, [acts]);
   React.useEffect(()=>{ cloudSave("mis",   mis);      }, [mis]);
   React.useEffect(()=>{ cloudSave("logs",  logs);     }, [logs]);
-  React.useEffect(()=>{ if(catsDirty.current) cloudSave("settings", [{key:"categories", items:categories}]); }, [categories]);
+  React.useEffect(()=>{ if(catsDirty.current) cloudSave("settings", [{key:"categories", items:categories},{key:"sla", targets:slaTargets}]); }, [categories, slaTargets]);
   const [modal,      setModal]      = useState(null);
   const [target,     setTarget]     = useState(null);
   const [showSwitch, setShowSwitch] = useState(false);
@@ -6776,6 +6817,23 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
                     .reduce((s,l)=>s+l.mins, 0),
     }));
   }, [allUsers, logs, acts]);
+  // == Effort estimate from history (statistics on your own data, no AI needed) ==
+  const estimateFromHistory = (f) => {
+    if(!f || !f.type) return null;
+    const recurring = ["BAU","Service Request","Meeting","Incident"].includes(f.type);
+    const byAct = {}; logs.forEach(l=>{ (byAct[l.actId]=byAct[l.actId]||{mins:0,months:new Set()}); byAct[l.actId].mins+=l.mins; byAct[l.actId].months.add((l.date||"").slice(0,7)); });
+    const pool = acts.filter(a=>a.type===f.type && byAct[a.id] && byAct[a.id].mins>0 && !(target && a.id===target.id));
+    const score = a => (a.taskSize&&a.taskSize===f.taskSize?3:0) + (a.cat===f.cat?2:0) + (a.complexity&&a.complexity===f.complexity?2:0) + (a.level&&a.level===f.level?1:0) + (a.team===f.team?1:0);
+    const ranked = pool.map(a=>({a, sc:score(a)})).sort((x,y)=>y.sc-x.sc);
+    const best = ranked.filter(x=>x.sc>=3);
+    const use = (best.length>=3 ? best : ranked).slice(0,12);
+    if(use.length<3) return {n:use.length, enough:false};
+    const vals = use.map(x=>{ const o=byAct[x.a.id]; return recurring ? o.mins/Math.max(1,o.months.size) : o.mins; }).sort((p,q)=>p-q);
+    const pick = p => vals[Math.min(vals.length-1, Math.max(0, Math.round((vals.length-1)*p)))];
+    const r30 = v => Math.max(30, Math.round(v/30)*30);
+    return {enough:true, n:use.length, median:r30(pick(0.5)), low:r30(pick(0.25)), high:r30(pick(0.75)), recurring:recurring, tight:best.length>=3};
+  };
+
   const minsForAct = actId => logs.filter(l=>l.actId===actId).reduce((s,l)=>s+l.mins,0);
 
   const filtActs = useMemo(()=>{
@@ -8546,6 +8604,42 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     const [sortDir,      setSortDir]      = React.useState("desc");
     const [page,         setPage]         = React.useState(1);
     const PAGE_SIZE = 25;
+    // -- AI quick log (describe your day, review, add) --
+    const [qOpen, setQOpen] = React.useState(false);
+    const [qText, setQText] = React.useState("");
+    const [qBusy, setQBusy] = React.useState(false);
+    const [qErr,  setQErr]  = React.useState("");
+    const [qRows, setQRows] = React.useState([]);
+    const myLoggable = loggable;
+    const missingDays = (() => {
+      const have = new Set(logs.filter(l=>l.userId===user.id).map(l=>l.date));
+      const out = []; const d = new Date(); d.setHours(12,0,0,0);
+      for(let i=1; out.length<5 && i<14; i++){ const x = new Date(d.getTime()-i*86400000); const dow=x.getDay(); if(dow===0||dow===6) continue; const iso = x.toISOString().slice(0,10); if(!have.has(iso)) out.push(iso); }
+      return out;
+    })();
+    const draftQuick = async () => {
+      if(!qText.trim()) { setQErr("Describe what you worked on first."); return; }
+      setQBusy(true); setQErr(""); setQRows([]);
+      try {
+        const snap = {today:today(), activities: myLoggable.slice(0,120).map(a=>({id:a.id, name:a.name, type:a.isMajorIncident?"Incident":a.type}))};
+        const data = await callAiFn(cloud, {mode:"timelog", question:qText.trim(), snapshot:snap});
+        let j = null; try { const m = String(data.text||"").match(/\{[\s\S]*\}/); j = m ? JSON.parse(m[0]) : null; } catch(e) {}
+        const list = j && Array.isArray(j.entries) ? j.entries : [];
+        if(!list.length) throw new Error("The AI did not return any entries. Try describing the work with durations, e.g. '2h on firewall review'.");
+        const valid = new Set(myLoggable.map(a=>a.id));
+        setQRows(list.slice(0,20).map((e,i)=>({k:i, actId:valid.has(e.actId)?e.actId:"", mins:Math.max(5,Math.min(960,Math.round(+e.mins||30))), notes:String(e.notes||"").slice(0,300), date:/^\d{4}-\d{2}-\d{2}$/.test(e.date||"")&&e.date<=today()?e.date:today()})));
+      } catch(e) { setQErr(e.message||String(e)); }
+      setQBusy(false);
+    };
+    const addQuick = () => {
+      const ok = qRows.filter(r=>r.actId && r.mins>0);
+      if(!ok.length) { showToast("Pick an activity for at least one row","err"); return; }
+      const made = ok.map(r=>{ const act = myLoggable.find(a=>a.id===r.actId); const d = logDefaultsFrom(act,{});
+        return {id:uid("TL"), date:r.date, userId:user.id, member:user.name, team:act.isMajorIncident?user.team:act.team, actId:act.id, activity:act.name, type:act.isMajorIncident?"Incident":act.type, cat:d.cat||act.cat||"Maintenance", mins:+r.mins, notes:r.notes, ticketRef:d.ticketRef, nature:d.nature, workType:d.workType, workNature:d.workNature, priority:d.priority}; });
+      setLogs(p=>[...made,...p]);
+      showToast(made.length+" entr"+(made.length===1?"y":"ies")+" added ("+fmtM(made.reduce((x,l)=>x+l.mins,0))+")");
+      setQOpen(false); setQText(""); setQRows([]);
+    };
 
     const memberList = isAdmin ? allUsers.filter(u=>u.team) : isMgr ? allUsers.filter(u=>u.team===user.team) : [allUsers.find(u=>u.id===user.id)||user];
     const maxMins    = Math.max(...memberList.map(m=>filtLogs.filter(l=>l.userId===m.id).reduce((s,l)=>s+l.mins,0)),1);
@@ -8595,9 +8689,34 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
               </div>
             )}
             <div style={{background:"var(--brand-light)",border:"1px solid #bfdbfe",borderRadius:"var(--radius-md)",padding:"8px 14px",fontSize:13,fontWeight:700,color:"var(--brand)"}}>{fmtM(total)} · {viewLogs.length} entries</div>
+            {!isAdmin && <Btn v="sec" onClick={()=>{setQOpen(true);setQErr("");}}>✨ Quick log</Btn>}
             {!isAdmin && <Btn onClick={()=>{setTarget(null);setLForm(bLog);setModal("log");}}>⏱ Log Time</Btn>}
           </div>
         </div>
+
+        {qOpen && (
+          <ModalWrap title="✨ Quick log from notes" onClose={()=>setQOpen(false)} wide>
+            <div style={{display:"grid",gap:12}}>
+              <InfoBanner color="#5b21b6" bg="#faf5ff" border="#ddd6fe" icon="✨">Describe your work in plain words, with durations. The AI drafts entries against your activities; you review and edit before anything is saved.</InfoBanner>
+              {missingDays.length>0 && <div style={{fontSize:12,color:"#92400e",background:"#fffbeb",border:"1px solid #fde68a",borderRadius:8,padding:"7px 10px"}}>No time logged on: {missingDays.map(d=>new Date(d+"T12:00:00").toLocaleDateString("en-GB",{weekday:"short",day:"2-digit",month:"short"})).join(", ")}. Mention the day in your text, e.g. "Friday: 3h patching".</div>}
+              <textarea value={qText} onChange={e=>setQText(e.target.value)} style={{...iS,minHeight:90,resize:"vertical"}} placeholder="e.g. 2h reviewing firewall rules for the DMZ, 45 min weekly stand-up, 1h helping with the VPN ticket"/>
+              <div><Btn onClick={draftQuick} disabled={qBusy}>{qBusy?"Drafting...":"Draft entries"}</Btn></div>
+              {qErr && <div style={{padding:"9px 12px",borderRadius:8,background:"#fef2f2",border:"1px solid #fecaca",color:"#b91c1c",fontSize:12.5,wordBreak:"break-word"}}>{qErr}</div>}
+              {qRows.length>0 && (<div>
+                <div style={{fontSize:12,fontWeight:700,color:"var(--text-3)",marginBottom:6}}>Review before adding ({qRows.length})</div>
+                {qRows.map(r=>(<div key={r.k} style={{display:"grid",gridTemplateColumns:"130px minmax(160px,1.3fr) 80px minmax(140px,1.2fr) 28px",gap:6,alignItems:"center",marginBottom:6}}>
+                  <input type="date" max={today()} value={r.date} onChange={e=>setQRows(p=>p.map(x=>x.k===r.k?{...x,date:e.target.value}:x))} style={iS}/>
+                  <select value={r.actId} onChange={e=>setQRows(p=>p.map(x=>x.k===r.k?{...x,actId:e.target.value}:x))} style={{...iS,borderColor:r.actId?undefined:"#f59e0b"}}><option value="">Select activity...</option>{myLoggable.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select>
+                  <input type="number" min="5" step="5" value={r.mins} onChange={e=>setQRows(p=>p.map(x=>x.k===r.k?{...x,mins:+e.target.value}:x))} style={iS} title="Minutes"/>
+                  <input value={r.notes} onChange={e=>setQRows(p=>p.map(x=>x.k===r.k?{...x,notes:e.target.value}:x))} style={iS} placeholder="Notes"/>
+                  <button onClick={()=>setQRows(p=>p.filter(x=>x.k!==r.k))} style={{background:"none",border:"none",cursor:"pointer",color:"var(--text-4)",fontSize:16}}>×</button>
+                </div>))}
+                <div style={{fontSize:11.5,color:"var(--text-3)"}}>Total {fmtM(qRows.reduce((x,r)=>x+(+r.mins||0),0))}. Rows without an activity are skipped.</div>
+                <MFoot onClose={()=>setQOpen(false)} onSave={addQuick} label={"Add "+qRows.filter(r=>r.actId).length+" entries"}/>
+              </div>)}
+            </div>
+          </ModalWrap>
+        )}
 
         {/* == Member summary table — only shown to managers/admins == */}
         {isMgrOrAdmin && <Card style={{padding:0,overflow:"hidden",marginBottom:14}}>
@@ -10369,6 +10488,21 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
                   <span key={t} style={{padding:"5px 12px",borderRadius:20,background:"var(--surface-2)",border:"1px solid var(--border)",fontSize:12.5,color:"var(--text-2)",fontWeight:600}}>{t}</span>
                 ))}
               </div>
+            </Card>
+
+            <Card>
+              <div style={{fontWeight:700,fontSize:13,marginBottom:4}}>Incident resolution targets</div>
+              <div style={{fontSize:12,color:"var(--text-3)",marginBottom:14,lineHeight:1.5}}>Hours allowed from incident start to resolution, per severity. Open incidents show a countdown, turn amber at 75% of the target and red once breached. The Action Center raises findings for both.</div>
+              {["Sev1","Sev2","Sev3"].map(sv=>(
+                <div key={sv} style={{display:"flex",alignItems:"center",gap:12,padding:"8px 0",borderBottom:"1px solid var(--surface-3)"}}>
+                  <div style={{flex:1,fontSize:13,fontWeight:600}}>{sv}</div>
+                  <input type="number" min="0.25" step="0.25" disabled={!isAdmin} value={Math.round(((slaTargets[sv]||DEFAULT_SLA[sv]).resolve/60)*100)/100}
+                    onChange={e=>{ const h = Math.max(0.25, +e.target.value||0.25); updateSla({...slaTargets, [sv]:{resolve:Math.round(h*60)}}); }}
+                    style={{width:84,padding:"6px 8px",borderRadius:7,border:"1px solid var(--border-2)",fontSize:13}}/>
+                  <span style={{fontSize:12,color:"var(--text-3)",width:40}}>hours</span>
+                </div>
+              ))}
+              {!isAdmin && <div style={{marginTop:10,fontSize:12,color:"var(--text-4)"}}>Only an administrator can change targets.</div>}
             </Card>
           </div>
         )}
@@ -14357,6 +14491,8 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     const [dismissed, _setDismissed] = React.useState(()=>{ try { return JSON.parse(localStorage.getItem("isms_ac_dismissed")||"{}"); } catch(e) { return {}; } });
     const setDismissed = fn => _setDismissed(prev=>{ const n = typeof fn==="function"?fn(prev):fn; try { localStorage.setItem("isms_ac_dismissed", JSON.stringify(n)); } catch(e) {} return n; });
 
+    const [roiIn, _setRoiIn] = React.useState(()=>{ try { return JSON.parse(localStorage.getItem("isms_roi_inputs")||"{}"); } catch(e) { return {}; } });
+    const setRoi = (id, patch) => _setRoiIn(prev=>{ const n={...prev,[id]:{...(prev[id]||{}),...patch}}; try { localStorage.setItem("isms_roi_inputs", JSON.stringify(n)); } catch(e) {} return n; });
     const [aiOut, _setAiOut] = React.useState(window.__aiOut || null);      // {text, provider, model, q}
     const setAiOut = v => { window.__aiOut = v; _setAiOut(v); };
     const [aiBusy, setAiBusy] = React.useState(false);
@@ -14396,8 +14532,10 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       sMis.filter(m=>m.status==="Open").forEach(m=>{
         const ageH = Math.max(0,(anchor - new Date(m.startedAt))/3600000);
         const sevW = m.severity==="Sev1"?100:m.severity==="Sev2"?85:60;
-        add({id:"mi-open-"+m.id, domain:"Incidents", sev: m.severity==="Sev1"||ageH>24?"critical":"high", score:sevW+Math.min(ageH,48)/2,
-          title:(m.incidentNo||m.id)+" "+m.name+" still open", detail:m.severity+" open for "+(ageH>=24?Math.round(ageH/24)+" day(s)":Math.round(ageH)+"h")+" · teams: "+((m.teamsInvolved||[]).join(", ")||m.team),
+        const sl = slaInfo(m, slaTargets, Date.now());
+        const slaTxt = sl.state==="breached" ? " · resolution target ("+fmtDur(sl.target)+") breached by "+fmtDur(-sl.remaining) : sl.state==="risk" ? " · "+fmtDur(sl.remaining)+" left of "+fmtDur(sl.target)+" target" : sl.state==="ok" ? " · "+fmtDur(sl.remaining)+" left of target" : "";
+        add({id:"mi-open-"+m.id, domain:"Incidents", sev: (m.severity==="Sev1"||ageH>24||sl.state==="breached")?"critical":"high", score:sevW+Math.min(ageH,48)/2+(sl.state==="breached"?10:0),
+          title:(m.incidentNo||m.id)+" "+m.name+" still open", detail:m.severity+" open for "+(ageH>=24?Math.round(ageH/24)+" day(s)":Math.round(ageH)+"h")+slaTxt+" · teams: "+((m.teamsInvolved||[]).join(", ")||m.team),
           why:"Open major incidents breach restore-time targets quickly (DORA MTTR < 4h for Sev1/2).",
           action:{label:"Open incident", run:()=>{ window.__miTab="incidents"; goPage("major_incidents"); }}});
       });
@@ -14407,6 +14545,24 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
           title:(m.incidentNo||m.id)+" resolved but not closed", detail:"Awaiting post-incident review and closure"+(dH>0?" · resolved "+Math.round(dH/24)+" day(s) ago":""),
           why:"Closing incidents forces the PIR and keeps MTTR / recurrence reports accurate.",
           action:{label:"Review & close", run:()=>{ window.__miTab="incidents"; goPage("major_incidents"); }}});
+      });
+
+      const _done = sMis.filter(m=>(m.status==="Resolved"||m.status==="Closed") && m.resolvedAt);
+      const slaMet = _done.filter(m=>slaInfo(m, slaTargets, Date.now()).state==="met").length;
+      const slaStats = {met:slaMet, total:_done.length, pct:_done.length?Math.round(slaMet/_done.length*100):null};
+      // -- 1b. Incident follow-up actions -------------------------------------
+      sMis.forEach(m=>{
+        const open = (m.actionItems||[]).filter(x=>!x.done);
+        if(!open.length) return;
+        const overdue = open.filter(x=>x.due && toD(x.due) < anchor);
+        if(overdue.length) add({id:"mi-ai-over-"+m.id, domain:"Incidents", sev:"high", score:72+Math.min(overdue.length,5),
+          title:overdue.length+" overdue follow-up action"+(overdue.length>1?"s":"")+" on "+(m.incidentNo||m.id), detail:overdue.slice(0,3).map(x=>x.text+(x.owner?" ("+x.owner+")":"")+" - due "+x.due).join("; "),
+          why:"Post-incident actions that slip are the main reason incidents repeat.",
+          action:{label:"Open incident", run:()=>{ window.__miTab="incidents"; goPage("major_incidents"); }}});
+        else if(m.status==="Closed") add({id:"mi-ai-closed-"+m.id, domain:"Incidents", sev:"medium", score:46,
+          title:(m.incidentNo||m.id)+" is closed but has "+open.length+" open follow-up"+(open.length>1?"s":""), detail:open.slice(0,3).map(x=>x.text).join("; "),
+          why:"Closing before the fixes are done hides the remaining risk.",
+          action:{label:"Open incident", run:()=>{ window.__miTab="incidents"; goPage("major_incidents"); }}});
       });
 
       // -- 2. Activities ----------------------------------------------------
@@ -14492,7 +14648,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
           action:{label:"See repeat patterns", run:()=>goPage("prod_repeat")}});
       });
       const byAct = {};
-      sLog.filter(l=>l.nature==="Reactive").forEach(l=>{ const k=l.actId; (byAct[k]=byAct[k]||{id:k,name:l.activity,team:l.team,n:0,mins:0,users:new Set(),cost:0}); const o=byAct[k]; o.n++; o.mins+=l.mins; o.users.add(l.userId); o.cost+=l.mins/60*cost(l.userId); });
+      sLog.filter(l=>l.nature==="Reactive").forEach(l=>{ const k=l.actId; (byAct[k]=byAct[k]||{id:k,name:l.activity,team:l.team,n:0,mins:0,users:new Set(),cost:0,months:new Set()}); const o=byAct[k]; o.n++; o.mins+=l.mins; o.users.add(l.userId); o.cost+=l.mins/60*cost(l.userId); o.months.add((l.date||"").slice(0,7)); });
       Object.values(byAct).filter(o=>o.n>=5 && o.mins>=600).sort((a,b)=>b.mins-a.mins).slice(0,5).forEach(o=>{
         const exists = sAct.some(a=>a.team===o.team && a.cat==="Automation & Scripting" && a.name.toLowerCase().includes((o.name||"").toLowerCase().slice(0,18)));
         add({id:"rep-"+o.id, domain:"Efficiency", sev:"medium", score:48+Math.min(o.mins/600,12),
@@ -14501,6 +14657,13 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
           action: exists ? {label:"Open activities", run:()=>goPage("activities")} :
             {label:"Create automation task", run:()=>{ setActs(p=>[{id:nextActId(o.team,p), name:"Automate: "+o.name, team:o.team, type:"Project", cat:"Automation & Scripting", estMins:Math.min(2400,Math.round(o.mins*0.5/60)*60||480), priority:"Medium", status:"Active", ticketNo:"", jira:"", date:today(), nature:"Proactive", workNature:"Change", taskSize:"Medium", complexity:"Medium", level:"L2", desc:"Auto-created from Action Center: "+o.n+" reactive entries ("+fmtH(o.mins)+") on "+o.id}, ...p]); showToast("Automation task created for "+o.team); }}});
       });
+      const toil = Object.values(byAct).filter(o=>o.n>=5 && o.mins>=600).sort((a,b)=>b.mins-a.mins).slice(0,15)
+        .map(o=>{ const mo=Math.max(1,o.months.size); return {id:o.id,name:o.name,team:o.team,n:o.n,mins:o.mins,months:mo,hrsPerMonth:o.mins/60/mo,costPerHr:o.mins?o.cost/(o.mins/60):0}; });
+      const avgRate = (()=>{ const r = sUsers.map(u=>u.costPerHour||0).filter(Boolean); return r.length ? r.reduce((a,b)=>a+b,0)/r.length : 0; })();
+      const inflight = sAct.filter(a=>a.cat==="Automation & Scripting" && a.status!=="Suspended").map(a=>({id:a.id,name:a.name,team:a.team,status:a.status,investedHrs:(loggedByAct[a.id]||0)/60,estHrs:(a.estMins||0)/60,savesHrsMonth:(a.savesMinsMonth||0)/60}));
+      const _inv = inflight.map(a=>a.investedHrs).filter(x=>x>0).sort((a,b)=>a-b);
+      const autoBuild = _inv.length>=3 ? Math.max(8, Math.round(_inv[Math.floor(_inv.length/2)])) : 40;
+      const autoBasis = _inv.length>=3 ? "median of "+_inv.length+" automation activities already logged" : "flat default (fewer than 3 automation activities logged)";
       const noTicket = sLog.filter(l=>!(l.ticketRef||"").trim() && ["Incident","Change"].includes(l.type));
       if(noTicket.length>=3) add({id:"log-ticket", domain:"Hygiene", sev:"medium", score:34+Math.min(noTicket.length,30)/3,
         title:noTicket.length+" incident / change logs have no ticket reference", detail:"Audit trail gap for "+[...new Set(noTicket.map(l=>l.team))].join(", "),
@@ -14536,8 +14699,8 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       }).sort((a,b)=>a.score-b.score);
 
       F.sort((a,b)=>b.score-a.score);
-      return {F, series, projHrs, scorecard, anchorStr, monthKey, totalCap, nAct:sAct.length, nUsers:sUsers.length, nLogs:sLog.length};
-    }, [acts, logs, mis, allUsers, isAdmin, user, prodData]);
+      return {F, series, projHrs, scorecard, anchorStr, monthKey, totalCap, nAct:sAct.length, nUsers:sUsers.length, nLogs:sLog.length, toil, inflight, avgRate, autoBuild, autoBasis, slaStats};
+    }, [acts, logs, mis, allUsers, isAdmin, user, prodData, slaTargets]);
 
     const sevMeta = {critical:{c:"#b91c1c",bg:"#fef2f2",l:"Critical"}, high:{c:"#c2410c",bg:"#fff7ed",l:"High"}, medium:{c:"#a16207",bg:"#fefce8",l:"Medium"}, info:{c:"#1d4ed8",bg:"#eff6ff",l:"Info"}};
     const domains = ["All", ...Array.from(new Set(model.F.map(f=>f.domain)))];
@@ -14633,11 +14796,12 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
           <Tile label="Critical" val={cnt("critical")} color={cnt("critical")?"#b91c1c":"#16a34a"} sub="act now"/>
           <Tile label="High" val={cnt("high")} color={cnt("high")?"#c2410c":"#16a34a"} sub="this week"/>
           <Tile label="Medium / Info" val={cnt("medium")+" / "+cnt("info")} sub="plan & watch"/>
+          <Tile label="Resolution SLA" val={model.slaStats.pct===null?"-":model.slaStats.pct+"%"} sub={model.slaStats.total?(model.slaStats.met+" of "+model.slaStats.total+" incidents on target"):"no resolved incidents"} color={model.slaStats.pct===null?undefined:model.slaStats.pct>=90?"#16a34a":model.slaStats.pct>=70?"#a16207":"#b91c1c"}/>
           <Tile label="Next month" val={model.projHrs!==null?Math.round(model.projHrs/Math.max(1,model.totalCap)*100)+"%":"-"} sub="forecast of capacity" color={model.projHrs!==null&&model.projHrs/Math.max(1,model.totalCap)>1?"#b91c1c":undefined}/>
         </div>
 
         <div style={{display:"flex",borderBottom:"2px solid var(--border)",marginBottom:16}}>
-          <TabBtn id="actions" label={"Recommended actions ("+active.length+")"}/><TabBtn id="score" label="Team scorecard"/><TabBtn id="forecast" label="Forecast & trend"/><TabBtn id="summary" label="Executive summary"/><TabBtn id="ai" label="✨ AI insights"/>
+          <TabBtn id="actions" label={"Recommended actions ("+active.length+")"}/><TabBtn id="score" label="Team scorecard"/><TabBtn id="forecast" label="Forecast & trend"/><TabBtn id="roi" label="Automation ROI"/><TabBtn id="summary" label="Executive summary"/><TabBtn id="ai" label="✨ AI insights"/>
         </div>
 
         {tab==="actions" && (<div>
@@ -14701,6 +14865,61 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
             <thead><tr style={{textAlign:"left",color:"var(--text-3)"}}><th style={{padding:6}}>Month</th><th>Hours</th><th>Reactive h</th><th>Reactive %</th><th>Effort cost</th></tr></thead>
             <tbody>{model.series.map(s=>(<tr key={s.mk} style={{borderTop:"1px solid var(--border)"}}><td style={{padding:6}}>{s.mk}</td><td>{Math.round(s.hrs)}</td><td>{Math.round(s.react)}</td><td>{Math.round(s.react/Math.max(1,s.hrs)*100)}%</td><td>{money(s.cost)}</td></tr>))}</tbody></table>}
         </Card>)}
+
+        {tab==="roi" && (() => {
+          const rate = model.avgRate || 0;
+          const rows = model.toil.map(t=>{
+            const inp = roiIn[t.id]||{};
+            const build = inp.build!=null && inp.build!=="" ? +inp.build : model.autoBuild;
+            const pct = inp.pct!=null && inp.pct!=="" ? +inp.pct : 70;
+            const saved = t.hrsPerMonth*pct/100;
+            const payback = saved>0 ? build/saved : null;
+            return {...t, build, pct, saved, payback, yearly:saved*12*(t.costPerHr||rate)};
+          });
+          const totSaved = rows.reduce((s,r)=>s+r.saved,0), totYear = rows.reduce((s,r)=>s+r.yearly,0), totBuild = rows.reduce((s,r)=>s+r.build,0);
+          const fl = model.inflight, flInv = fl.reduce((s,a)=>s+a.investedHrs,0), flSave = fl.reduce((s,a)=>s+a.savesHrsMonth,0);
+          const th = {textAlign:"left",padding:"6px 8px",color:"var(--text-3)",fontWeight:600,fontSize:11.5};
+          const td = {padding:"7px 8px",borderTop:"1px solid var(--border)",fontSize:12.5};
+          const numIn = {width:64,padding:"4px 6px",border:"1px solid var(--border)",borderRadius:6,fontSize:12.5,background:"var(--surface)",color:"var(--text-1)"};
+          return (<div style={{display:"grid",gap:14}}>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:12}}>
+              <Tile label="Toil candidates" val={rows.length} sub="recurring reactive work"/>
+              <Tile label="Potential saving" val={Math.round(totSaved)+"h/mo"} sub={"about "+money(totYear)+" a year"} color="#16a34a"/>
+              <Tile label="Build effort" val={Math.round(totBuild)+"h"} sub="assumed, editable below"/>
+              <Tile label="In flight" val={fl.length} sub={Math.round(flInv)+"h invested · "+Math.round(flSave)+"h/mo claimed"}/>
+            </div>
+            <Card>
+              <div style={{fontWeight:700,marginBottom:2}}>Automation candidates</div>
+              <div style={{fontSize:12,color:"var(--text-3)",marginBottom:10}}>Hours per month come from your logs. Build hours default to the {model.autoBuild}h {model.autoBasis}; savings default to 70%. Edit both per row; edits are kept in this browser. Payback = build hours / monthly hours saved.</div>
+              {rows.length===0 ? <div style={{fontSize:13,color:"var(--text-3)"}}>No recurring reactive work found yet (needs 5+ entries and 10h+ on one activity).</div> :
+              <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}}>
+                <thead><tr><th style={th}>Activity</th><th style={th}>Team</th><th style={th}>Hours / month</th><th style={th}>Build hours</th><th style={th}>Saved %</th><th style={th}>Saves / month</th><th style={th}>Payback</th><th style={th}>Per year</th><th style={th}></th></tr></thead>
+                <tbody>{rows.map(r=>(<tr key={r.id}>
+                  <td style={{...td,fontWeight:600,maxWidth:240}}>{r.name}</td><td style={td}>{r.team}</td>
+                  <td style={td}>{r.hrsPerMonth.toFixed(1)}</td>
+                  <td style={td}><input type="number" min="1" style={numIn} value={roiIn[r.id]&&roiIn[r.id].build!=null?roiIn[r.id].build:r.build} onChange={e=>setRoi(r.id,{build:e.target.value})}/></td>
+                  <td style={td}><input type="number" min="5" max="100" style={numIn} value={roiIn[r.id]&&roiIn[r.id].pct!=null?roiIn[r.id].pct:r.pct} onChange={e=>setRoi(r.id,{pct:e.target.value})}/></td>
+                  <td style={td}>{r.saved.toFixed(1)}h</td>
+                  <td style={{...td,fontWeight:700,color:r.payback!==null&&r.payback<=3?"#16a34a":r.payback!==null&&r.payback<=9?"#a16207":"#b91c1c"}}>{r.payback===null?"-":r.payback.toFixed(1)+" mo"}</td>
+                  <td style={td}>{money(r.yearly)}</td>
+                  <td style={td}><button onClick={()=>{ setActs(p=>[{id:nextActId(r.team,p), name:"Automate: "+r.name, team:r.team, type:"Project", cat:"Automation & Scripting", estMins:Math.round(r.build*60/30)*30, priority:"Medium", status:"Active", ticketNo:"", jira:"", date:today(), nature:"Proactive", workNature:"Change", taskSize:"Medium", complexity:"Medium", level:"L2", savesMinsMonth:Math.round(r.saved*60), desc:"Automation candidate from ROI tracker: "+r.hrsPerMonth.toFixed(1)+"h/month recurring on "+r.id}, ...p]); showToast("Automation task created for "+r.team); }} style={{padding:"4px 10px",fontSize:11.5,fontWeight:700,borderRadius:6,border:"1px solid var(--brand)",background:"var(--brand-light)",color:"var(--brand)",cursor:"pointer",whiteSpace:"nowrap"}}>Create task</button></td>
+                </tr>))}</tbody></table></div>}
+            </Card>
+            <Card>
+              <div style={{fontWeight:700,marginBottom:2}}>Automation in flight</div>
+              <div style={{fontSize:12,color:"var(--text-3)",marginBottom:10}}>Activities in the Automation & Scripting category. Enter the hours per month each one is expected to save, to track real payback.</div>
+              {fl.length===0 ? <div style={{fontSize:13,color:"var(--text-3)"}}>None yet. Use "Create task" above.</div> :
+              <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}}>
+                <thead><tr><th style={th}>Activity</th><th style={th}>Team</th><th style={th}>Status</th><th style={th}>Invested / estimate</th><th style={th}>Saves h / month</th><th style={th}>Payback</th></tr></thead>
+                <tbody>{fl.map(a=>(<tr key={a.id}>
+                  <td style={{...td,fontWeight:600}}>{a.name}</td><td style={td}>{a.team}</td><td style={td}>{a.status}</td>
+                  <td style={td}>{a.investedHrs.toFixed(1)}h / {a.estHrs.toFixed(1)}h</td>
+                  <td style={td}><input type="number" min="0" step="0.5" style={numIn} value={a.savesHrsMonth||""} placeholder="0" onChange={e=>{ const v=Math.max(0,+e.target.value||0); setActs(p=>p.map(x=>x.id===a.id?{...x,savesMinsMonth:Math.round(v*60)}:x)); }}/></td>
+                  <td style={td}>{a.savesHrsMonth>0 ? (a.investedHrs/a.savesHrsMonth).toFixed(1)+" mo" : "-"}</td>
+                </tr>))}</tbody></table></div>}
+            </Card>
+          </div>);
+        })()}
 
         {tab==="summary" && (<Card>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,gap:8,flexWrap:"wrap"}}>
@@ -15742,6 +15961,13 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     const [flow, setFlow] = React.useState(null);          // {mi, mode: "resolve" | "close" | "reopen" | "view"}
     const [flowForm, setFlowForm] = React.useState({summary:"", root:"", when:"", note:""});
     const [aiBox, setAiBox] = React.useState({busy:false, err:"", kind:"", text:"", rca:null});
+    const [aiForm, setAiForm] = React.useState({text:"", owner:"", due:""});
+    const setItems = (miId, fn) => setMis(p=>p.map(m=>m.id===miId ? {...m, actionItems: fn(m.actionItems||[])} : m));
+    const addItem = (cur) => {
+      if(!aiForm.text.trim()) { showToast("Describe the follow-up action","err"); return; }
+      setItems(cur.id, a=>[...a, {id:"AI-"+Date.now().toString(36), text:aiForm.text.trim(), owner:aiForm.owner||"", due:aiForm.due||"", done:false, createdBy:user.name, createdAt:new Date().toISOString()}]);
+      setAiForm({text:"", owner:"", due:""});
+    };
     const runIncAI = async (kind, cur) => {
       setAiBox({busy:true, err:"", kind:kind, text:"", rca:null});
       try {
@@ -16080,7 +16306,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
                   {miDetail.map(mi=>(
                     <tr key={mi.id} className="trow-hover">
                       <TD><code onClick={()=>openFlow(mi,"view")} title="View details and history" style={{fontFamily:"var(--font-mono)",fontWeight:700,fontSize:12,color:"var(--brand)",cursor:"pointer",textDecoration:"underline"}}>{mi.incidentNo}</code></TD>
-                      <TD><div onClick={()=>openFlow(mi,"view")} style={{fontWeight:700,color:"var(--text-1)",maxWidth:200,cursor:"pointer"}}>{mi.name}</div></TD>
+                      <TD><div onClick={()=>openFlow(mi,"view")} style={{fontWeight:700,color:"var(--text-1)",maxWidth:200,cursor:"pointer"}}>{mi.name}</div><SlaChip mi={mi} targets={slaTargets}/></TD>
                       <TD><SevBadge sev={mi.severity}/></TD>
                       <TD><StatusBadge s={mi.status}/></TD>
                       <TD s={{fontSize:11,color:"var(--text-3)",fontFamily:"var(--font-mono)"}}>
@@ -16299,7 +16525,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
             <ModalWrap title={titles[mode] + " - " + cur.incidentNo} onClose={()=>setFlow(null)} wide>
               <div style={{marginBottom:14}}>
                 <div style={{fontWeight:700,fontSize:14,color:"var(--text-1)"}}>{cur.name}</div>
-                <div style={{display:"flex",gap:8,marginTop:6,alignItems:"center"}}><SevBadge sev={cur.severity}/><StatusBadge s={cur.status}/></div>
+                <div style={{display:"flex",gap:8,marginTop:6,alignItems:"center",flexWrap:"wrap"}}><SevBadge sev={cur.severity}/><StatusBadge s={cur.status}/><SlaChip mi={cur} targets={slaTargets}/></div>
               </div>
 
               {mode==="resolve" && (
@@ -16376,6 +16602,22 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
                         <div style={{flex:1}}><strong>{h.action}</strong>{" by " + h.by}{h.note ? <div style={{color:"var(--text-3)",marginTop:2,whiteSpace:"pre-wrap"}}>{h.note}</div> : null}</div>
                       </div>
                     ))}
+                  <div style={{fontWeight:700,fontSize:12,color:"var(--text-3)",textTransform:"uppercase",letterSpacing:.5,margin:"16px 0 8px"}}>Follow-up actions {(cur.actionItems||[]).length>0 && <span style={{textTransform:"none",fontWeight:500}}>({(cur.actionItems||[]).filter(a=>a.done).length}/{(cur.actionItems||[]).length} done)</span>}</div>
+                  {(cur.actionItems||[]).length===0 && <div style={{fontSize:12.5,color:"var(--text-4)",marginBottom:6}}>No follow-up actions yet. Add the fixes that stop this happening again.</div>}
+                  {(cur.actionItems||[]).map(it=>{ const overdue = !it.done && it.due && it.due < today(); return (
+                    <div key={it.id} style={{display:"flex",gap:8,alignItems:"center",padding:"7px 0",borderBottom:"1px solid var(--surface-3)",fontSize:12.5}}>
+                      <input type="checkbox" checked={!!it.done} disabled={!isMgrOrAdmin} onChange={e=>setItems(cur.id, a=>a.map(x=>x.id===it.id?{...x,done:e.target.checked,doneAt:e.target.checked?new Date().toISOString():null}:x))}/>
+                      <div style={{flex:1,textDecoration:it.done?"line-through":"none",color:it.done?"var(--text-4)":"var(--text-1)"}}>{it.text}</div>
+                      <span style={{color:"var(--text-3)",fontSize:11.5}}>{it.owner||"Unassigned"}</span>
+                      {it.due && <span style={{fontSize:11.5,fontWeight:600,color:overdue?"#b91c1c":"var(--text-3)"}}>{overdue?"Overdue · ":"Due "}{it.due}</span>}
+                      {isMgrOrAdmin && <button onClick={()=>setItems(cur.id, a=>a.filter(x=>x.id!==it.id))} title="Remove" style={{background:"none",border:"none",cursor:"pointer",color:"var(--text-4)",fontSize:16,lineHeight:1}}>×</button>}
+                    </div>); })}
+                  {isMgrOrAdmin && (<div style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}>
+                    <input value={aiForm.text} onChange={e=>setAiForm(f=>({...f,text:e.target.value}))} onKeyDown={e=>{ if(e.key==="Enter") addItem(cur); }} placeholder="e.g. Raise memory limits on worker nodes" style={{...iS,flex:"1 1 220px"}}/>
+                    <select value={aiForm.owner} onChange={e=>setAiForm(f=>({...f,owner:e.target.value}))} style={{...iS,width:130}}><option value="">Owner team</option>{[...new Set([...(cur.teamsInvolved||[]), ...teams.map(t=>t.name)])].map(t=><option key={t}>{t}</option>)}</select>
+                    <input type="date" value={aiForm.due} onChange={e=>setAiForm(f=>({...f,due:e.target.value}))} style={{...iS,width:140}}/>
+                    <Btn sm onClick={()=>addItem(cur)}>Add action</Btn>
+                  </div>)}
                   {isMgrOrAdmin && (<div style={{border:"1px dashed #c4b5fd",borderRadius:10,padding:12,background:"#faf5ff",marginTop:16}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                       <div style={{fontSize:12.5,color:"#5b21b6",fontWeight:600}}>✨ AI assist</div>
@@ -17057,7 +17299,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
 
         {/* Content */}
         <div style={{flex:1,overflowY:"auto",padding:"20px 24px"}}>
-          <ErrorBoundary key={page}><CurPage/></ErrorBoundary>
+          <ErrorBoundary key={page}><PageHost render={CurPage}/></ErrorBoundary>
         </div>
       </div>
 
@@ -17179,6 +17421,12 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
             {/* Estimated Time */}
             <Lbl t={`Estimated Time = ${fmtM(aForm.estMins)}`}>
               <input type="number" min="30" step="30" style={iS} value={aForm.estMins} onChange={e=>setAForm(f=>({...f,estMins:+e.target.value}))}/>
+              {(()=>{ const sg = estimateFromHistory(aForm); if(!sg) return null;
+                if(!sg.enough) return <div style={{fontSize:11,color:"var(--text-4)",marginTop:6}}>💡 Estimate assist: not enough similar past {aForm.type} work yet ({sg.n} found, 3 needed).</div>;
+                return (<div style={{marginTop:8,padding:"8px 10px",borderRadius:8,background:"#f0f9ff",border:"1px solid #bae6fd",fontSize:12,color:"#0c4a6e",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                  <span>💡 Based on {sg.n} similar {sg.tight?"(matched size/category) ":""}activities: typically <strong>{fmtM(sg.median)}</strong>{sg.recurring?" per month":""} (range {fmtM(sg.low)} to {fmtM(sg.high)}).</span>
+                  <button onClick={()=>setAForm(f=>({...f,estMins:sg.median}))} style={{padding:"3px 10px",borderRadius:"var(--radius-xl)",border:"1px solid #0284c7",background:"#fff",color:"#0369a1",fontSize:11,fontWeight:700,cursor:"pointer"}}>Use {fmtM(sg.median)}</button>
+                </div>); })()}
               <div style={{display:"flex",gap:5,marginTop:6,flexWrap:"wrap"}}>
                 {[[60,"1h"],[120,"2h"],[240,"4h"],[480,"8h"],[960,"2d"],[2400,"5d"]].map(([v,l])=>(
                   <button key={v} onClick={()=>setAForm(f=>({...f,estMins:v}))} style={{padding:"3px 9px",borderRadius:"var(--radius-xl)",border:`1.5px solid ${aForm.estMins===v?"var(--brand)":"var(--border-2)"}`,background:aForm.estMins===v?"var(--brand)":"var(--surface)",color:aForm.estMins===v?"#fff":"var(--text-2)",fontSize:11,fontWeight:600,cursor:"pointer"}}>{l}</button>
