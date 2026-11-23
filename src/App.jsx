@@ -6377,8 +6377,8 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
     let got = [];
     try {
       const avoid = bank.filter(b=>b.skill===gen.skill).map(b=>b.data.text);
-      for(let guard=0; got.length<total && guard<6; guard++) {
-        const d = await callAiFn(cloud, {mode:"st_generate", skill:gen.skill, count:Math.min(10,total-got.length), difficulty:gen.difficulty, type:gen.type, avoid:avoid.concat(got.map(x=>x.text)).slice(-40)});
+      for(let guard=0; got.length<total && guard<12; guard++) {
+        const d = await callAiFn(cloud, {mode:"st_generate", skill:gen.skill, count:Math.min(6,total-got.length), difficulty:gen.difficulty, type:gen.type, avoid:avoid.concat(got.map(x=>x.text)).slice(-40)});
         const seen = new Set(avoid.concat(got.map(x=>x.text)).map(stNorm));
         d.questions.forEach(q=>{ if(!seen.has(stNorm(q.text)) && got.length<total) got.push({...q, keep:true}); });
         setGen(g=>({...g, items:got.slice()}));
