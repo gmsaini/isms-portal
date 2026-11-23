@@ -7207,8 +7207,8 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       id:"planning", icon:"📅", label:"Capacity Planning",
       mgrSec:"Reports & Analytics", mbrSec:"Analytics",
       role:"all", guideGroup:"📈 Reports & Analytics", guideColor:"#d97706", guideBg:"#fffbeb",
-      desc:"Forward-looking view of available capacity per team, adjusted for leave and utilisation, with headcount and workload guidance.",
-      benefits:["Prevents over-committing teams to new projects without resource headroom","Provides objective data for hiring decisions and contractor engagement","Aligns delivery commitments with realistic team availability"],
+      desc:"Forward-looking view of available capacity per team, adjusted for leave and utilisation, with headcount and workload guidance. Includes a what-if planner for staffing and project scenarios.",
+      benefits:["What-if planner: try adding or losing engineers, leave or a new project and see the utilisation and headcount needed","Prevents over-committing teams to new projects without resource headroom","Provides objective data for hiring decisions and contractor engagement","Aligns delivery commitments with realistic team availability"],
     },
 
     // == Productivity ==========================================
@@ -7216,8 +7216,8 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       id:"action_center", icon:"🎯", label:"Action Center",
       mgrSec:"Productivity",
       role:"mgr", guideGroup:"🚀 Productivity Intelligence", guideColor:"#0891b2", guideBg:"#ecfeff",
-      desc:"Rule-based intelligence engine that scans activities, time logs, incidents and capacity, ranks what needs attention, and offers one-click actions, a team health scorecard, a demand forecast and an executive summary.",
-      benefits:["Turns raw data into a prioritised to-do list with one-click fixes","Detects overruns, idle work, overload, recurring toil, open incidents and audit gaps","Team health scorecard and next-month forecast","Executive summary export (CSV / print to PDF)"],
+      desc:"Rule-based intelligence engine that scans activities, time logs, incidents and capacity, ranks what needs attention, and offers one-click actions, a team health scorecard, a demand forecast and an executive summary. Also includes change risk scoring, an AI 'Ask your data' assistant, SLA compliance and a one-click digest to email or chat.",
+      benefits:["Change risk tab scores active Change and Project work 0-100, with the factors and ways to lower the risk","Ask your data: type a question in plain English and get a calculated answer (AI plans the query, your browser runs it)","Resolution SLA tile and findings for breached or at-risk incidents","Send digest emails or posts the critical and high findings to Teams/Slack","Turns raw data into a prioritised to-do list with one-click fixes","Detects overruns, idle work, overload, recurring toil, open incidents and audit gaps","Team health scorecard and next-month forecast","Executive summary export (CSV / print to PDF)"],
     },
     {
       id:"prod_overview", icon:"🚀", label:"Overview",
@@ -7275,21 +7275,21 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       mgrSec:"Operations", mbrSec:"Team",
       role:"all", guideGroup:"📋 Activity & Time Management", guideColor:"#059669", guideBg:"#f0fdf4",
       desc:"Centralised registry of all work items across every team — Projects, Changes, BAU, Incidents, Training, and Meetings — with bulk CSV/Excel import.",
-      benefits:["Single source of truth for all work — eliminates spreadsheet silos across teams","Links every logged hour to a specific, approved work item for a full audit trail","Bulk import from JIRA or any CSV source cuts activity creation from hours to minutes"],
+      benefits:["Best-fit suggestion in the activity form ranks team members by availability, experience on similar work and level fit","Estimate assist from your own history","Single source of truth for all work — eliminates spreadsheet silos across teams","Links every logged hour to a specific, approved work item for a full audit trail","Bulk import from JIRA or any CSV source cuts activity creation from hours to minutes"],
     },
     {
       id:"major_incidents", icon:"🚨", label:"Major Incidents",
       mgrSec:"Operations",
       role:"mgr", guideGroup:"🚨 Major Incident Management", guideColor:"#dc2626", guideBg:"#fef2f2",
       desc:"Dedicated Sev1/Sev2 incident registry with MTTR tracking, estimated cost analysis, team contribution matrix, and cross-team time logging.",
-      benefits:["Quantifies the true financial cost of every major incident for executive reporting","Tracks MTTR trends to measure improvement from problem management actions","Attributes effort across all responding teams — supporting fair recognition and SLA reviews"],
+      benefits:["Resolution SLA countdown per severity with breach warnings","Follow-up actions with owners and due dates, AI root-cause suggestions and post-incident review drafts","Quantifies the true financial cost of every major incident for executive reporting","Tracks MTTR trends to measure improvement from problem management actions","Attributes effort across all responding teams — supporting fair recognition and SLA reviews"],
     },
     {
       id:"timelog", icon:"⏱", label:"Time Log", mgrLabel:"Team Time Log", mbrLabel:"My Time Log",
       mgrSec:"Operations", mbrSec:"Team",
       role:"all", guideGroup:"📋 Activity & Time Management", guideColor:"#059669", guideBg:"#f0fdf4",
       desc:"Guided 7-step time capture (activity -> nature -> type -> work category -> time -> date -> notes) plus an inline quick-log table for logging multiple tasks at once.",
-      benefits:["Structured data that is immediately usable in reports — no cleanup required","Guided steps ensure every entry is tagged for analytics, eliminating free-text chaos","Inline quick-log table lets members record multiple tasks in under 60 seconds"],
+      benefits:["Quick log: describe your day in words and AI turns it into draft entries you review before saving","Structured data that is immediately usable in reports — no cleanup required","Guided steps ensure every entry is tagged for analytics, eliminating free-text chaos","Inline quick-log table lets members record multiple tasks in under 60 seconds"],
     },
     {
       id:"teams", icon:"👥", label:"Team Management", mgrLabel:"Team Management", mbrLabel:"Team View",
@@ -7342,7 +7342,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       mgrSec:"System",
       role:"mgr", guideGroup:"👥 User & Team Management", guideColor:"#7c3aed", guideBg:"#f5f3ff",
       desc:"Secure self-service password change, profile management, and account settings — with enforced complexity rules and first-login mandatory reset.",
-      benefits:["Meets baseline security policy requirements without external IAM tools","Forced first-login reset eliminates shared or default credential risk","Self-service removes IT helpdesk dependency for routine account changes"],
+      benefits:["Admins set the incident resolution targets and can preview and import open incidents from ServiceNow or SMAX","Meets baseline security policy requirements without external IAM tools","Forced first-login reset eliminates shared or default credential risk","Self-service removes IT helpdesk dependency for routine account changes"],
     },
     {
       id:"about_isms", icon:"📖", label:"Feature Guide",
