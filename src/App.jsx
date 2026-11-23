@@ -6300,6 +6300,8 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
   const [bank, setBank] = React.useState([]);
   const [attempts, setAttempts] = React.useState([]);
   const [fSkill, setFSkill] = React.useState("");
+  const [srch, setSrch] = React.useState("");
+  const [newSkill, setNewSkill] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [up, setUp] = React.useState(null);           // {ok,bad}
   const [gen, setGen] = React.useState({skill:"", count:30, difficulty:"mixed", type:"mixed", items:[], busy:false});
@@ -6398,6 +6400,13 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
     const {error} = await sb.from("app_settings").upsert({key:"skillcfg", data}, {onConflict:"key"});
     if(error) { toast(error.message,"err"); return; } toast("Settings saved"); load();
   };
+  const addSkill = async () => {
+    const name = newSkill.trim(); if(!name) return;
+    setBusy(true);
+    try { await callAiFn(cloud, {mode:"st_addskill", name}); toast("Skill added: "+name); setNewSkill(""); setCfgForm(null); await load(); }
+    catch(e) { toast(e.message,"err"); }
+    setBusy(false);
+  };
   const rescore = async id => { setBusy(true); try { const r = await callAiFn(cloud, {mode:"st_rescore", attemptId:id}); toast("Re-scored: "+r.score+"%"); loadAttempts(); } catch(e){ toast(e.message,"err"); } setBusy(false); };
   const delQ = async id => { const {error} = await sb.from("skill_questions").delete().eq("id",id); if(error){ toast(error.message,"err"); return; } setBank(b=>b.filter(x=>x.id!==id)); load(); };
   const toggleQ = async q => { const {error} = await sb.from("skill_questions").update({active:!q.active}).eq("id",q.id); if(error){ toast(error.message,"err"); return; } setBank(b=>b.map(x=>x.id===q.id?{...x,active:!x.active}:x)); load(); };
@@ -6416,9 +6425,19 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
       {err && <Card style={{marginBottom:14,borderColor:"#fecaca",background:"#fef2f2"}}><div style={{fontSize:13,color:"#b91c1c"}}>{err}</div></Card>}
 
       {tab==="take" && (
+        <>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",marginBottom:14}}>
+          <input value={srch} onChange={e=>setSrch(e.target.value)} placeholder="Search skills..." aria-label="Search skills" style={{...iS,width:260}}/>
+          <span style={{fontSize:12.5,color:"var(--text-3)"}}>{skills.filter(s=>s.toLowerCase().includes(srch.trim().toLowerCase())).length} of {skills.length} skills</span>
+          {isMgr && <div style={{display:"flex",gap:8,marginLeft:"auto"}}>
+            <input value={newSkill} onChange={e=>setNewSkill(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") addSkill(); }} placeholder="New skill name" aria-label="New skill name" style={{...iS,width:190}}/>
+            <Btn v="sec" disabled={busy||!newSkill.trim()} onClick={addSkill}>+ Add skill</Btn>
+          </div>}
+        </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(290px,1fr))",gap:14}}>
           {loading && !info && <div style={{fontSize:13,color:"var(--text-3)"}}>Loading...</div>}
-          {skills.map(s=>{
+          {skills.length>0 && !skills.some(s=>s.toLowerCase().includes(srch.trim().toLowerCase())) && <div style={{fontSize:13,color:"var(--text-3)"}}>No skill matches "{srch}".</div>}
+          {skills.filter(s=>s.toLowerCase().includes(srch.trim().toLowerCase())).map(s=>{
             const my = mine.filter(a=>a.skill===s);
             const best = my.filter(a=>a.status==="submitted").reduce((m,a)=>Math.max(m,Number(a.score)||0),-1);
             const last = my[0];
@@ -6441,6 +6460,7 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
             );
           })}
         </div>
+        </>
       )}
 
       {tab==="results" && (
@@ -8514,13 +8534,6 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       benefits:["Quick log: describe your day in words and AI turns it into draft entries you review before saving","Structured data that is immediately usable in reports — no cleanup required","Guided steps ensure every entry is tagged for analytics, eliminating free-text chaos","Inline quick-log table lets members record multiple tasks in under 60 seconds"],
     },
     {
-      id:"skill_tests", icon:"🎯", label:"Skill Tests",
-      mgrSec:"Overview", mbrSec:"My Work",
-      role:"all", guideGroup:"📋 Activity & Time Management", guideColor:"#059669", guideBg:"#f0fdf4",
-      desc:"Proctored 30-question skill tests (for example Control-M and Talend). Questions come from an uploaded or AI-generated bank, multiple-choice is auto-scored and written answers are scored by AI. The test runs full screen and ends if the person leaves the window.",
-      benefits:["Gives an objective, repeatable view of skills to feed the skill matrix and training plans","Managers can upload their own questions or generate a bank with AI and review every result","Answers never reach the browser before submission and every attempt is recorded"]
-    },
-    {
       id:"my_week", icon:"📆", label:"My Week",
       mgrSec:"Overview", mbrSec:"My Work",
       role:"all", guideGroup:"📋 Activity & Time Management", guideColor:"#059669", guideBg:"#f0fdf4",
@@ -8570,6 +8583,13 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       role:"all", guideGroup:"🔗 Data Connect", guideColor:"#ea580c", guideBg:"#fff7ed",
       desc:"Upload ticket exports from JIRA, ServiceNow, HPSM, SMAX, or any CSV-based ITSM tool to create activities in bulk with intelligent column auto-mapping.",
       benefits:["Eliminates duplicate data entry between ITSM and time-tracking systems","Preserves ticket references so logs remain traceable to source systems","Enables adoption without requiring a full ITSM integration on day one"],
+    },
+    {
+      id:"skill_tests", icon:"🎯", label:"Skill Tests",
+      mgrSec:"Learning & Training", mbrSec:"Learning & Training",
+      role:"all", guideGroup:"🎓 Learning & Training", guideColor:"#7c3aed", guideBg:"#f5f3ff",
+      desc:"Proctored 30-question skill tests (for example Control-M and Talend). Questions come from an uploaded or AI-generated bank, multiple-choice is auto-scored and written answers are scored by AI. The test runs full screen and ends if the person leaves the window.",
+      benefits:["Gives an objective, repeatable view of skills to feed the skill matrix and training plans","Managers can upload their own questions or generate a bank with AI and review every result","Answers never reach the browser before submission and every attempt is recorded"]
     },
     {
       id:"dc_integrations", icon:"🔗", label:"Integrations",
