@@ -6055,6 +6055,503 @@ const CustomReportsView = ({logs, acts, mis, users, teams, isAdmin, user, slaTar
   </div>);
 };
 
+// ====================================================================
+//  SKILL TESTS  (page: skill_tests)  - served and scored by the `ai` Edge Function (st_* modes)
+// ====================================================================
+const ST_COUNT = 30;
+const ST_TEMPLATE = 'skill,type,question,optionA,optionB,optionC,optionD,answer,difficulty\n"Control-M",mcq,"Which Control-M component schedules and monitors jobs?","Control-M/Server","Control-M/Agent only","Control-M Reports","Control-M Archive",A,easy\n"Talend",short,"What is a tMap component used for in Talend?","","","","","It joins, filters and transforms data between inputs and outputs (lookups, expressions, reject flows).",medium\n';
+function stParseCsv(text) {
+  const rows = []; let row = [], cur = "", q = false;
+  for(let i=0;i<text.length;i++){
+    const c = text[i];
+    if(q){ if(c==='"'){ if(text[i+1]==='"'){cur+='"';i++;} else q=false; } else cur+=c; }
+    else if(c==='"') q=true;
+    else if(c===","){ row.push(cur); cur=""; }
+    else if(c==="\n"||c==="\r"){ if(c==="\r"&&text[i+1]==="\n") i++; row.push(cur); cur=""; if(row.some(x=>x.trim())) rows.push(row); row=[]; }
+    else cur+=c;
+  }
+  row.push(cur); if(row.some(x=>x.trim())) rows.push(row);
+  return rows;
+}
+// returns {ok:[question objects], bad:[strings]}
+function stRowsToQuestions(rows, skills) {
+  const ok = [], bad = [];
+  if(!rows.length) return {ok,bad:["File is empty"]};
+  const H = rows[0].map(h=>h.trim().toLowerCase());
+  const ix = n => H.indexOf(n);
+  ["skill","type","question","answer"].forEach(n=>{ if(ix(n)<0) bad.push("Missing column: "+n); });
+  if(bad.length) return {ok,bad};
+  rows.slice(1).forEach((r,k)=>{
+    const g = n => ix(n)>=0 ? String(r[ix(n)]||"").trim() : "";
+    const skill = skills.find(s=>s.toLowerCase()===g("skill").toLowerCase());
+    const type = g("type").toLowerCase(); const text = g("question"); let ans = g("answer");
+    const line = "Row "+(k+2)+": ";
+    if(!skill){ bad.push(line+"unknown skill '"+g("skill")+"'"); return; }
+    if(type!=="mcq"&&type!=="short"){ bad.push(line+"type must be mcq or short"); return; }
+    if(!text){ bad.push(line+"question is empty"); return; }
+    if(!ans){ bad.push(line+"answer is empty"); return; }
+    let options;
+    if(type==="mcq"){
+      options = ["optiona","optionb","optionc","optiond"].map(g);
+      if(options.some(o=>!o)){ bad.push(line+"MCQ needs 4 options"); return; }
+      ans = ans.toUpperCase(); if(!/^[A-D]$/.test(ans)){ bad.push(line+"MCQ answer must be A, B, C or D"); return; }
+    }
+    ok.push({skill, data:{type, text, options, answer:ans, difficulty:g("difficulty")||"medium", source:"uploaded"}});
+  });
+  return {ok,bad};
+}
+const stNorm = t => String(t||"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
+const stFmt = d => d ? new Date(d).toLocaleString([], {dateStyle:"medium", timeStyle:"short"}) : "-";
+const stStatusLabel = {in_progress:"In progress", submitted:"Completed", terminated:"Terminated", expired:"Expired", scoring_failed:"Scoring failed"};
+
+function StTerms({cfg, skill, onCancel, onAccept}) {
+  const [ok, setOk] = React.useState(false);
+  const li = {marginBottom:7,lineHeight:1.5};
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(14,22,38,.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:9000,padding:16}}>
+      <div style={{background:"var(--surface)",borderRadius:16,maxWidth:640,width:"100%",maxHeight:"92vh",overflowY:"auto",padding:"24px 28px",boxShadow:"var(--shadow-xl)"}}>
+        <div style={{fontSize:18,fontWeight:800,color:"var(--text-1)",marginBottom:4}}>Terms of the {skill} skill test</div>
+        <div style={{fontSize:12.5,color:"var(--text-3)",marginBottom:14}}>Please read before you start.</div>
+        <ol style={{fontSize:13,color:"var(--text-2)",paddingLeft:20,margin:0}}>
+          <li style={li}>The test has <b>{ST_COUNT} questions</b> and a time limit of <b>{cfg.timeLimitMin} minutes</b>. The pass mark is <b>{cfg.passMark}%</b>.</li>
+          <li style={li}>The test runs in <b>full screen</b>. All other portal controls are disabled while it runs.</li>
+          <li style={li}><b>Leaving the test ends it.</b> Switching tab or window, minimising the browser, exiting full screen (including pressing Esc), reloading or closing the page terminates the test immediately. A terminated test is <b>not scored</b> and cannot be resumed.</li>
+          <li style={li}>A terminated, expired or completed test <b>counts as an attempt</b>. You can retake the test after <b>{cfg.cooldownDays} day{cfg.cooldownDays===1?"":"s"}</b>.</li>
+          <li style={li}>No external help: no other people, notes, websites, AI tools or second devices. Copy, paste, right-click and keyboard shortcuts are disabled.</li>
+          <li style={li}>Multiple-choice answers are scored automatically. Written answers are scored by AI against a reference answer, so answer clearly and precisely.</li>
+          <li style={li}>Your result, answers and any violations are recorded and visible to your manager and administrators.</li>
+        </ol>
+        <label style={{display:"flex",gap:9,alignItems:"flex-start",margin:"16px 0",fontSize:13,color:"var(--text-1)",cursor:"pointer"}}>
+          <input type="checkbox" checked={ok} onChange={e=>setOk(e.target.checked)} style={{marginTop:3}}/>
+          <span>I have read and accept these terms, and I understand that leaving the test will terminate it.</span>
+        </label>
+        <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+          <Btn v="sec" onClick={onCancel}>Cancel</Btn>
+          <Btn disabled={!ok} onClick={()=>ok&&onAccept()}>Start test in full screen</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StRunner({cloud, run, cfg, onClose}) {
+  const {attemptId, deadline, questions, skill} = run;
+  const [idx, setIdx] = React.useState(0);
+  const [answers, setAnswers] = React.useState({});
+  const [left, setLeft] = React.useState(Math.max(0, Math.round((new Date(deadline).getTime()-Date.now())/1000)));
+  const [end, setEnd] = React.useState(null);      // {type:"terminated",reason} | {type:"result",res} | {type:"failed",msg}
+  const [busy, setBusy] = React.useState(false);
+  const [confirm, setConfirm] = React.useState(false);
+  const ended = React.useRef(false); const armed = React.useRef(false);
+  const ans = React.useRef({}); ans.current = answers;
+  const exitFs = () => { try { if(document.fullscreenElement) document.exitFullscreen(); } catch(e) {} };
+
+  const terminate = React.useCallback(reason => {
+    if(ended.current) return; ended.current = true;
+    callAiFn(cloud, {mode:"st_terminate", attemptId, reason}).catch(()=>{});
+    exitFs(); setEnd({type:"terminated", reason});
+  }, [cloud, attemptId]);
+
+  const submit = React.useCallback(async () => {
+    if(ended.current) return; ended.current = true; setBusy(true); setConfirm(false);
+    try {
+      const res = await callAiFn(cloud, {mode:"st_submit", attemptId, answers:ans.current});
+      exitFs(); setEnd(res.status==="submitted" ? {type:"result",res} : {type:"failed",msg:res.message});
+    } catch(e) {
+      exitFs(); setEnd({type:"failed", msg:e.message});
+    }
+    setBusy(false);
+  }, [cloud, attemptId]);
+
+  React.useEffect(()=>{
+    const t0 = setTimeout(()=>{ armed.current = true; }, 1500);
+    const viol = r => { if(armed.current && !ended.current) terminate(r); };
+    const onVis = () => { if(document.hidden) viol("Switched tab or minimised the window"); };
+    const onBlur = () => viol("The test window lost focus");
+    const onFs = () => { if(!document.fullscreenElement) viol("Exited full screen"); };
+    const stop = e => e.preventDefault();
+    const onKey = e => {
+      if(ended.current) return;
+      if(e.key==="Escape") return;
+      const fk = /^F\d+$/.test(e.key) || e.key==="PrintScreen" || e.key==="ContextMenu";
+      if(e.ctrlKey||e.metaKey||e.altKey||fk) { e.preventDefault(); e.stopPropagation(); }
+    };
+    const onUnload = e => { if(!ended.current){ e.preventDefault(); e.returnValue = ""; } };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("blur", onBlur);
+    document.addEventListener("fullscreenchange", onFs);
+    ["contextmenu","copy","cut","paste","dragstart","selectstart"].forEach(n=>document.addEventListener(n, n==="selectstart"?(e=>{ if(!/^(TEXTAREA|INPUT)$/.test(e.target.tagName||"")) e.preventDefault(); }):stop));
+    document.addEventListener("keydown", onKey, true);
+    window.addEventListener("beforeunload", onUnload);
+    return ()=>{
+      clearTimeout(t0);
+      document.removeEventListener("visibilitychange", onVis); window.removeEventListener("blur", onBlur);
+      document.removeEventListener("fullscreenchange", onFs);
+      ["contextmenu","copy","cut","paste","dragstart"].forEach(n=>document.removeEventListener(n, stop));
+      document.removeEventListener("keydown", onKey, true); window.removeEventListener("beforeunload", onUnload);
+    };
+  }, [terminate]);
+
+  React.useEffect(()=>{
+    if(end) return;
+    const iv = setInterval(()=>setLeft(l=>l-1), 1000);
+    return ()=>clearInterval(iv);
+  }, [end]);
+  React.useEffect(()=>{ if(left<=0 && !ended.current && !end) submit(); }, [left, end, submit]);
+
+  const q = questions[idx]; const mm = String(Math.floor(Math.max(0,left)/60)).padStart(2,"0"), ss = String(Math.max(0,left)%60).padStart(2,"0");
+  const done = questions.filter(x=>String(answers[x.id]||"").trim()).length;
+  const shell = {position:"fixed",inset:0,zIndex:99999,background:"var(--bg, #f6f7fb)",overflowY:"auto",userSelect:"none",display:"flex",flexDirection:"column"};
+
+  if(end) return (
+    <div style={{...shell,alignItems:"center",justifyContent:"center",padding:20}}>
+      <div style={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:16,padding:"28px 32px",maxWidth:560,width:"100%",maxHeight:"90vh",overflowY:"auto"}}>
+        {end.type==="terminated" && <>
+          <div style={{fontSize:40}}>⛔</div>
+          <div style={{fontSize:20,fontWeight:800,color:"#b91c1c",margin:"6px 0"}}>Test terminated</div>
+          <div style={{fontSize:13.5,color:"var(--text-2)",lineHeight:1.6}}>Reason: <b>{end.reason}</b>.<br/>As stated in the terms, the test is not scored and cannot be resumed. This attempt counts toward your retake waiting period and your manager can see it.</div>
+        </>}
+        {end.type==="failed" && <>
+          <div style={{fontSize:40}}>⚠️</div>
+          <div style={{fontSize:20,fontWeight:800,color:"#b45309",margin:"6px 0"}}>Could not complete scoring</div>
+          <div style={{fontSize:13.5,color:"var(--text-2)",lineHeight:1.6}}>{end.msg}</div>
+        </>}
+        {end.type==="result" && <>
+          <div style={{fontSize:40}}>{end.res.passed?"🎉":"📘"}</div>
+          <div style={{fontSize:20,fontWeight:800,color:end.res.passed?"#059669":"#b45309",margin:"6px 0"}}>{end.res.passed?"Passed":"Not passed"} - {end.res.score}%</div>
+          <div style={{fontSize:13,color:"var(--text-3)",marginBottom:12}}>{skill} · pass mark {end.res.passMark}%</div>
+          <div style={{display:"grid",gap:6}}>
+            {end.res.per.map((p,i)=>(
+              <div key={p.id} style={{display:"flex",gap:8,alignItems:"flex-start",fontSize:12.5,padding:"6px 10px",borderRadius:8,background:p.score>=1?"#f0fdf4":p.score>0?"#fffbeb":"#fef2f2"}}>
+                <b style={{minWidth:26}}>Q{i+1}</b>
+                <span style={{color:"var(--text-2)"}}>{p.score>=1?"Correct":p.score>0?"Partly correct":"Incorrect"}{p.comment?" - "+p.comment:""}</span>
+              </div>
+            ))}
+          </div>
+        </>}
+        <div style={{marginTop:18,textAlign:"right"}}><Btn onClick={onClose}>Back to portal</Btn></div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={shell}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 22px",background:"var(--surface)",borderBottom:"1px solid var(--border)",gap:12,flexWrap:"wrap"}}>
+        <div style={{fontWeight:800,color:"var(--text-1)"}}>{skill} skill test <span style={{fontWeight:500,color:"var(--text-3)",fontSize:12.5}}>· {done}/{questions.length} answered</span></div>
+        <div style={{fontWeight:800,fontSize:18,color:left<300?"#b91c1c":"var(--text-1)",fontVariantNumeric:"tabular-nums"}}>⏱ {mm}:{ss}</div>
+      </div>
+      <div style={{display:"flex",gap:18,padding:20,flex:1,flexWrap:"wrap",maxWidth:1100,width:"100%",margin:"0 auto",boxSizing:"border-box"}}>
+        <div style={{flex:"1 1 460px",minWidth:0}}>
+          <div style={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:14,padding:"22px 24px"}}>
+            <div style={{fontSize:12,fontWeight:700,color:"var(--text-3)",marginBottom:8}}>QUESTION {idx+1} OF {questions.length} · {q.type==="mcq"?"Choose one":"Written answer"}</div>
+            <div style={{fontSize:15.5,fontWeight:600,color:"var(--text-1)",lineHeight:1.55,marginBottom:16,whiteSpace:"pre-wrap"}}>{q.text}</div>
+            {q.type==="mcq" ? (
+              <div style={{display:"grid",gap:8}}>
+                {q.options.map((o,i)=>{ const L="ABCD"[i]; const sel=answers[q.id]===L; return (
+                  <label key={L} style={{display:"flex",gap:10,alignItems:"flex-start",padding:"10px 14px",border:"1.5px solid "+(sel?"var(--brand)":"var(--border)"),borderRadius:10,cursor:"pointer",background:sel?"var(--brand-light, #eff6ff)":"transparent",fontSize:13.5,color:"var(--text-1)"}}>
+                    <input type="radio" name={"q"+q.id} checked={sel} onChange={()=>setAnswers(a=>({...a,[q.id]:L}))} style={{marginTop:3}}/>
+                    <span><b>{L}.</b> {o}</span>
+                  </label>); })}
+              </div>
+            ) : (
+              <textarea value={answers[q.id]||""} onChange={e=>setAnswers(a=>({...a,[q.id]:e.target.value.slice(0,1500)}))} onPaste={e=>e.preventDefault()} rows={7}
+                placeholder="Type your answer (pasting is disabled)" style={{...iS,width:"100%",resize:"vertical",boxSizing:"border-box",userSelect:"text"}}/>
+            )}
+          </div>
+          <div style={{display:"flex",justifyContent:"space-between",marginTop:14,gap:10}}>
+            <Btn v="sec" disabled={idx===0} onClick={()=>setIdx(i=>i-1)}>← Previous</Btn>
+            {idx<questions.length-1 ? <Btn onClick={()=>setIdx(i=>i+1)}>Next →</Btn> : <Btn v="suc" onClick={()=>setConfirm(true)}>Submit test</Btn>}
+          </div>
+        </div>
+        <div style={{flex:"0 0 220px"}}>
+          <div style={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:14,padding:16}}>
+            <div style={{fontSize:12,fontWeight:700,color:"var(--text-3)",marginBottom:10}}>QUESTIONS</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:6}}>
+              {questions.map((x,i)=>{ const a=!!String(answers[x.id]||"").trim(); return (
+                <button key={x.id} onClick={()=>setIdx(i)} style={{padding:"6px 0",borderRadius:8,border:"1.5px solid "+(i===idx?"var(--brand)":"var(--border)"),background:a?"#dcfce7":"var(--surface)",fontSize:12,fontWeight:700,cursor:"pointer",color:"var(--text-1)"}}>{i+1}</button>); })}
+            </div>
+            <div style={{marginTop:14}}><Btn v="suc" style={{width:"100%",justifyContent:"center"}} onClick={()=>setConfirm(true)}>Submit test</Btn></div>
+            <div style={{fontSize:11,color:"var(--text-3)",marginTop:10,lineHeight:1.5}}>Leaving this window or exiting full screen terminates the test.</div>
+          </div>
+        </div>
+      </div>
+      {confirm && (
+        <div style={{position:"fixed",inset:0,background:"rgba(14,22,38,.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100000}}>
+          <div style={{background:"var(--surface)",borderRadius:14,padding:"22px 26px",maxWidth:420}}>
+            <div style={{fontWeight:800,fontSize:16,marginBottom:8}}>Submit the test?</div>
+            <div style={{fontSize:13,color:"var(--text-2)",marginBottom:16}}>You answered {done} of {questions.length} questions. Unanswered questions score 0. You cannot change answers after submitting.</div>
+            <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}><Btn v="sec" onClick={()=>setConfirm(false)}>Keep working</Btn><Btn v="suc" onClick={submit}>Submit now</Btn></div>
+          </div>
+        </div>
+      )}
+      {busy && <div style={{position:"fixed",inset:0,background:"rgba(255,255,255,.75)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100001,fontWeight:700}}>Scoring your answers...</div>}
+    </div>
+  );
+}
+
+function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
+  const sb = cloud && cloud.sb;
+  const [tab, setTab] = React.useState("take");
+  const [info, setInfo] = React.useState(null);
+  const [err, setErr] = React.useState("");
+  const [loading, setLoading] = React.useState(false);
+  const [terms, setTerms] = React.useState(null);     // skill name
+  const [run, setRun] = React.useState(null);
+  const [bank, setBank] = React.useState([]);
+  const [attempts, setAttempts] = React.useState([]);
+  const [fSkill, setFSkill] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [up, setUp] = React.useState(null);           // {ok,bad}
+  const [gen, setGen] = React.useState({skill:"", count:30, difficulty:"mixed", type:"mixed", items:[], busy:false});
+  const [cfgForm, setCfgForm] = React.useState(null);
+
+  const load = React.useCallback(async () => {
+    if(!sb) return;
+    setLoading(true); setErr("");
+    try { const d = await callAiFn(cloud, {mode:"st_list"}); setInfo(d); setCfgForm(f=>f||{skills:d.config.skills.join(", "), passMark:d.config.passMark, timeLimitMin:d.config.timeLimitMin, cooldownDays:d.config.cooldownDays}); setGen(g=>g.skill?g:{...g, skill:d.config.skills[0]}); }
+    catch(e) { setErr(e.message); }
+    setLoading(false);
+  }, [sb, cloud]);
+  React.useEffect(()=>{ load(); }, [load]);
+
+  const loadBank = async () => {
+    const {data, error} = await sb.from("skill_questions").select("id,skill,active,data,created_at").order("created_at",{ascending:false}).limit(2000);
+    if(error) { toast(error.message,"err"); return; } setBank(data||[]);
+  };
+  const loadAttempts = async () => {
+    const {data, error} = await sb.from("skill_attempts").select("id,user_id,user_name,team,skill,status,started_at,ended_at,score,passed,data").order("started_at",{ascending:false}).limit(300);
+    if(error) { toast(error.message,"err"); return; } setAttempts(data||[]);
+  };
+  React.useEffect(()=>{ if(!sb||!isMgr) return; if(tab==="bank"||tab==="upload"||tab==="gen") loadBank(); if(tab==="results") loadAttempts(); }, [tab]); // eslint-disable-line
+
+  if(!sb) return (
+    <div style={{maxWidth:720,margin:"0 auto"}}>
+      <PageHero icon="🎯" title="Skill Tests" subtitle="Test your skills and track your results"/>
+      <Card><div style={{fontSize:13.5,color:"var(--text-2)"}}>Skill tests need cloud mode (Supabase), because questions and answers are stored and scored on the server so they cannot be seen or changed in the browser.</div></Card>
+    </div>
+  );
+
+  const cfg = info ? info.config : {passMark:70,timeLimitMin:45,cooldownDays:7,skills:[]};
+  const skills = cfg.skills;
+  const mine = info ? info.attempts : [];
+
+  const begin = async skill => {
+    setTerms(null);
+    if(!document.documentElement.requestFullscreen) { toast("This browser or device does not support full screen, so the test cannot be taken here. Use a desktop browser.","err"); return; }
+    try { await document.documentElement.requestFullscreen(); }
+    catch(e) { toast("Full screen was blocked. Allow full screen and try again.","err"); return; }
+    try {
+      const d = await callAiFn(cloud, {mode:"st_start", skill});
+      setRun({...d, skill});
+    } catch(e) { try{ if(document.fullscreenElement) document.exitFullscreen(); }catch(x){} toast(e.message,"err"); load(); }
+  };
+  const closeRun = () => { setRun(null); load(); };
+
+  const addQuestions = async (items) => {
+    if(!items.length) return 0;
+    const have = new Set(bank.map(b=>b.skill+"|"+stNorm(b.data&&b.data.text)));
+    const rows = []; let dup = 0;
+    items.forEach(it=>{ const k = it.skill+"|"+stNorm(it.data.text); if(have.has(k)){ dup++; return; } have.add(k); rows.push({id:"SQ-"+Date.now().toString(36)+Math.random().toString(36).slice(2,7), skill:it.skill, active:true, data:{...it.data, createdBy:user.name}}); });
+    for(let i=0;i<rows.length;i+=100){ const {error} = await sb.from("skill_questions").insert(rows.slice(i,i+100)); if(error) { toast(error.message,"err"); return 0; } }
+    toast("Added "+rows.length+" question"+(rows.length===1?"":"s")+(dup?" ("+dup+" duplicate"+(dup===1?"":"s")+" skipped)":""));
+    await loadBank(); load(); return rows.length;
+  };
+
+  const onFile = async f => {
+    if(!f) return; const text = await f.text(); let res;
+    try {
+      if(/\.json$/i.test(f.name)) {
+        const arr = JSON.parse(text); const hdr = "skill,type,question,optionA,optionB,optionC,optionD,answer,difficulty".split(",");
+        const q = s => '"'+String(s==null?"":s).replace(/"/g,'""')+'"';
+        const lines = [hdr.join(",")].concat((Array.isArray(arr)?arr:[]).map(o=>[o.skill,o.type,o.question||o.text,...(o.options||["","","",""]),o.answer,o.difficulty].map(q).join(",")));
+        res = stRowsToQuestions(stParseCsv(lines.join("\n")), skills);
+      } else res = stRowsToQuestions(stParseCsv(text), skills);
+    } catch(e) { res = {ok:[],bad:["Could not read file: "+e.message]}; }
+    setUp(res);
+  };
+  const downloadTemplate = () => { const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([ST_TEMPLATE],{type:"text/csv"})); a.download="skill_questions_template.csv"; a.click(); };
+
+  const generate = async () => {
+    const total = Math.min(30, Math.max(1, Number(gen.count)||30));
+    setGen(g=>({...g, busy:true, items:[]}));
+    let got = [];
+    try {
+      const avoid = bank.filter(b=>b.skill===gen.skill).map(b=>b.data.text);
+      for(let guard=0; got.length<total && guard<6; guard++) {
+        const d = await callAiFn(cloud, {mode:"st_generate", skill:gen.skill, count:Math.min(10,total-got.length), difficulty:gen.difficulty, type:gen.type, avoid:avoid.concat(got.map(x=>x.text)).slice(-40)});
+        const seen = new Set(avoid.concat(got.map(x=>x.text)).map(stNorm));
+        d.questions.forEach(q=>{ if(!seen.has(stNorm(q.text)) && got.length<total) got.push({...q, keep:true}); });
+        setGen(g=>({...g, items:got.slice()}));
+      }
+      if(!got.length) toast("The AI returned no usable questions. Try again.","err");
+    } catch(e) { toast(e.message,"err"); }
+    setGen(g=>({...g, busy:false, items:got}));
+  };
+  const addGen = async () => {
+    const items = gen.items.filter(x=>x.keep).map(x=>({skill:gen.skill, data:{type:x.type,text:x.text,options:x.options,answer:x.answer,difficulty:x.difficulty,source:"ai"}}));
+    setBusy(true); const n = await addQuestions(items); setBusy(false); if(n) setGen(g=>({...g, items:[]}));
+  };
+  const saveCfg = async () => {
+    const sk = cfgForm.skills.split(",").map(s=>s.trim()).filter(Boolean);
+    if(!sk.length) { toast("Add at least one skill","err"); return; }
+    const data = {skills:[...new Set(sk)], passMark:Math.min(100,Math.max(1,Number(cfgForm.passMark)||70)), timeLimitMin:Math.min(180,Math.max(5,Number(cfgForm.timeLimitMin)||45)), cooldownDays:Math.min(365,Math.max(0,Number(cfgForm.cooldownDays)||0))};
+    const {error} = await sb.from("app_settings").upsert({key:"skillcfg", data}, {onConflict:"key"});
+    if(error) { toast(error.message,"err"); return; } toast("Settings saved"); load();
+  };
+  const rescore = async id => { setBusy(true); try { const r = await callAiFn(cloud, {mode:"st_rescore", attemptId:id}); toast("Re-scored: "+r.score+"%"); loadAttempts(); } catch(e){ toast(e.message,"err"); } setBusy(false); };
+  const delQ = async id => { const {error} = await sb.from("skill_questions").delete().eq("id",id); if(error){ toast(error.message,"err"); return; } setBank(b=>b.filter(x=>x.id!==id)); load(); };
+  const toggleQ = async q => { const {error} = await sb.from("skill_questions").update({active:!q.active}).eq("id",q.id); if(error){ toast(error.message,"err"); return; } setBank(b=>b.map(x=>x.id===q.id?{...x,active:!x.active}:x)); load(); };
+
+  const tabs = [["take","My tests"]].concat(isMgr?[["results","Team results"],["bank","Question bank"],["upload","Upload questions"],["gen","Generate with AI"]]:[]).concat(isAdmin?[["settings","Settings"]]:[]);
+  const th = {textAlign:"left",fontSize:11.5,fontWeight:700,color:"var(--text-3)",padding:"8px 10px",borderBottom:"1px solid var(--border)"};
+  const td = {fontSize:12.5,color:"var(--text-2)",padding:"8px 10px",borderBottom:"1px solid var(--border)",verticalAlign:"top"};
+  const bankFor = s => bank.filter(b=>b.skill===s && b.active).length;
+
+  return (
+    <div style={{maxWidth:980,margin:"0 auto"}}>
+      <PageHero icon="🎯" title="Skill Tests" subtitle={ST_COUNT+" questions per test · full-screen, proctored by the browser · scored automatically with AI for written answers"}/>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:16}}>
+        {tabs.map(([k,l])=><Btn key={k} v={tab===k?"pri":"sec"} sm onClick={()=>setTab(k)}>{l}</Btn>)}
+      </div>
+      {err && <Card style={{marginBottom:14,borderColor:"#fecaca",background:"#fef2f2"}}><div style={{fontSize:13,color:"#b91c1c"}}>{err}</div></Card>}
+
+      {tab==="take" && (
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(290px,1fr))",gap:14}}>
+          {loading && !info && <div style={{fontSize:13,color:"var(--text-3)"}}>Loading...</div>}
+          {skills.map(s=>{
+            const my = mine.filter(a=>a.skill===s);
+            const best = my.filter(a=>a.status==="submitted").reduce((m,a)=>Math.max(m,Number(a.score)||0),-1);
+            const last = my[0];
+            const next = last ? new Date(last.started_at).getTime()+cfg.cooldownDays*86400000 : 0;
+            const wait = next>Date.now();
+            const ready = info && (info.counts[s]||0) >= ST_COUNT;
+            return (
+              <Card key={s}>
+                <div style={{fontSize:16,fontWeight:800,color:"var(--text-1)"}}>{s}</div>
+                <div style={{fontSize:12.5,color:"var(--text-3)",margin:"4px 0 12px"}}>{ST_COUNT} questions · {cfg.timeLimitMin} min · pass {cfg.passMark}%</div>
+                <div style={{fontSize:13,color:"var(--text-2)",lineHeight:1.7,marginBottom:12}}>
+                  Best score: <b>{best>=0?best+"%":"-"}</b><br/>
+                  Last attempt: {last ? stFmt(last.started_at)+" - "+stStatusLabel[last.status]+(last.status==="submitted"?" ("+last.score+"%)":"") : "none yet"}
+                  {last && last.status==="terminated" && last.reason ? <><br/><span style={{color:"#b91c1c"}}>Reason: {last.reason}</span></> : null}
+                </div>
+                {!ready ? <div style={{fontSize:12.5,color:"var(--text-3)"}}>Not available yet - the question bank is still being prepared.</div>
+                  : wait ? <div style={{fontSize:12.5,color:"#b45309"}}>You can retake this on {new Date(next).toLocaleDateString([], {dateStyle:"medium"})}.</div>
+                  : <Btn onClick={()=>setTerms(s)}>Start test</Btn>}
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      {tab==="results" && (
+        <Card>
+          <div style={{display:"flex",gap:10,marginBottom:12,alignItems:"center"}}>
+            <select value={fSkill} onChange={e=>setFSkill(e.target.value)} style={{...sS,width:200}}><option value="">All skills</option>{skills.map(s=><option key={s}>{s}</option>)}</select>
+            <Btn v="sec" sm onClick={loadAttempts}>Refresh</Btn>
+          </div>
+          <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}}>
+            <thead><tr>{["Person","Team","Skill","Started","Status","Score","Notes"].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {attempts.filter(a=>!fSkill||a.skill===fSkill).map(a=>(
+                <tr key={a.id}>
+                  <td style={td}>{a.user_name}</td><td style={td}>{a.team||"-"}</td><td style={td}>{a.skill}</td><td style={td}>{stFmt(a.started_at)}</td>
+                  <td style={td}>{stStatusLabel[a.status]||a.status}</td>
+                  <td style={td}>{a.status==="submitted" ? <b style={{color:a.passed?"#059669":"#b45309"}}>{a.score}% {a.passed?"✓":"✗"}</b> : "-"}</td>
+                  <td style={td}>{a.data&&a.data.reason ? a.data.reason : ""}{a.status==="scoring_failed" && <> <Btn sm v="sec" disabled={busy} onClick={()=>rescore(a.id)}>Re-score</Btn></>}</td>
+                </tr>))}
+              {!attempts.length && <tr><td style={td} colSpan={7}>No attempts yet.</td></tr>}
+            </tbody></table></div>
+        </Card>
+      )}
+
+      {tab==="bank" && (
+        <Card>
+          <div style={{display:"flex",gap:14,flexWrap:"wrap",marginBottom:12}}>
+            {skills.map(s=><div key={s} style={{fontSize:13,color:"var(--text-2)"}}><b>{s}</b>: <span style={{color:bankFor(s)>=ST_COUNT?"#059669":"#b45309",fontWeight:700}}>{bankFor(s)}/{ST_COUNT}</span> active</div>)}
+          </div>
+          <select value={fSkill} onChange={e=>setFSkill(e.target.value)} style={{...sS,width:200,marginBottom:10}}><option value="">All skills</option>{skills.map(s=><option key={s}>{s}</option>)}</select>
+          <div style={{fontSize:12,color:"var(--text-3)",marginBottom:8}}>A test draws {ST_COUNT} random questions from a skill's bank, so a bigger bank gives different tests each time. A skill opens for members once it has at least {ST_COUNT} active questions.</div>
+          <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}}>
+            <thead><tr>{["Skill","Type","Question","Answer","Source",""].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {bank.filter(b=>!fSkill||b.skill===fSkill).slice(0,300).map(b=>(
+                <tr key={b.id} style={{opacity:b.active?1:.5}}>
+                  <td style={td}>{b.skill}</td><td style={td}>{b.data.type}</td>
+                  <td style={{...td,maxWidth:360}}>{b.data.text}{b.data.type==="mcq" && <div style={{fontSize:11.5,color:"var(--text-3)"}}>{(b.data.options||[]).map((o,i)=>"ABCD"[i]+") "+o).join("  ")}</div>}</td>
+                  <td style={{...td,maxWidth:200}}>{b.data.answer}</td><td style={td}>{b.data.source||"-"}</td>
+                  <td style={{...td,whiteSpace:"nowrap"}}><Btn sm v="sec" onClick={()=>toggleQ(b)}>{b.active?"Disable":"Enable"}</Btn> <Btn sm v="dan" onClick={()=>delQ(b.id)}>Delete</Btn></td>
+                </tr>))}
+              {!bank.length && <tr><td style={td} colSpan={6}>No questions yet. Upload a file or generate with AI.</td></tr>}
+            </tbody></table></div>
+        </Card>
+      )}
+
+      {tab==="upload" && (
+        <Card>
+          <div style={{fontSize:14,fontWeight:700,marginBottom:6}}>Upload questions with answers</div>
+          <div style={{fontSize:12.5,color:"var(--text-3)",lineHeight:1.6,marginBottom:12}}>
+            CSV columns: <code>skill, type, question, optionA, optionB, optionC, optionD, answer, difficulty</code>. For <b>mcq</b> the answer is a letter A-D. For <b>short</b> the answer is the reference answer the AI scores against (leave the options empty). A JSON array with the same fields (<code>skill,type,question,options[],answer,difficulty</code>) also works.
+          </div>
+          <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
+            <input type="file" accept=".csv,.json,text/csv,application/json" onChange={e=>{ onFile(e.target.files[0]); e.target.value=""; }}/>
+            <Btn v="sec" sm onClick={downloadTemplate}>Download CSV template</Btn>
+          </div>
+          {up && (
+            <div style={{marginTop:14}}>
+              <div style={{fontSize:13,fontWeight:700,color:up.ok.length?"#059669":"#b91c1c"}}>{up.ok.length} valid question{up.ok.length===1?"":"s"}{up.bad.length?", "+up.bad.length+" problem"+(up.bad.length===1?"":"s"):""}</div>
+              {up.bad.length>0 && <ul style={{fontSize:12,color:"#b91c1c",margin:"6px 0",paddingLeft:18,maxHeight:140,overflowY:"auto"}}>{up.bad.slice(0,50).map((b,i)=><li key={i}>{b}</li>)}</ul>}
+              {up.ok.length>0 && <div style={{marginTop:8}}><Btn disabled={busy} onClick={async()=>{ setBusy(true); const n = await addQuestions(up.ok); setBusy(false); if(n>=0) setUp(null); }}>Add {up.ok.length} valid question{up.ok.length===1?"":"s"}</Btn></div>}
+            </div>
+          )}
+        </Card>
+      )}
+
+      {tab==="gen" && (
+        <Card>
+          <div style={{fontSize:14,fontWeight:700,marginBottom:10}}>Generate questions with AI</div>
+          <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-end",marginBottom:12}}>
+            <Lbl t="Skill"><select value={gen.skill} onChange={e=>setGen(g=>({...g,skill:e.target.value}))} style={{...sS,width:170}}>{skills.map(s=><option key={s}>{s}</option>)}</select></Lbl>
+            <Lbl t="How many (max 30)"><input type="number" min={1} max={30} value={gen.count} onChange={e=>setGen(g=>({...g,count:e.target.value}))} style={{...iS,width:110}}/></Lbl>
+            <Lbl t="Difficulty"><select value={gen.difficulty} onChange={e=>setGen(g=>({...g,difficulty:e.target.value}))} style={{...sS,width:120}}>{["mixed","easy","medium","hard"].map(x=><option key={x}>{x}</option>)}</select></Lbl>
+            <Lbl t="Type"><select value={gen.type} onChange={e=>setGen(g=>({...g,type:e.target.value}))} style={{...sS,width:150}}><option value="mixed">Mixed</option><option value="mcq">Multiple choice</option><option value="short">Written answer</option></select></Lbl>
+            <Btn disabled={gen.busy} onClick={generate}>{gen.busy?"Generating...":"Generate"}</Btn>
+          </div>
+          <div style={{fontSize:12,color:"var(--text-3)",marginBottom:10}}>AI can be wrong. Review each question and its answer, untick any you do not trust, then add the rest to the bank.</div>
+          {gen.items.length>0 && <>
+            <div style={{display:"grid",gap:8,maxHeight:460,overflowY:"auto"}}>
+              {gen.items.map((x,i)=>(
+                <label key={i} style={{display:"flex",gap:10,padding:"10px 12px",border:"1px solid var(--border)",borderRadius:10,fontSize:12.5,cursor:"pointer",opacity:x.keep?1:.5}}>
+                  <input type="checkbox" checked={x.keep} onChange={e=>setGen(g=>({...g,items:g.items.map((y,j)=>j===i?{...y,keep:e.target.checked}:y)}))}/>
+                  <div><b>{x.type==="mcq"?"MCQ":"Written"}</b> · {x.difficulty}<div style={{color:"var(--text-1)",margin:"2px 0"}}>{x.text}</div>
+                    {x.type==="mcq" && <div style={{color:"var(--text-3)"}}>{x.options.map((o,k)=>"ABCD"[k]+") "+o).join("   ")}</div>}
+                    <div style={{color:"#059669"}}>Answer: {x.answer}</div></div>
+                </label>))}
+            </div>
+            <div style={{marginTop:12}}><Btn disabled={busy||gen.busy} onClick={addGen}>Add {gen.items.filter(x=>x.keep).length} selected to bank</Btn></div>
+          </>}
+        </Card>
+      )}
+
+      {tab==="settings" && cfgForm && (
+        <Card>
+          <div style={{fontSize:14,fontWeight:700,marginBottom:10}}>Skill test settings</div>
+          <div style={{display:"grid",gap:12,maxWidth:480}}>
+            <Lbl t="Skills (comma separated)"><input value={cfgForm.skills} onChange={e=>setCfgForm(f=>({...f,skills:e.target.value}))} style={iS}/></Lbl>
+            <Lbl t="Pass mark (%)"><input type="number" value={cfgForm.passMark} onChange={e=>setCfgForm(f=>({...f,passMark:e.target.value}))} style={iS}/></Lbl>
+            <Lbl t="Time limit (minutes)"><input type="number" value={cfgForm.timeLimitMin} onChange={e=>setCfgForm(f=>({...f,timeLimitMin:e.target.value}))} style={iS}/></Lbl>
+            <Lbl t="Days before a retake"><input type="number" value={cfgForm.cooldownDays} onChange={e=>setCfgForm(f=>({...f,cooldownDays:e.target.value}))} style={iS}/></Lbl>
+            <div><Btn onClick={saveCfg}>Save settings</Btn></div>
+            <div style={{fontSize:12,color:"var(--text-3)"}}>Renaming a skill does not move existing questions or results; they stay under the old name.</div>
+          </div>
+        </Card>
+      )}
+
+      {terms && <StTerms cfg={cfg} skill={terms} onCancel={()=>setTerms(null)} onAccept={()=>begin(terms)}/>}
+      {run && <StRunner cloud={cloud} run={run} cfg={cfg} onClose={closeRun}/>}
+    </div>
+  );
+}
+
 const DEFAULT_CATEGORIES = ["Infrastructure Build","Maintenance","Security & Compliance","Automation & Scripting","Monitoring & Alerting","Documentation"].map(n=>({name:n, active:true}));
 // Values pre-filled in the Log Time form from an activity's own settings
 const logDefaultsFrom = (a, f) => ({
@@ -8017,6 +8514,13 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       benefits:["Quick log: describe your day in words and AI turns it into draft entries you review before saving","Structured data that is immediately usable in reports — no cleanup required","Guided steps ensure every entry is tagged for analytics, eliminating free-text chaos","Inline quick-log table lets members record multiple tasks in under 60 seconds"],
     },
     {
+      id:"skill_tests", icon:"🎯", label:"Skill Tests",
+      mgrSec:"Overview", mbrSec:"My Work",
+      role:"all", guideGroup:"📋 Activity & Time Management", guideColor:"#059669", guideBg:"#f0fdf4",
+      desc:"Proctored 30-question skill tests (for example Control-M and Talend). Questions come from an uploaded or AI-generated bank, multiple-choice is auto-scored and written answers are scored by AI. The test runs full screen and ends if the person leaves the window.",
+      benefits:["Gives an objective, repeatable view of skills to feed the skill matrix and training plans","Managers can upload their own questions or generate a bank with AI and review every result","Answers never reach the browser before submission and every attempt is recorded"]
+    },
+    {
       id:"my_week", icon:"📆", label:"My Week",
       mgrSec:"Overview", mbrSec:"My Work",
       role:"all", guideGroup:"📋 Activity & Time Management", guideColor:"#059669", guideBg:"#f0fdf4",
@@ -8143,6 +8647,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
   PAGE_TITLE.dashboard = isMgrOrAdmin ? "Dashboard" : "Team Activities";
   PAGE_TITLE.changepw  = "Change Password";
   PAGE_TITLE.myprofile = "My Profile";
+  PAGE_TITLE.skill_tests = "Skill Tests";
 
   // == MINUTE PRESETS =======================
   const MinPre = ({val,onChange}) => (
@@ -14090,6 +14595,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
         <div style={{marginBottom:22}}>
           <PageHero icon="👤" title="My Profile" subtitle="Your account details, engineer level and activity history"/>
           <div style={{fontSize:12,color:"var(--text-3)",marginTop:3}}>Manage your personal information and account settings</div>
+          <div style={{marginTop:10}}><Btn v="sec" sm onClick={()=>goPage("skill_tests")}>🎯 Take a skill test</Btn></div>
         </div>
 
         {/* Profile header card */}
@@ -18209,6 +18715,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     settings: PageSettings,
     action_center: PageActionCenter,
     my_week: PageMyWeek,
+    skill_tests: ()=><SkillTestsPage cloud={cloud} user={user} isAdmin={isAdmin} isMgr={isMgrOrAdmin} toast={showToast}/>,
     cab: ()=><CabPage acts={acts} setActs={setActs} users={allUsers} user={user} isAdmin={isAdmin} logs={logs} mis={mis} toast={showToast}/>,
     services: ()=><ServicesPage services={services} setServices={setServices} acts={acts} logs={logs} mis={mis} users={allUsers} teamNames={teams.map(t=>t.name)} canEdit={isMgrOrAdmin} toast={showToast}/>,
     audit_log: ()=><AuditPage cloud={cloud} toast={showToast}/>,
