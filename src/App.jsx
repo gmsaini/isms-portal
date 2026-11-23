@@ -5315,7 +5315,7 @@ const DataAssistant = ({cloud, tables, names, scopeLabel}) => {
             <div style={{flex:1,height:12,background:"var(--surface-3)",borderRadius:6,overflow:"hidden"}}><div style={{height:"100%",width:Math.max(2,r.value/mx*100)+"%",background:"var(--brand)",borderRadius:6}}/></div>
             <span style={{minWidth:70,textAlign:"right",fontWeight:700}}>{Math.round(r.value*10)/10}</span>
           </div>))}</div>
-        {res.explain && <div style={{marginTop:10,padding:"10px 12px",background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:8,fontSize:12,color:"#0c4a6e",whiteSpace:"pre-wrap"}}>{res.explain}</div>}
+        {res.explain && <div style={{marginTop:10,padding:"10px 12px",background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:8,fontSize:12,color:"#0c4a6e",whiteSpace:"pre-wrap"}}>{res.explain}<AiRate kind="data"/></div>}
         <details style={{marginTop:8}}><summary style={{fontSize:11,color:"var(--text-4)",cursor:"pointer"}}>Show the query that was run</summary><pre style={{fontSize:11,background:"var(--surface-2)",padding:8,borderRadius:6,overflow:"auto"}}>{JSON.stringify(res.spec,null,2)}</pre></details>
       </Card>)}
     </div>);
@@ -5344,6 +5344,169 @@ const IntegrationsCard = ({cloud, existing, onImport}) => {
       <div style={{marginTop:10}}><Btn onClick={()=>{ onImport(chosen); setList(null); }} disabled={!chosen.length}>Import {chosen.length} incident{chosen.length===1?"":"s"}</Btn></div>
     </div>)}
   </Card>);
+};
+// ===== Stage 5: similar incidents, problem management, handover, anomalies, skills, AI rating =====
+const INC_STOP = new Set(["with","from","that","this","issue","incident","after","during","team","the","and","for","not"]);
+const incTokens = m => new Set(String((m.name||"")+" "+(m.impactedServices||"")).toLowerCase().split(/[^a-z0-9]+/).filter(w=>w.length>2 && !INC_STOP.has(w)));
+const incTeams = m => new Set([...(m.teamsInvolved||[]), ...(m.team && m.team!=="Cross-Team" ? [m.team] : [])]);
+function incSim(a, b) {
+  const A = incTokens(a), B = incTokens(b); if(!A.size || !B.size) return 0;
+  let inter = 0; A.forEach(x=>{ if(B.has(x)) inter++; });
+  const jac = inter / (A.size + B.size - inter);
+  const ta = incTeams(a), tb = incTeams(b); let tshare = 0; ta.forEach(x=>{ if(tb.has(x)) tshare = 1; });
+  return inter ? jac + 0.15*tshare : 0;
+}
+const similarIncidents = (cur, mis, n=3) => mis.filter(m=>m.id!==cur.id).map(m=>({m, s:incSim(cur,m)})).filter(x=>x.s>=0.25).sort((a,b)=>b.s-a.s).slice(0,n);
+function problemGroups(mis) {
+  const p = mis.map((_,i)=>i); const find = i => { while(p[i]!==i){ p[i]=p[p[i]]; i=p[i]; } return i; };
+  for(let i=0;i<mis.length;i++) for(let j=i+1;j<mis.length;j++) if(incSim(mis[i],mis[j])>=0.35) p[find(i)]=find(j);
+  const g = {}; mis.forEach((m,i)=>{ (g[find(i)]=g[find(i)]||[]).push(m); });
+  return Object.values(g).filter(x=>x.length>=2).map(list=>{
+    list.sort((a,b)=>String(b.startedAt||"").localeCompare(String(a.startedAt||"")));
+    const hrs = list.reduce((s,m)=>s+((m.startedAt&&m.resolvedAt)?(new Date(m.resolvedAt)-new Date(m.startedAt))/3600000:0),0);
+    const teamCount = {}; list.forEach(m=>incTeams(m).forEach(t=>{ teamCount[t]=(teamCount[t]||0)+1; }));
+    const team = Object.keys(teamCount).sort((a,b)=>teamCount[b]-teamCount[a])[0] || "";
+    const prob = list.find(m=>m.problem);
+    return {list, hrs:Math.round(hrs*10)/10, team, name:list[0].name, problem:prob?prob.problem:null};
+  }).sort((a,b)=>b.list.length-a.list.length || b.hrs-a.hrs);
+}
+
+const SimilarBox = ({cur, mis}) => {
+  const sims = useMemo(()=>similarIncidents(cur, mis, 3), [cur.id, cur.name, cur.impactedServices, mis]);
+  if(!sims.length) return null;
+  return (
+    <div data-testid="similar-box" style={{margin:"12px 0",padding:"10px 12px",borderRadius:8,background:"#fffbeb",border:"1px solid #fde68a",fontSize:12}}>
+      <div style={{fontWeight:700,color:"#92400e",marginBottom:4}}>🔁 Similar past incidents {sims.length>=2 && <span style={{fontWeight:500}}>· this looks recurring, consider a problem record</span>}</div>
+      {sims.map(({m,s})=>(
+        <div key={m.id} style={{padding:"4px 0",borderTop:"1px dashed #fde68a"}}>
+          <strong>{m.incidentNo||m.id}</strong> {m.name} <span style={{color:"var(--text-4)"}}>· {m.severity} · {m.status} · {Math.round(Math.min(1,s)*100)}% match</span>
+          {(m.rootCause||m.resolutionSummary) && <div style={{color:"var(--text-3)",marginTop:2}}>{m.rootCause && <span>Cause: {String(m.rootCause).slice(0,140)}. </span>}{m.resolutionSummary && <span>Fix: {String(m.resolutionSummary).slice(0,140)}</span>}</div>}
+        </div>))}
+    </div>);
+};
+
+const ProblemsTab = ({mis, setMis, setActs, user, toast, nextId}) => {
+  const groups = useMemo(()=>problemGroups(mis), [mis]);
+  const create = g => {
+    const pid = "PRB-"+String(Date.now()).slice(-5);
+    const prob = {id:pid, name:g.name, createdBy:user.name, createdAt:new Date().toISOString()};
+    const ids = new Set(g.list.map(m=>m.id));
+    const team = g.team || user.team || "Cloud";
+    setActs(p=>[{id:nextId(team,p), name:"Permanent fix: "+g.name, team, type:"Project", cat:"Infrastructure Build", estMins:960, priority:"High", status:"Active", ticketNo:pid, jira:"", date:new Date().toISOString().slice(0,10), nature:"Proactive", workNature:"Change", taskSize:"Medium", complexity:"High", level:"L3", desc:"Problem record "+pid+": "+g.list.length+" related incidents ("+g.list.map(m=>m.incidentNo||m.id).join(", ")+"). Find and remove the root cause so it stops recurring."}, ...p]);
+    setMis(p=>p.map(m=>ids.has(m.id)?{...m, problem:prob}:m));
+    toast("Problem "+pid+" created with a permanent-fix task for "+team);
+  };
+  return (
+    <div data-testid="problems-tab">
+      <div style={{fontSize:12,color:"var(--text-3)",marginBottom:10}}>Incidents with similar names, services and teams are grouped. Two or more in a group usually means a permanent fix is cheaper than repeated firefighting. Creating a problem links the incidents and adds a fix task to Activities.</div>
+      {groups.length===0 && <Card style={{textAlign:"center",padding:30,fontSize:13}}>No recurring incident patterns found.</Card>}
+      {groups.map((g,i)=>(
+        <Card key={i} style={{marginBottom:10}}>
+          <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+            <div style={{fontWeight:700,fontSize:13,flex:1}}>{g.name} <span style={{fontWeight:400,color:"var(--text-4)"}}>· {g.list.length} incidents · {g.hrs}h to resolve in total{g.team?" · "+g.team:""}</span></div>
+            {g.problem ? <span style={{fontSize:11,fontWeight:700,color:"#166534",background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:12,padding:"2px 10px"}}>{g.problem.id} tracked</span>
+              : <Btn sm onClick={()=>create(g)}>Create problem + fix task</Btn>}
+          </div>
+          <div style={{fontSize:12,color:"var(--text-3)",marginTop:6}}>{g.list.map(m=>(m.incidentNo||m.id)+" ("+m.severity+")").join(", ")}</div>
+        </Card>))}
+    </div>);
+};
+
+// Shift handover brief: plain text built from live data, copy-ready
+const HandoverTab = ({mis, acts, targets, toast}) => {
+  const now = Date.now();
+  const open = mis.filter(m=>m.status!=="Resolved"&&m.status!=="Closed");
+  const recent = mis.filter(m=>(m.status==="Resolved"||m.status==="Closed") && m.resolvedAt && now-new Date(m.resolvedAt).getTime()<=24*3600000);
+  const overdue = []; mis.forEach(m=>(m.actionItems||[]).forEach(a=>{ if(!a.done && a.due && new Date(a.due+"T23:59:59").getTime()<now) overdue.push({m,a}); }));
+  const changes = acts.filter(a=>a.status==="Active" && a.type==="Change").slice(0,6);
+  const today0 = new Date().toISOString().slice(0,10), in7 = new Date(now+7*86400000).toISOString().slice(0,10);
+  const leave = LEAVE.filter(l=>l.from<=in7 && l.to>=today0);
+  const lines = ["Shift handover - "+new Date().toLocaleString(), ""];
+  lines.push("OPEN INCIDENTS ("+open.length+")"); if(!open.length) lines.push("- None");
+  open.forEach(m=>{ const s=slaInfo(m,targets,now); const fu=(m.actionItems||[]).filter(a=>!a.done).length;
+    lines.push("- "+(m.incidentNo||m.id)+" ["+m.severity+"] "+m.name+" - "+(s.state==="breached"?"SLA breached by "+fmtDur(-s.remaining):s.state==="risk"||s.state==="ok"?fmtDur(s.remaining)+" left on SLA":"no SLA")+(fu?", "+fu+" follow-up(s) open":"")+" - teams: "+((m.teamsInvolved||[]).join(", ")||m.team)); });
+  lines.push("", "RESOLVED IN THE LAST 24H ("+recent.length+")"); if(!recent.length) lines.push("- None"); recent.forEach(m=>lines.push("- "+(m.incidentNo||m.id)+" "+m.name+(m.status==="Resolved"?" (awaiting close)":"")));
+  lines.push("", "OVERDUE FOLLOW-UPS ("+overdue.length+")"); if(!overdue.length) lines.push("- None"); overdue.slice(0,10).forEach(({m,a})=>lines.push("- "+a.text+" ("+(a.owner||"no owner")+", due "+a.due+", "+(m.incidentNo||m.id)+")"));
+  lines.push("", "CHANGES IN FLIGHT ("+changes.length+" shown)"); if(!changes.length) lines.push("- None"); changes.forEach(a=>lines.push("- "+a.name+" ("+a.team+", "+a.priority+")"));
+  lines.push("", "ON LEAVE IN THE NEXT 7 DAYS"); if(!leave.length) lines.push("- No leave recorded"); leave.forEach(l=>lines.push("- "+l.member+" ("+l.team+") "+l.from+" to "+l.to));
+  const text = lines.join("\n");
+  return (
+    <div data-testid="handover">
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+        <div style={{fontSize:12,color:"var(--text-3)"}}>Built from live data. Copy it into chat or an email at the end of the shift.</div>
+        <Btn sm onClick={()=>{ try { navigator.clipboard.writeText(text); toast("Handover copied"); } catch(e) { toast("Copy failed","err"); } }}>Copy</Btn>
+      </div>
+      <Card><pre style={{margin:0,whiteSpace:"pre-wrap",fontSize:12.5,fontFamily:"var(--font-mono, monospace)",lineHeight:1.55}}>{text}</pre></Card>
+    </div>);
+};
+
+// Anomalies: latest complete month against the team's own history (needs 3+ prior months)
+function monthAnomalies(logs, users, anchorStr) {
+  const out = []; const months = [...new Set(logs.map(l=>(l.date||"").slice(0,7)).filter(Boolean))].sort();
+  if(months.length < 4) return out;
+  const lastDay = +(anchorStr||"").slice(8,10) || 30;
+  const use = lastDay >= 25 ? months : months.slice(0,-1);
+  if(use.length < 4) return out;
+  const cur = use[use.length-1], prior = use.slice(-7,-1);
+  const cost = {}; users.forEach(u=>{ cost[u.id]=u.costPerHour||0; });
+  const teams = [...new Set(logs.map(l=>l.team).filter(Boolean))];
+  const stat = (arr) => { const m=arr.reduce((a,b)=>a+b,0)/arr.length; const sd=Math.sqrt(arr.reduce((a,b)=>a+(b-m)*(b-m),0)/arr.length); return {m,sd}; };
+  teams.forEach(t=>{
+    const per = mo => { const L=logs.filter(l=>l.team===t&&(l.date||"").startsWith(mo)); const mins=L.reduce((s,l)=>s+l.mins,0); const re=L.filter(l=>l.nature==="Reactive").reduce((s,l)=>s+l.mins,0); return {hrs:mins/60, react:mins?re/mins*100:0, cost:L.reduce((s,l)=>s+l.mins/60*(cost[l.userId]||0),0)}; };
+    const c = per(cur), ps = prior.map(per);
+    [["hrs","Hours logged","h"],["react","Reactive share","%"],["cost","Effort cost","$"]].forEach(([k,label,u])=>{
+      const {m,sd} = stat(ps.map(x=>x[k])); if(sd<=0 || m<=0) return;
+      const z = (c[k]-m)/sd; if(Math.abs(z) < 2) return;
+      const f = v => u==="$" ? "$"+Math.round(v).toLocaleString() : Math.round(v)+u;
+      out.push({team:t, key:k, label, z, cur:c[k], mean:m, month:cur, text:label+" in "+cur+" was "+f(c[k])+" against a usual "+f(m)+" ("+(z>0?"+":"-")+(Math.abs(z)>=10?">10":Math.abs(z).toFixed(1))+" standard deviations)"});
+    });
+  });
+  return out.sort((a,b)=>Math.abs(b.z)-Math.abs(a.z));
+}
+
+// Skill matrix from logged hours per work category; cover = people with real hours in the last 6 months
+function skillMatrix(logs, users, team) {
+  const months = [...new Set(logs.map(l=>(l.date||"").slice(0,7)).filter(Boolean))].sort().slice(-6);
+  const L = logs.filter(l=>l.team===team && months.includes((l.date||"").slice(0,7)));
+  const members = users.filter(u=>u.team===team && u.status!=="Inactive" && u.role!=="admin");
+  const cats = {}; L.forEach(l=>{ const c=l.cat||"(none)"; cats[c]=cats[c]||{total:0,by:{}}; cats[c].total+=l.mins; cats[c].by[l.userId]=(cats[c].by[l.userId]||0)+l.mins; });
+  const rows = Object.keys(cats).map(c=>{ const by=cats[c].by; const cover=members.filter(m=>(by[m.id]||0)>=480).length; return {cat:c, total:cats[c].total/60, by, cover}; }).sort((a,b)=>b.total-a.total);
+  return {members, rows, months};
+}
+
+// Thumbs rating for AI answers, kept in this browser only
+const AiRate = ({kind}) => {
+  const key = "isms_ai_ratings";
+  const read = () => { try { return JSON.parse(localStorage.getItem(key)||"{}"); } catch(e) { return {}; } };
+  const [done, setDone] = useState(false); const [tot, setTot] = useState(read());
+  const vote = up => { const r = read(); const k=kind||"all"; r[k]=r[k]||{up:0,down:0}; r[k][up?"up":"down"]++; try { localStorage.setItem(key, JSON.stringify(r)); } catch(e) {} setTot(r); setDone(true); };
+  const all = Object.values(tot).reduce((a,b)=>({up:a.up+b.up,down:a.down+b.down}),{up:0,down:0});
+  const n = all.up+all.down;
+  return (<div data-testid="ai-rate" style={{display:"flex",alignItems:"center",gap:8,marginTop:8,fontSize:11,color:"var(--text-4)"}}>
+    {done ? <span>Thanks, noted.</span> : <><span>Was this useful?</span><button onClick={()=>vote(true)} style={{border:"1px solid var(--border-2)",background:"var(--surface)",borderRadius:12,padding:"1px 9px",cursor:"pointer"}}>👍</button><button onClick={()=>vote(false)} style={{border:"1px solid var(--border-2)",background:"var(--surface)",borderRadius:12,padding:"1px 9px",cursor:"pointer"}}>👎</button></>}
+    {n>=5 && <span>· rated useful {Math.round(all.up/n*100)}% of {n}</span>}
+  </div>);
+};
+
+const SkillsTab = ({logs, users, teams}) => {
+  const [team, setTeam] = useState(teams[0]||"");
+  const sm = useMemo(()=>skillMatrix(logs, users, team), [logs, users, team]);
+  const mx = Math.max(1, ...sm.rows.flatMap(r=>Object.values(r.by)))/60;
+  return (<div data-testid="skills-tab">
+    <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:10,flexWrap:"wrap"}}>
+      <select value={team} onChange={e=>setTeam(e.target.value)} style={{padding:"6px 8px",borderRadius:7,border:"1px solid var(--border-2)",fontSize:13}}>{teams.map(t=><option key={t}>{t}</option>)}</select>
+      <span style={{fontSize:12,color:"var(--text-3)"}}>Hours logged per work category over the last {sm.months.length} months. Cover counts people with at least 8 hours in the category.</span>
+    </div>
+    <Card style={{overflowX:"auto"}}>
+      <table style={{borderCollapse:"collapse",fontSize:12,width:"100%"}}>
+        <thead><tr><th style={{textAlign:"left",padding:"6px 8px"}}>Work category</th>{sm.members.map(m=><th key={m.id} style={{padding:"6px 8px",fontWeight:600,whiteSpace:"nowrap"}}>{m.name.split(" ")[0]}</th>)}<th style={{padding:"6px 8px"}}>Cover</th></tr></thead>
+        <tbody>{sm.rows.slice(0,14).map(r=>(<tr key={r.cat} style={{borderTop:"1px solid var(--surface-3)"}}>
+          <td style={{padding:"6px 8px",fontWeight:600}}>{r.cat}</td>
+          {sm.members.map(m=>{ const h=(r.by[m.id]||0)/60; return <td key={m.id} style={{textAlign:"center",padding:"6px 8px",background:h>=8?"rgba(37,99,235,"+(0.1+Math.min(0.5,h/mx*0.5))+")":"transparent",color:h?"var(--text-1)":"var(--text-4)"}}>{h?Math.round(h):"·"}</td>; })}
+          <td style={{textAlign:"center",padding:"6px 8px",fontWeight:700,color:r.cover<=1?"#b91c1c":"#166534"}}>{r.cover}{r.cover===1&&r.total>=40?" ⚠":""}</td></tr>))}</tbody>
+      </table>
+      {sm.rows.length===0 && <div style={{padding:20,textAlign:"center",fontSize:13}}>No logged work for this team yet.</div>}
+    </Card></div>);
 };
 
 const DEFAULT_CATEGORIES = ["Infrastructure Build","Maintenance","Security & Compliance","Automation & Scripting","Monitoring & Alerting","Documentation"].map(n=>({name:n, active:true}));
@@ -7217,7 +7380,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       mgrSec:"Productivity",
       role:"mgr", guideGroup:"🚀 Productivity Intelligence", guideColor:"#0891b2", guideBg:"#ecfeff",
       desc:"Rule-based intelligence engine that scans activities, time logs, incidents and capacity, ranks what needs attention, and offers one-click actions, a team health scorecard, a demand forecast and an executive summary. Also includes change risk scoring, an AI 'Ask your data' assistant, SLA compliance and a one-click digest to email or chat.",
-      benefits:["Change risk tab scores active Change and Project work 0-100, with the factors and ways to lower the risk","Ask your data: type a question in plain English and get a calculated answer (AI plans the query, your browser runs it)","Resolution SLA tile and findings for breached or at-risk incidents","Send digest emails or posts the critical and high findings to Teams/Slack","Turns raw data into a prioritised to-do list with one-click fixes","Detects overruns, idle work, overload, recurring toil, open incidents and audit gaps","Team health scorecard and next-month forecast","Executive summary export (CSV / print to PDF)"],
+      benefits:["Anomaly alerts when a team's hours, reactive share or cost swing far from its own history","Skills & cover tab: who has done what, with warnings where only one person covers a skill area","Rating buttons on AI answers","Change risk tab scores active Change and Project work 0-100, with the factors and ways to lower the risk","Ask your data: type a question in plain English and get a calculated answer (AI plans the query, your browser runs it)","Resolution SLA tile and findings for breached or at-risk incidents","Send digest emails or posts the critical and high findings to Teams/Slack","Turns raw data into a prioritised to-do list with one-click fixes","Detects overruns, idle work, overload, recurring toil, open incidents and audit gaps","Team health scorecard and next-month forecast","Executive summary export (CSV / print to PDF)"],
     },
     {
       id:"prod_overview", icon:"🚀", label:"Overview",
@@ -7282,7 +7445,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       mgrSec:"Operations",
       role:"mgr", guideGroup:"🚨 Major Incident Management", guideColor:"#dc2626", guideBg:"#fef2f2",
       desc:"Dedicated Sev1/Sev2 incident registry with MTTR tracking, estimated cost analysis, team contribution matrix, and cross-team time logging.",
-      benefits:["Resolution SLA countdown per severity with breach warnings","Follow-up actions with owners and due dates, AI root-cause suggestions and post-incident review drafts","Quantifies the true financial cost of every major incident for executive reporting","Tracks MTTR trends to measure improvement from problem management actions","Attributes effort across all responding teams — supporting fair recognition and SLA reviews"],
+      benefits:["Similar past incidents shown in each incident, with their causes and fixes","Problems tab groups recurring incidents and creates a problem record with a permanent-fix task","Shift handover brief built from live data, ready to copy","Resolution SLA countdown per severity with breach warnings","Follow-up actions with owners and due dates, AI root-cause suggestions and post-incident review drafts","Quantifies the true financial cost of every major incident for executive reporting","Tracks MTTR trends to measure improvement from problem management actions","Attributes effort across all responding teams — supporting fair recognition and SLA reviews"],
     },
     {
       id:"timelog", icon:"⏱", label:"Time Log", mgrLabel:"Team Time Log", mbrLabel:"My Time Log",
@@ -7290,6 +7453,13 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       role:"all", guideGroup:"📋 Activity & Time Management", guideColor:"#059669", guideBg:"#f0fdf4",
       desc:"Guided 7-step time capture (activity -> nature -> type -> work category -> time -> date -> notes) plus an inline quick-log table for logging multiple tasks at once.",
       benefits:["Quick log: describe your day in words and AI turns it into draft entries you review before saving","Structured data that is immediately usable in reports — no cleanup required","Guided steps ensure every entry is tagged for analytics, eliminating free-text chaos","Inline quick-log table lets members record multiple tasks in under 60 seconds"],
+    },
+    {
+      id:"my_week", icon:"📆", label:"My Week",
+      mgrSec:"Overview", mbrSec:"My Work",
+      role:"all", guideGroup:"📋 Activity & Time Management", guideColor:"#059669", guideBg:"#f0fdf4",
+      desc:"Personal weekly view of hours logged per day against an 8-hour day, reactive versus planned share, where the time went, missing days and follow-up actions that are overdue.",
+      benefits:["Shows gaps and overload while there is still time to fix the week","Makes the reactive share visible so interruptions can be discussed with evidence","Collects your overdue incident follow-ups in one place"],
     },
     {
       id:"teams", icon:"👥", label:"Team Management", mgrLabel:"Team Management", mbrLabel:"Team View",
@@ -14865,6 +15035,23 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
         why:"Lean/Kanban: more than 5% of items blocked indicates a governance gap.",
         action:{label:"Review suspended", run:()=>goPage("activities")}});
 
+      // -- 2b. Anomalies and single-person skill cover -----------------------
+      monthAnomalies(sLog, allUsers, anchorStr).slice(0,5).forEach(an=>{
+        add({id:"anom-"+an.team+"-"+an.key+"-"+an.month, domain:"Efficiency", sev:Math.abs(an.z)>=3?"high":"medium", score:46+Math.min(Math.abs(an.z),5)*2,
+          title:an.team+": unusual "+an.label.toLowerCase()+" in "+an.month, detail:an.text,
+          why:"A swing of more than two standard deviations from the team's own history usually has a cause worth finding: a project, an incident wave, a staffing change or a logging gap.",
+          action:{label:"Open team scorecard", run:()=>{ window.__acTab="score"; goPage("action_center"); }}});
+      });
+      teamNames.forEach(t=>{
+        const sm = skillMatrix(sLog, sUsers, t);
+        const one = sm.rows.filter(r=>r.total>=40 && r.cover===1).slice(0,4);
+        if(one.length) add({id:"skill-"+t, domain:"People", sev:"medium", score:42+one.length*2,
+          title:t+": "+one.length+" skill area"+(one.length>1?"s":"")+" rely on one person",
+          detail:one.map(r=>{ const uid0=Object.keys(r.by).find(id=>r.by[id]>=480); const u=sUsers.find(x=>x.id===uid0); return r.cat+" ("+(u?u.name:"1 person")+")"; }).join(", "),
+          why:"Single-person cover turns leave, illness or attrition into an outage risk. Pair someone in or document the work.",
+          action:{label:"See skill matrix", run:()=>{ window.__acTab="skills"; goPage("action_center"); }}});
+      });
+
       // -- 3. People & capacity ---------------------------------------------
       sUsers.forEach(u=>{
         const m = monthByUser[u.id]||0, pct = m/MINS_PER_ENGINEER_MONTH*100;
@@ -15068,7 +15255,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
         </div>
 
         <div style={{display:"flex",borderBottom:"2px solid var(--border)",marginBottom:16}}>
-          <TabBtn id="actions" label={"Recommended actions ("+active.length+")"}/><TabBtn id="score" label="Team scorecard"/><TabBtn id="forecast" label="Forecast & trend"/><TabBtn id="risk" label="Change risk"/><TabBtn id="roi" label="Automation ROI"/><TabBtn id="summary" label="Executive summary"/><TabBtn id="ai" label="✨ AI insights"/><TabBtn id="data" label="💬 Ask your data"/>
+          <TabBtn id="actions" label={"Recommended actions ("+active.length+")"}/><TabBtn id="score" label="Team scorecard"/><TabBtn id="forecast" label="Forecast & trend"/><TabBtn id="risk" label="Change risk"/><TabBtn id="skills" label="Skills & cover"/><TabBtn id="roi" label="Automation ROI"/><TabBtn id="summary" label="Executive summary"/><TabBtn id="ai" label="✨ AI insights"/><TabBtn id="data" label="💬 Ask your data"/>
         </div>
 
         {tab==="actions" && (<div>
@@ -15153,6 +15340,12 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
                 </div>
               </Card>); })}
           </div>);
+        })()}
+
+        {tab==="skills" && (()=>{
+          const susers = (isAdmin ? allUsers.filter(u=>u.team) : allUsers.filter(u=>u.team===user.team));
+          const tms = [...new Set(susers.map(u=>u.team))];
+          return <SkillsTab logs={isAdmin?logs:logs.filter(l=>l.team===user.team)} users={susers} teams={tms}/>;
         })()}
 
         {tab==="data" && (()=>{
@@ -15262,6 +15455,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
             <pre style={{whiteSpace:"pre-wrap",fontFamily:"inherit",fontSize:13,lineHeight:1.65,margin:0,color:"var(--text-1)"}}>{aiOut.text}</pre>
             <div style={{display:"flex",gap:8,marginTop:12,alignItems:"center"}}>
               <button onClick={()=>{ try{navigator.clipboard.writeText(aiOut.text);}catch(e){} showToast("Copied"); }} style={{padding:"5px 12px",fontSize:12,borderRadius:"var(--radius-md)",border:"1px solid var(--border)",background:"var(--surface)",cursor:"pointer"}}>📋 Copy</button>
+              <AiRate kind="insights"/>
               <span style={{fontSize:11,color:"var(--text-3)"}}>AI can make mistakes - check important figures against the tabs above.</span></div>
           </Card>}
         </div>)}
@@ -16470,7 +16664,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
 
         {/* == Tabs == */}
         <div style={{display:"flex",gap:4,marginBottom:18,borderBottom:"2px solid var(--border)",paddingBottom:0}}>
-          {[["dashboard","📊 Dashboard"],["incidents","📋 Incident List"],["analytics","📈 Analytics"]].map(([id,label])=>(
+          {[["dashboard","📊 Dashboard"],["incidents","📋 Incident List"],["problems","🔁 Problems"],["handover","📋 Shift handover"],["analytics","📈 Analytics"]].map(([id,label])=>(
             <button key={id} onClick={()=>setMiTab(id)} style={{
               padding:"8px 18px",border:"none",cursor:"pointer",fontSize:13,fontWeight:600,
               background:"transparent",borderBottom:`2px solid ${miTab===id?"var(--brand)":"transparent"}`,
@@ -16648,6 +16842,8 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
         )}
 
         {/* == TAB: ANALYTICS == */}
+        {miTab==="problems" && <ProblemsTab mis={mis} setMis={setMis} setActs={setActs} user={user} toast={showToast} nextId={nextActId}/>}
+        {miTab==="handover" && <HandoverTab mis={mis} acts={acts} targets={slaTargets} toast={showToast}/>}
         {miTab==="analytics" && (
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
 
@@ -16828,7 +17024,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
             <ModalWrap title={titles[mode] + " - " + cur.incidentNo} onClose={()=>setFlow(null)} wide>
               <div style={{marginBottom:14}}>
                 <div style={{fontWeight:700,fontSize:14,color:"var(--text-1)"}}>{cur.name}</div>
-                <div style={{display:"flex",gap:8,marginTop:6,alignItems:"center",flexWrap:"wrap"}}><SevBadge sev={cur.severity}/><StatusBadge s={cur.status}/><SlaChip mi={cur} targets={slaTargets}/></div>
+                <div style={{display:"flex",gap:8,marginTop:6,alignItems:"center",flexWrap:"wrap"}}><SevBadge sev={cur.severity}/><StatusBadge s={cur.status}/><SlaChip mi={cur} targets={slaTargets}/>{cur.problem && <span style={{fontSize:11,fontWeight:700,color:"#6b21a8",background:"#faf5ff",border:"1px solid #e9d5ff",borderRadius:12,padding:"2px 9px"}}>🧩 {cur.problem.id}</span>}</div>
               </div>
 
               {mode==="resolve" && (
@@ -16853,7 +17049,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
                           <span style={{fontSize:11,color:"var(--text-3)"}}>AI suggestion · {aiBox.meta} · always verify</span>
                         </div>
                       </div>
-                    ) : <pre style={{whiteSpace:"pre-wrap",fontFamily:"inherit",fontSize:12.5,margin:"10px 0 0"}}>{aiBox.text}</pre>)}
+                    ) : <div><pre style={{whiteSpace:"pre-wrap",fontFamily:"inherit",fontSize:12.5,margin:"10px 0 0"}}>{aiBox.text}</pre><AiRate kind="incident"/></div>)}
                   </div>
                 </div>
               )}
@@ -16905,6 +17101,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
                         <div style={{flex:1}}><strong>{h.action}</strong>{" by " + h.by}{h.note ? <div style={{color:"var(--text-3)",marginTop:2,whiteSpace:"pre-wrap"}}>{h.note}</div> : null}</div>
                       </div>
                     ))}
+                  <SimilarBox cur={cur} mis={mis}/>
                   <div style={{fontWeight:700,fontSize:12,color:"var(--text-3)",textTransform:"uppercase",letterSpacing:.5,margin:"16px 0 8px"}}>Follow-up actions {(cur.actionItems||[]).length>0 && <span style={{textTransform:"none",fontWeight:500}}>({(cur.actionItems||[]).filter(a=>a.done).length}/{(cur.actionItems||[]).length} done)</span>}</div>
                   {(cur.actionItems||[]).length===0 && <div style={{fontSize:12.5,color:"var(--text-4)",marginBottom:6}}>No follow-up actions yet. Add the fixes that stop this happening again.</div>}
                   {(cur.actionItems||[]).map(it=>{ const overdue = !it.done && it.due && it.due < today(); return (
@@ -17377,6 +17574,57 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     );
   };
 
+
+  const PageMyWeek = () => {
+    const mine = logs.filter(l=>l.userId===user.id);
+    const latest = mine.map(l=>l.date).sort().pop() || today();
+    const nowDays = (new Date(today()+"T00:00:00Z") - new Date(latest+"T00:00:00Z"))/86400000;
+    const stale = nowDays > 10;
+    const base = stale ? new Date(latest+"T00:00:00Z") : new Date(today()+"T00:00:00Z");
+    const dow = (base.getUTCDay()+6)%7;                    // Monday = 0
+    const mon = new Date(base.getTime() - dow*86400000);
+    const days = [...Array(7)].map((_,i)=>{ const d=new Date(mon.getTime()+i*86400000); return d.toISOString().slice(0,10); });
+    const wl = mine.filter(l=>days.includes(l.date));
+    const byDay = days.map(d=>wl.filter(l=>l.date===d).reduce((s,l)=>s+l.mins,0)/60);
+    const total = byDay.reduce((a,b)=>a+b,0);
+    const react = wl.filter(l=>l.nature==="Reactive").reduce((s,l)=>s+l.mins,0)/60;
+    const lastIdx = stale ? 4 : Math.min(4, dow);
+    const missing = days.slice(0,lastIdx+1).filter((d,i)=>byDay[i]<1);
+    const byAct = {}; wl.forEach(l=>{ byAct[l.activity]=(byAct[l.activity]||0)+l.mins/60; });
+    const top = Object.entries(byAct).sort((a,b)=>b[1]-a[1]).slice(0,6);
+    const od = []; mis.forEach(m=>(m.actionItems||[]).forEach(a=>{ if(!a.done && a.owner && a.owner.toLowerCase().includes(user.name.toLowerCase()) && a.due && a.due < today()) od.push({m,a}); }));
+    const names = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+    const mx = Math.max(8, ...byDay);
+    return (
+      <div data-testid="my-week">
+        <PageHero icon="📆" title="My Week" subtitle={"Week of "+days[0]+(stale?" · your most recent logged week":"")}/>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:12,margin:"16px 0"}}>
+          <Card><div style={{fontSize:11,color:"var(--text-4)"}}>Logged</div><div style={{fontSize:26,fontWeight:800}}>{total.toFixed(1)}h</div><div style={{fontSize:11,color:"var(--text-3)"}}>of 40h</div></Card>
+          <Card><div style={{fontSize:11,color:"var(--text-4)"}}>Reactive share</div><div style={{fontSize:26,fontWeight:800,color:total&&react/total>0.5?"#c2410c":undefined}}>{total?Math.round(react/total*100):0}%</div><div style={{fontSize:11,color:"var(--text-3)"}}>{react.toFixed(1)}h unplanned</div></Card>
+          <Card><div style={{fontSize:11,color:"var(--text-4)"}}>Missing days</div><div style={{fontSize:26,fontWeight:800,color:missing.length?"#b91c1c":"#16a34a"}}>{missing.length}</div><div style={{fontSize:11,color:"var(--text-3)"}}>{missing.length?missing.map(d=>names[(new Date(d+"T00:00:00Z").getUTCDay()+6)%7]).join(", "):"all weekdays logged"}</div></Card>
+          <Card><div style={{fontSize:11,color:"var(--text-4)"}}>Overdue follow-ups</div><div style={{fontSize:26,fontWeight:800,color:od.length?"#b91c1c":"#16a34a"}}>{od.length}</div><div style={{fontSize:11,color:"var(--text-3)"}}>owned by you</div></Card>
+        </div>
+        <Card style={{marginBottom:12}}>
+          <div style={{fontWeight:700,fontSize:13,marginBottom:10}}>Hours per day</div>
+          <div style={{display:"flex",gap:10,alignItems:"flex-end",height:130}}>
+            {byDay.map((h,i)=>(<div key={i} style={{flex:1,textAlign:"center"}}>
+              <div style={{fontSize:11,fontWeight:700,marginBottom:3}}>{h?h.toFixed(1):""}</div>
+              <div style={{height:Math.max(3,h/mx*100),background:h>9?"#c2410c":h>=7?"#16a34a":i<5?"#f59e0b":"var(--surface-3)",borderRadius:4}} title={days[i]}/>
+              <div style={{fontSize:11,color:"var(--text-3)",marginTop:3}}>{names[i]}</div></div>))}
+          </div>
+          <div style={{fontSize:11,color:"var(--text-4)",marginTop:6}}>Green is 7 to 9 hours, amber is under 7, orange is over 9.</div>
+        </Card>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",gap:12}}>
+          <Card><div style={{fontWeight:700,fontSize:13,marginBottom:8}}>Where the time went</div>
+            {top.length===0 && <div style={{fontSize:12,color:"var(--text-3)"}}>Nothing logged this week yet.</div>}
+            {top.map(([n,h])=>(<div key={n} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"3px 0",borderBottom:"1px solid var(--surface-3)"}}><span>{n}</span><strong>{h.toFixed(1)}h</strong></div>))}</Card>
+          <Card><div style={{fontWeight:700,fontSize:13,marginBottom:8}}>Overdue follow-ups</div>
+            {od.length===0 && <div style={{fontSize:12,color:"var(--text-3)"}}>None. Nice.</div>}
+            {od.map(({m,a})=>(<div key={m.id+a.id} style={{fontSize:12,padding:"3px 0",borderBottom:"1px solid var(--surface-3)"}}>{a.text} <span style={{color:"var(--text-4)"}}>· {m.incidentNo||m.id} · due {a.due}</span></div>))}</Card>
+        </div>
+      </div>);
+  };
+
   const PAGES = {
     dashboard: PageDashboard,
     activities: PageActivities,
@@ -17390,6 +17638,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     planning: PagePlanning,
     settings: PageSettings,
     action_center: PageActionCenter,
+    my_week: PageMyWeek,
     prod_overview: PageProdOverview,
     prod_flags: PageProdFlags,
     prod_heatmap: PageProdHeatmap,
