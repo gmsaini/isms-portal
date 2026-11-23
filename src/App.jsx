@@ -6381,6 +6381,9 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
   const [fSkill, setFSkill] = React.useState("");
   const [srch, setSrch] = React.useState("");
   const [newSkill, setNewSkill] = React.useState("");
+  const [view, setViewS] = React.useState(()=>{ try { return localStorage.getItem("isms_st_view")||"list"; } catch(e) { return "list"; } });
+  const setView = v => { setViewS(v); try { localStorage.setItem("isms_st_view", v); } catch(e) {} };
+  const [availOnly, setAvailOnly] = React.useState(false);
   const [prep, setPrep] = React.useState(null);   // null | "camera" | {skill,stream,lm}
   const [busy, setBusy] = React.useState(false);
   const [up, setUp] = React.useState(null);           // {ok,bad}
@@ -6529,32 +6532,56 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
             <Btn v="sec" disabled={busy||!newSkill.trim()} onClick={addSkill}>+ Add skill</Btn>
           </div>}
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(290px,1fr))",gap:14}}>
-          {loading && !info && <div style={{fontSize:13,color:"var(--text-3)"}}>Loading...</div>}
-          {skills.length>0 && !skills.some(s=>s.toLowerCase().includes(srch.trim().toLowerCase())) && <div style={{fontSize:13,color:"var(--text-3)"}}>No skill matches "{srch}".</div>}
-          {skills.filter(s=>s.toLowerCase().includes(srch.trim().toLowerCase())).map(s=>{
+        {(()=>{
+          const q = srch.trim().toLowerCase();
+          const rows = skills.filter(s=>s.toLowerCase().includes(q)).map(s=>{
             const my = mine.filter(a=>a.skill===s);
             const best = my.filter(a=>a.status==="submitted").reduce((m,a)=>Math.max(m,Number(a.score)||0),-1);
             const last = my[0];
             const next = last ? new Date(last.started_at).getTime()+cfg.cooldownDays*86400000 : 0;
             const wait = next>Date.now();
-            const ready = info && (info.counts[s]||0) >= ST_COUNT;
-            return (
-              <Card key={s}>
-                <div style={{fontSize:16,fontWeight:800,color:"var(--text-1)"}}>{s}</div>
-                <div style={{fontSize:12.5,color:"var(--text-3)",margin:"4px 0 12px"}}>{ST_COUNT} questions · {cfg.timeLimitMin} min · pass {cfg.passMark}%</div>
-                <div style={{fontSize:13,color:"var(--text-2)",lineHeight:1.7,marginBottom:12}}>
-                  Best score: <b>{best>=0?best+"%":"-"}</b><br/>
-                  Last attempt: {last ? stFmt(last.started_at)+" - "+stStatusLabel[last.status]+(last.status==="submitted"?" ("+last.score+"%)":"") : "none yet"}
-                  {last && last.status==="terminated" && last.reason ? <><br/><span style={{color:"#b91c1c"}}>Reason: {last.reason}</span></> : null}
-                </div>
-                {!ready ? <div style={{fontSize:12.5,color:"var(--text-3)"}}>Not available yet - the question bank is still being prepared.</div>
-                  : wait ? <div style={{fontSize:12.5,color:"#b45309"}}>You can retake this on {new Date(next).toLocaleDateString([], {dateStyle:"medium"})}.</div>
-                  : <Btn onClick={()=>setTerms(s)}>Start test</Btn>}
-              </Card>
-            );
-          })}
-        </div>
+            const ready = !!info && (info.counts[s]||0) >= ST_COUNT;
+            return {s,best,last,next,wait,ready,can:ready&&!wait};
+          }).filter(r=>!availOnly||r.can);
+          const lastTxt = r => r.last ? stFmt(r.last.started_at)+" - "+stStatusLabel[r.last.status]+(r.last.status==="submitted"?" ("+r.last.score+"%)":"") : "none yet";
+          const action = r => !r.ready ? <span style={{fontSize:12.5,color:"var(--text-3)"}}>Not available yet</span>
+            : r.wait ? <span style={{fontSize:12.5,color:"#b45309"}}>Retake on {new Date(r.next).toLocaleDateString([], {dateStyle:"medium"})}</span>
+            : <Btn sm onClick={()=>setTerms(r.s)}>Start test</Btn>;
+          return <>
+            <div style={{display:"flex",gap:12,alignItems:"center",marginBottom:12,flexWrap:"wrap"}}>
+              <div style={{display:"flex",gap:4}}>
+                <Btn sm v={view==="list"?"pri":"sec"} onClick={()=>setView("list")}>☰ List</Btn>
+                <Btn sm v={view==="cards"?"pri":"sec"} onClick={()=>setView("cards")}>▦ Cards</Btn>
+              </div>
+              <label style={{display:"flex",gap:6,alignItems:"center",fontSize:12.5,color:"var(--text-2)",cursor:"pointer"}}><input type="checkbox" checked={availOnly} onChange={e=>setAvailOnly(e.target.checked)}/>Available to take now</label>
+              <span style={{fontSize:12.5,color:"var(--text-3)"}}>{ST_COUNT} questions · {cfg.timeLimitMin} min · pass {cfg.passMark}%</span>
+            </div>
+            {loading && !info && <div style={{fontSize:13,color:"var(--text-3)"}}>Loading...</div>}
+            {info && !rows.length && <div style={{fontSize:13,color:"var(--text-3)"}}>{srch.trim()?'No skill matches "'+srch+'".':"No skills to show."}</div>}
+            {view==="list" && rows.length>0 && <Card style={{padding:0}}><div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}} data-testid="st-list">
+              <thead><tr>{["Skill","Best score","Last attempt",""].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
+              <tbody>{rows.map(r=>(
+                <tr key={r.s}>
+                  <td style={{...td,fontWeight:700,color:"var(--text-1)"}}>{r.s}</td>
+                  <td style={td}>{r.best>=0?r.best+"%":"-"}</td>
+                  <td style={td}>{lastTxt(r)}{r.last&&r.last.status==="terminated"&&r.last.reason?<div style={{fontSize:11.5,color:"#b91c1c"}}>Reason: {r.last.reason}</div>:null}</td>
+                  <td style={{...td,textAlign:"right",whiteSpace:"nowrap"}}>{action(r)}</td>
+                </tr>))}</tbody></table></div></Card>}
+            {view==="cards" && <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(290px,1fr))",gap:14}}>
+              {rows.map(r=>(
+                <Card key={r.s}>
+                  <div style={{fontSize:16,fontWeight:800,color:"var(--text-1)"}}>{r.s}</div>
+                  <div style={{fontSize:12.5,color:"var(--text-3)",margin:"4px 0 12px"}}>{ST_COUNT} questions · {cfg.timeLimitMin} min · pass {cfg.passMark}%</div>
+                  <div style={{fontSize:13,color:"var(--text-2)",lineHeight:1.7,marginBottom:12}}>
+                    Best score: <b>{r.best>=0?r.best+"%":"-"}</b><br/>
+                    Last attempt: {lastTxt(r)}
+                    {r.last && r.last.status==="terminated" && r.last.reason ? <><br/><span style={{color:"#b91c1c"}}>Reason: {r.last.reason}</span></> : null}
+                  </div>
+                  {action(r)}
+                </Card>))}
+            </div>}
+          </>;
+        })()}
         </>
       )}
 
