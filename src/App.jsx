@@ -5541,6 +5541,7 @@ const ChangeCalendar = ({acts, logs, mis, users, anchorStr}) => {
             <span style={{fontSize:12,color:"var(--text-3)"}}>{a.team}</span>
             {r ? <span style={{fontSize:11,fontWeight:700,color:col,background:bg,borderRadius:10,padding:"3px 0",textAlign:"center"}}>risk {r.score} · {r.band}</span> : <span/>}
           </div>
+          {a.cab && <div style={{fontSize:11.5,color:"var(--text-3)",marginTop:5,paddingLeft:100}}>Approval: {a.cab.state}{a.cab.state==="Pending approval"?" ("+cabCount(a.cab)+"/"+a.cab.required+")":""}</div>}
           {c.length>0 && <div style={{fontSize:11.5,color:"#92400e",marginTop:5,paddingLeft:100}}>⚠ {c.join(" · ")}</div>}
         </Card>); })}
     </div>))}
@@ -5609,6 +5610,7 @@ function auditDiff(name, prev, items, now, actor) {
       let b = {}; try { b = JSON.parse(e.before); } catch(x) {}
       const a = e.it||{}; const keys = [...new Set([...Object.keys(b), ...Object.keys(a)])];
       keys.forEach(f=>{ if(AUDIT_SKIP.has(f)) return; if(_canon(b[f])===_canon(a[f])) return;
+        if(f==="cab") { const bc=b.cab||{}, ac=a.cab||{}; if(bc.state!==ac.state) changes.push({f:"approval state", from:bc.state||"(none)", to:ac.state||"(none)"}); const nb=(bc.approvals||[]).length, na=(ac.approvals||[]).length; if(na>nb) { const l=ac.approvals[na-1]; changes.push({f:"decision", from:"", to:l.decision+" by "+l.by+(l.comment?": "+l.comment:"")}); } if(ac.outcome!==bc.outcome && ac.outcome) changes.push({f:"outcome", from:"", to:ac.outcome}); return; }
         changes.push(AUDIT_MASK.has(f) ? {f, from:"", to:"(changed)"} : {f, from:auditShort(b[f]), to:auditShort(a[f])}); });
       if(!changes.length) return null;
       changes = changes.slice(0,12);
@@ -5777,6 +5779,279 @@ const ServicesPage = ({services, setServices, acts, logs, mis, users, teamNames,
         </div>))}
       </Card>
     </div>)}
+  </div>);
+};
+
+// ===== CAB: change approval workflow (stored on the Change activity as act.cab) =====
+const CAB_STATES = ["Pending approval","Approved","Rejected","Implemented","Withdrawn"];
+const cabRequired = (score, emergency) => emergency ? 1 : (score >= 60 ? 2 : 1);
+const cabCount = (cab) => ((cab && cab.approvals) || []).filter(x=>x.decision==="approved").length;
+function cabDecide(act, user, decision, comment) {
+  const cab = act.cab || {}; const approvals = (cab.approvals||[]).filter(x=>x.by!==user.name).concat([{by:user.name, decision, comment:(comment||"").trim(), at:new Date().toISOString()}]);
+  const ok = approvals.filter(x=>x.decision==="approved").length;
+  const state = approvals.some(x=>x.decision==="rejected") ? "Rejected" : ok >= (cab.required||1) ? "Approved" : "Pending approval";
+  return {...act, cab:{...cab, approvals, state}};
+}
+const cabChip = st => ({"Pending approval":["#a16207","#fffbeb"],"Approved":["#166534","#f0fdf4"],"Rejected":["#b91c1c","#fef2f2"],"Implemented":["#1d4ed8","#eff6ff"],"Withdrawn":["#475569","#f1f5f9"]}[st]||["#475569","#f1f5f9"]);
+
+const CabPage = ({acts, setActs, users, user, isAdmin, logs, mis, toast}) => {
+  const [tab,setTab] = useState("mine"); const [dec,setDec] = useState({}); const [open,setOpen] = useState({});
+  const [req,setReq] = useState({actId:"", plannedDate:"", window:"", impact:"", test:"", rollback:"", emergency:false, reason:"", approvers:[]});
+  const [outcome,setOutcome] = useState({});
+  const changes = acts.filter(a=>a.type==="Change");
+  const risk = useMemo(()=>{ const m={}; changeRiskRows(acts, logs, mis, users, new Date().toISOString().slice(0,10)).forEach(r=>{ m[r.a.id]=r; }); return m; }, [acts, logs, mis, users]);
+  const approvers = users.filter(u=>(u.role==="manager"||u.role==="admin") && u.status==="Active" && u.name!==user.name);
+  const eligible = changes.filter(a=>a.status==="Active" && (!a.cab || ["Rejected","Withdrawn"].includes(a.cab.state)));
+  const pending = changes.filter(a=>a.cab && a.cab.state==="Pending approval");
+  const mine = pending.filter(a=>(a.cab.approvers||[]).includes(user.name) && !(a.cab.approvals||[]).some(x=>x.by===user.name));
+  const tracked = changes.filter(a=>a.cab);
+  const upd = (id, fn, msg) => { setActs(p=>p.map(a=>a.id===id?fn(a):a)); if(msg) toast(msg); };
+  const pick = id => { const a = acts.find(x=>x.id===id); const sug = users.filter(u=>(u.role==="manager"&&a&&u.team===a.team) || u.role==="admin").filter(u=>u.status==="Active"&&u.name!==user.name).map(u=>u.name).slice(0,2); setReq(r=>({...r, actId:id, approvers:sug})); };
+  const r0 = req.actId ? risk[req.actId] : null; const need = cabRequired(r0?r0.score:0, req.emergency);
+  const submit = () => {
+    if(!req.actId) { toast("Choose a change","err"); return; }
+    if(!req.plannedDate) { toast("Planned date required","err"); return; }
+    if(!req.rollback.trim()) { toast("A rollback plan is required","err"); return; }
+    if(req.emergency && !req.reason.trim()) { toast("Explain why this is an emergency","err"); return; }
+    if(req.approvers.length < need) { toast("Choose at least "+need+" approver"+(need>1?"s":""),"err"); return; }
+    upd(req.actId, a=>({...a, date:req.plannedDate, cab:{state:"Pending approval", requestedBy:user.name, requestedAt:new Date().toISOString(), plannedDate:req.plannedDate, window:req.window.trim(), impact:req.impact.trim(), test:req.test.trim(), rollback:req.rollback.trim(), emergency:req.emergency, reason:req.reason.trim(), approvers:req.approvers, required:need, riskScore:r0?r0.score:null, riskBand:r0?r0.band:null, approvals:[]}}), "Submitted for approval");
+    setReq({actId:"", plannedDate:"", window:"", impact:"", test:"", rollback:"", emergency:false, reason:"", approvers:[]}); setTab("all");
+  };
+  const inp = {padding:"7px 9px",borderRadius:7,border:"1px solid var(--border-2)",fontSize:13,background:"var(--surface)",width:"100%",boxSizing:"border-box"};
+  const TabB = ({id,label}) => <button onClick={()=>setTab(id)} style={{padding:"10px 16px",border:"none",background:"transparent",cursor:"pointer",fontSize:13,fontWeight:600,whiteSpace:"nowrap",color:tab===id?"var(--brand)":"var(--text-3)",borderBottom:"2px solid "+(tab===id?"var(--brand)":"transparent"),marginBottom:-2}}>{label}</button>;
+  const done = tracked.filter(a=>a.cab.state==="Implemented"); const okImpl = done.filter(a=>a.cab.outcome==="Successful").length;
+  const Card1 = (a) => { const c=a.cab; const [col,bg]=cabChip(c.state); const imOpen=open[a.id]; const canDecide = c.state==="Pending approval" && (c.approvers||[]).includes(user.name) && !(c.approvals||[]).some(x=>x.by===user.name);
+    return (<Card key={a.id} style={{marginBottom:10,padding:0,overflow:"hidden",borderLeft:"4px solid "+col}}>
+      <div style={{padding:"12px 16px"}}>
+        <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+          <span style={{fontSize:11,fontWeight:700,color:col,background:bg,borderRadius:10,padding:"2px 10px"}}>{c.state}</span>
+          {c.emergency && <span style={{fontSize:11,fontWeight:700,color:"#b91c1c",background:"#fef2f2",borderRadius:10,padding:"2px 10px"}}>Emergency</span>}
+          {c.riskScore!=null && <span style={{fontSize:11,color:"var(--text-3)"}}>risk {c.riskScore} · {c.riskBand}</span>}
+          <span style={{marginLeft:"auto",fontSize:11.5,color:"var(--text-3)"}}>{c.plannedDate||a.date}{c.window?" · "+c.window:""}</span>
+        </div>
+        <div style={{fontSize:14,fontWeight:700,marginTop:6}}>{a.name} <span style={{fontWeight:400,color:"var(--text-4)",fontSize:12}}>· {a.team}</span></div>
+        <div style={{fontSize:12,color:"var(--text-3)",marginTop:3}}>Requested by {c.requestedBy} · approvals {cabCount(c)}/{c.required} · approvers: {(c.approvers||[]).map(n=>{ const d=(c.approvals||[]).find(x=>x.by===n); return n+(d?(d.decision==="approved"?" ✓":" ✗"):" …"); }).join(", ")}</div>
+        <button onClick={()=>setOpen(o=>({...o,[a.id]:!o[a.id]}))} style={{marginTop:6,border:"none",background:"none",color:"var(--brand)",fontSize:12,cursor:"pointer",padding:0}}>{imOpen?"Hide details ▾":"Show details ▸"}</button>
+        {imOpen && <div style={{fontSize:12.5,marginTop:6,display:"grid",gap:4}}>
+          {c.impact && <div><strong>Impact:</strong> {c.impact}</div>}{c.test && <div><strong>Test plan:</strong> {c.test}</div>}<div><strong>Rollback:</strong> {c.rollback}</div>{c.reason && <div><strong>Emergency reason:</strong> {c.reason}</div>}
+          {(c.approvals||[]).map((x,i)=><div key={i} style={{color:"var(--text-3)"}}>{x.decision==="approved"?"✓ Approved":"✗ Rejected"} by {x.by} on {new Date(x.at).toLocaleDateString()}{x.comment?": "+x.comment:""}</div>)}
+          {c.outcome && <div><strong>Outcome:</strong> {c.outcome}{c.outcomeNote?" · "+c.outcomeNote:""}</div>}
+        </div>}
+      </div>
+      {(canDecide || c.state==="Approved" || (c.state==="Pending approval" && (c.requestedBy===user.name||isAdmin))) && <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",padding:"8px 16px",borderTop:"1px solid var(--surface-3)",background:"var(--surface-2)"}}>
+        {canDecide && <>
+          <input value={dec[a.id]||""} onChange={e=>setDec(d=>({...d,[a.id]:e.target.value}))} placeholder="Comment (required to reject)" style={{...inp,flex:"1 1 220px",width:"auto"}}/>
+          <Btn sm onClick={()=>upd(a.id, x=>cabDecide(x,user,"approved",dec[a.id]), "Approved")}>Approve</Btn>
+          <Btn sm v="sec" onClick={()=>{ if(!(dec[a.id]||"").trim()) { toast("Add a comment to reject","err"); return; } upd(a.id, x=>cabDecide(x,user,"rejected",dec[a.id]), "Rejected"); }}>Reject</Btn></>}
+        {c.state==="Approved" && <>
+          <select value={outcome[a.id]||""} onChange={e=>setOutcome(o=>({...o,[a.id]:e.target.value}))} style={{...inp,width:"auto"}}><option value="">Outcome…</option><option>Successful</option><option>Failed</option><option>Rolled back</option></select>
+          <Btn sm onClick={()=>{ if(!outcome[a.id]) { toast("Choose the outcome","err"); return; } upd(a.id, x=>({...x, cab:{...x.cab, state:"Implemented", outcome:outcome[a.id], implementedBy:user.name, implementedAt:new Date().toISOString()}}), "Marked implemented"); }}>Mark implemented</Btn></>}
+        {c.state==="Pending approval" && (c.requestedBy===user.name||isAdmin) && <Btn sm v="sec" onClick={()=>upd(a.id, x=>({...x, cab:{...x.cab, state:"Withdrawn"}}), "Request withdrawn")}>Withdraw</Btn>}
+      </div>}
+    </Card>); };
+  return (<div data-testid="cab-page">
+    <PageHero icon="✅" title="Change Approvals" subtitle="Request, review and approve changes before work starts · every decision is recorded in the audit log"/>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:12,margin:"16px 0"}}>
+      <Card><div style={{fontSize:11,color:"var(--text-4)"}}>Waiting for you</div><div style={{fontSize:26,fontWeight:800,color:mine.length?"#c2410c":"#16a34a"}}>{mine.length}</div></Card>
+      <Card><div style={{fontSize:11,color:"var(--text-4)"}}>Pending approval</div><div style={{fontSize:26,fontWeight:800}}>{pending.length}</div></Card>
+      <Card><div style={{fontSize:11,color:"var(--text-4)"}}>Approved, not yet done</div><div style={{fontSize:26,fontWeight:800}}>{tracked.filter(a=>a.cab.state==="Approved").length}</div></Card>
+      <Card><div style={{fontSize:11,color:"var(--text-4)"}}>Change success rate</div><div style={{fontSize:26,fontWeight:800}}>{done.length?Math.round(okImpl/done.length*100)+"%":"-"}</div><div style={{fontSize:11,color:"var(--text-3)"}}>{done.length} implemented</div></Card>
+    </div>
+    <div style={{display:"flex",borderBottom:"2px solid var(--border)",marginBottom:14,overflowX:"auto"}}><TabB id="mine" label={"Waiting for me ("+mine.length+")"}/><TabB id="all" label={"All requests ("+tracked.length+")"}/><TabB id="new" label="Request approval"/></div>
+    {tab==="mine" && (mine.length? mine.map(Card1) : <Card style={{textAlign:"center",padding:30,fontSize:13}}>Nothing is waiting for your approval.</Card>)}
+    {tab==="all" && (tracked.length? [...tracked].sort((a,b)=>String(b.cab.requestedAt||"").localeCompare(String(a.cab.requestedAt||""))).map(Card1) : <Card style={{textAlign:"center",padding:30,fontSize:13}}>No approval requests yet. Use "Request approval" for an active Change.</Card>)}
+    {tab==="new" && (<div data-testid="cab-form"><Card>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:12}}>
+        <label style={{fontSize:12,fontWeight:600}}>Change<select aria-label="Change" value={req.actId} onChange={e=>pick(e.target.value)} style={{...inp,marginTop:4}}><option value="">Choose an active Change…</option>{eligible.map(a=><option key={a.id} value={a.id}>{a.name} ({a.team})</option>)}</select></label>
+        <label style={{fontSize:12,fontWeight:600}}>Planned date<input type="date" value={req.plannedDate} onChange={e=>setReq({...req,plannedDate:e.target.value})} style={{...inp,marginTop:4}}/></label>
+        <label style={{fontSize:12,fontWeight:600}}>Change window<input value={req.window} onChange={e=>setReq({...req,window:e.target.value})} placeholder="e.g. Sat 22:00 to 02:00" style={{...inp,marginTop:4}}/></label>
+        <label style={{fontSize:12,fontWeight:600,gridColumn:"1/-1"}}>Impact (who or what is affected)<textarea value={req.impact} onChange={e=>setReq({...req,impact:e.target.value})} rows={2} style={{...inp,marginTop:4,resize:"vertical"}}/></label>
+        <label style={{fontSize:12,fontWeight:600}}>Test plan<textarea value={req.test} onChange={e=>setReq({...req,test:e.target.value})} rows={2} style={{...inp,marginTop:4,resize:"vertical"}}/></label>
+        <label style={{fontSize:12,fontWeight:600}}>Rollback plan (required)<textarea value={req.rollback} onChange={e=>setReq({...req,rollback:e.target.value})} rows={2} style={{...inp,marginTop:4,resize:"vertical"}}/></label>
+      </div>
+      <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12.5,margin:"12px 0 6px"}}><input type="checkbox" checked={req.emergency} onChange={e=>setReq({...req,emergency:e.target.checked})}/> Emergency change (needs one approval and a reason)</label>
+      {req.emergency && <input value={req.reason} onChange={e=>setReq({...req,reason:e.target.value})} placeholder="Why can this not wait for the normal process?" style={{...inp,marginBottom:8}}/>}
+      <div style={{fontSize:12,fontWeight:600,margin:"8px 0 6px"}}>Approvers {req.actId && <span style={{fontWeight:400,color:"var(--text-3)"}}>· {need} needed{r0?" (risk "+r0.score+" "+r0.band+")":""}</span>}</div>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>{approvers.map(u=>{ const on=req.approvers.includes(u.name); return <button key={u.id} type="button" onClick={()=>setReq(r=>({...r,approvers:on?r.approvers.filter(n=>n!==u.name):[...r.approvers,u.name]}))} style={{fontSize:12,padding:"4px 11px",borderRadius:14,border:"1px solid "+(on?"var(--brand)":"var(--border-2)"),background:on?"var(--brand-light)":"var(--surface)",color:on?"var(--brand)":"var(--text-2)",cursor:"pointer"}}>{u.name} <span style={{color:"var(--text-4)"}}>{u.role==="admin"?"admin":u.team}</span></button>; })}</div>
+      <Btn onClick={submit}>Submit for approval</Btn>
+      <div style={{fontSize:11.5,color:"var(--text-4)",marginTop:8}}>Rule: changes with risk 60 or more need two approvals; others need one. You cannot approve your own request. Any rejection stops the request.</div>
+    </Card></div>)}
+  </div>);
+};
+
+// ===== Custom report builder: real data, generated on demand =====
+const REPORT_DEFS = {
+  time_logs: {label:"Time logs", groups:{team:"Team",member:"Member",cat:"Work category",type:"Activity type",nature:"Reactive / proactive",workNature:"Work nature",priority:"Priority",activity:"Activity",month:"Month"},
+    metrics:{hours:"Hours logged",entries:"Number of entries",cost:"Effort cost ($)",avg:"Average hours per entry"}},
+  activities: {label:"Activities", groups:{team:"Team",type:"Activity type",status:"Status",priority:"Priority",cat:"Work category",complexity:"Complexity",taskSize:"Task size",level:"Level"},
+    metrics:{count:"Number of activities",est:"Estimated hours",logged:"Hours logged (all time)",over:"Activities over estimate"}},
+  incidents: {label:"Major incidents", groups:{severity:"Severity",status:"Status",team:"Team",month:"Month",service:"Service"},
+    metrics:{count:"Number of incidents",hours:"Hours to resolve (total)",avgh:"Average hours to resolve",cost:"Effort cost ($)",breached:"Resolution target missed"}},
+  members: {label:"Members", groups:{team:"Team",level:"Engineer level",role:"Role",member:"Member"},
+    metrics:{hours:"Hours logged",util:"Utilisation % (of 160h a month)",cost:"Effort cost ($)",entries:"Number of entries"}},
+};
+const REPORT_RANGES = {latest:"Latest month with data","3":"Last 3 months","6":"Last 6 months","12":"Last 12 months",all:"All time",custom:"Custom dates"};
+const DEFAULT_RCFG = {dataset:"time_logs", group:"team", metric:"hours", team:"All", range:"latest", from:"", to:"", chart:"bar", top:10};
+
+function reportRange(cfg, logs, mis) {
+  const ms = [...new Set([...logs.map(l=>(l.date||"").slice(0,7)), ...mis.map(m=>(m.startedAt||m.date||"").slice(0,7))].filter(Boolean))].sort();
+  const last = ms[ms.length-1] || new Date().toISOString().slice(0,7);
+  const back = n => { const [y,m] = last.split("-").map(Number); const d = new Date(Date.UTC(y, m-1-(n-1), 1)); return d.toISOString().slice(0,7); };
+  if(cfg.range==="custom") return {from:cfg.from||"0000-00-00", to:cfg.to||"9999-12-31", months:1};
+  if(cfg.range==="all") return {from:"0000-00-00", to:"9999-12-31", months:Math.max(1, ms.length)};
+  const n = cfg.range==="latest" ? 1 : +cfg.range;
+  return {from:back(n)+"-01", to:last+"-31", months:n};
+}
+function runReport(cfg, data) {
+  const {logs, acts, mis, users, slaTargets, scopeTeam} = data;
+  const def = REPORT_DEFS[cfg.dataset]; if(!def) throw new Error("Unknown report type");
+  if(!def.groups[cfg.group]) throw new Error("Cannot group "+def.label.toLowerCase()+" by that field");
+  if(!def.metrics[cfg.metric]) throw new Error("That measure is not available for "+def.label.toLowerCase());
+  const team = scopeTeam || (cfg.team && cfg.team!=="All" ? cfg.team : "");
+  const rg = reportRange(cfg, logs, mis);
+  const inR = d => { const x = String(d||"").slice(0,10); return x >= rg.from.slice(0,10) && x <= rg.to.slice(0,10); };
+  const rate = {}; users.forEach(u=>{ rate[u.id]=u.costPerHour||0; });
+  const userBy = {}; users.forEach(u=>{ userBy[u.id]=u; });
+  const L = logs.filter(l=>inR(l.date) && (!team || l.team===team));
+  const g = {};  const slot = k => g[k]||(g[k]={n:0,s:0,s2:0});
+  const add = (k, a=1, b=0, c=0) => { const o=slot(k||"(none)"); o.n+=a; o.s+=b; o.s2+=c; };
+  const logsByAct = {}; logs.forEach(l=>{ logsByAct[l.actId]=(logsByAct[l.actId]||0)+l.mins; });
+  const costByAct = {}; logs.forEach(l=>{ costByAct[l.actId]=(costByAct[l.actId]||0)+l.mins/60*(rate[l.userId]||0); });
+  let finish = (o) => o.s;
+  if(cfg.dataset==="time_logs") {
+    const key = l => cfg.group==="month" ? (l.date||"").slice(0,7) : l[cfg.group];
+    L.forEach(l=>{ const h=l.mins/60; add(key(l), 1, cfg.metric==="cost" ? h*(rate[l.userId]||0) : h); });
+    finish = o => cfg.metric==="entries" ? o.n : cfg.metric==="avg" ? (o.n?o.s/o.n:0) : o.s;
+  } else if(cfg.dataset==="activities") {
+    acts.filter(a=>(!team||a.team===team) && (cfg.range==="all" || inR(a.date))).forEach(a=>{
+      const h=(logsByAct[a.id]||0)/60, est=(a.estMins||0)/60;
+      add(a[cfg.group], 1, cfg.metric==="est"?est : cfg.metric==="logged"?h : cfg.metric==="over"?((est>0&&h>est*1.1)?1:0) : 0); });
+    finish = o => cfg.metric==="count" ? o.n : o.s;
+  } else if(cfg.dataset==="incidents") {
+    mis.filter(m=>inR(m.startedAt||m.date) && (!team || m.team===team || (m.teamsInvolved||[]).includes(team))).forEach(m=>{
+      const dur = (m.startedAt&&m.resolvedAt)?(new Date(m.resolvedAt)-new Date(m.startedAt))/3600000:null;
+      const keys = cfg.group==="month" ? [(m.startedAt||m.date||"").slice(0,7)] : cfg.group==="team" ? ((m.teamsInvolved&&m.teamsInvolved.length)?m.teamsInvolved:[m.team]) :
+        cfg.group==="service" ? (String(m.impactedServices||"").split(/[,;]/).map(x=>x.trim()).filter(Boolean).length?String(m.impactedServices).split(/[,;]/).map(x=>x.trim()).filter(Boolean):["(none)"]) : [m[cfg.group]];
+      const sl = slaInfo(m, slaTargets||DEFAULT_SLA, Date.now());
+      keys.forEach(k=>add(k, 1, cfg.metric==="hours"||cfg.metric==="avgh" ? (dur||0) : cfg.metric==="cost" ? (costByAct[m.id]||0)/keys.length : cfg.metric==="breached" ? ((sl.state==="missed"||sl.state==="breached")?1:0) : 0, dur===null?0:1));
+    });
+    finish = o => cfg.metric==="count" ? o.n : cfg.metric==="avgh" ? (o.s2?o.s/o.s2:0) : o.s;
+  } else if(cfg.dataset==="members") {
+    const per = {}; L.forEach(l=>{ const p=per[l.userId]||(per[l.userId]={mins:0,cost:0,n:0}); p.mins+=l.mins; p.cost+=l.mins/60*(rate[l.userId]||0); p.n++; });
+    users.filter(u=>u.team && u.status!=="Inactive" && (!team||u.team===team)).forEach(u=>{ const p=per[u.id]||{mins:0,cost:0,n:0};
+      const k = cfg.group==="member" ? u.name : cfg.group==="level" ? (u.engineerLevel||"(none)") : u[cfg.group];
+      add(k, 1, cfg.metric==="hours"?p.mins/60 : cfg.metric==="cost"?p.cost : cfg.metric==="entries"?p.n : p.mins/60, 0); });
+    finish = o => cfg.metric==="util" ? (o.n ? o.s/(o.n*160*rg.months)*100 : 0) : o.s;
+  }
+  let rows = Object.keys(g).map(k=>({label:String(k), value:finish(g[k]), n:g[k].n}));
+  if(cfg.group==="month") rows.sort((a,b)=>a.label<b.label?-1:1); else rows.sort((a,b)=>b.value-a.value);
+  const total = rows.reduce((s,r)=>s+r.value,0), all = rows.length;
+  const top = Math.max(3, Math.min(30, +cfg.top||10));
+  if(cfg.group!=="month" && rows.length>top) { const rest = rows.slice(top); rows = rows.slice(0,top).concat([{label:"Other ("+rest.length+")", value:rest.reduce((s,r)=>s+r.value,0), n:rest.reduce((s,r)=>s+r.n,0)}]); }
+  const isMoney = /cost/i.test(cfg.metric), isPct = cfg.metric==="util";
+  const avgLike = ["avg","avgh","util"].includes(cfg.metric);
+  return {rows, total: avgLike ? null : total, groups:all, isMoney, isPct, title:def.metrics[cfg.metric]+" by "+def.groups[cfg.group].toLowerCase(), scope: team||"All teams",
+    period: cfg.range==="all" ? "All time" : (rg.from.slice(0,7)+" to "+rg.to.slice(0,7)), note: cfg.dataset==="activities" ? "Date range applies to when the activity was created; logged hours are all-time." : ""};
+}
+const fmtRep = (v, r) => r.isMoney ? "$"+Math.round(v).toLocaleString() : r.isPct ? Math.round(v)+"%" : (Math.round(v*10)/10).toLocaleString();
+
+const ReportChart = ({res, type}) => {
+  const rows = res.rows.filter(r=>r.value>0 || type==="line"); const mx = Math.max(1e-9, ...rows.map(r=>r.value));
+  const pal = ["#2563eb","#16a34a","#d97706","#dc2626","#7c3aed","#0891b2","#db2777","#65a30d","#ea580c","#475569","#0d9488","#9333ea"];
+  if(!rows.length) return <div style={{padding:30,textAlign:"center",fontSize:13,color:"var(--text-3)"}}>No data for these settings. Try a wider date range or another team.</div>;
+  if(type==="hbar") return (<div>{rows.map((r,i)=>(<div key={r.label} style={{display:"grid",gridTemplateColumns:"minmax(90px,170px) 1fr 80px",gap:10,alignItems:"center",marginBottom:6,fontSize:12.5}}>
+    <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={r.label}>{r.label}</span>
+    <div style={{height:14,background:"var(--surface-3)",borderRadius:7,overflow:"hidden"}}><div style={{height:"100%",width:Math.max(1.5,r.value/mx*100)+"%",background:pal[i%pal.length]}}/></div>
+    <strong style={{textAlign:"right"}}>{fmtRep(r.value,res)}</strong></div>))}</div>);
+  if(type==="donut") { const tot = rows.reduce((s,r)=>s+r.value,0)||1; let a0=-Math.PI/2; const R=80, r0=48;
+    return (<div style={{display:"flex",gap:24,alignItems:"center",flexWrap:"wrap"}}>
+      <svg width="190" height="190" viewBox="-95 -95 190 190">{rows.map((r,i)=>{ const a1=a0+r.value/tot*2*Math.PI; const big=a1-a0>Math.PI?1:0; const p=[[R*Math.cos(a0),R*Math.sin(a0)],[R*Math.cos(a1),R*Math.sin(a1)],[r0*Math.cos(a1),r0*Math.sin(a1)],[r0*Math.cos(a0),r0*Math.sin(a0)]]; const d=rows.length===1?"":"M"+p[0]+" A"+R+" "+R+" 0 "+big+" 1 "+p[1]+" L"+p[2]+" A"+r0+" "+r0+" 0 "+big+" 0 "+p[3]+" Z"; a0=a1;
+        return rows.length===1 ? <circle key={i} r={(R+r0)/2} fill="none" stroke={pal[0]} strokeWidth={R-r0}/> : <path key={i} d={d} fill={pal[i%pal.length]}><title>{r.label}: {fmtRep(r.value,res)}</title></path>; })}</svg>
+      <div style={{fontSize:12.5}}>{rows.map((r,i)=>(<div key={r.label} style={{display:"flex",gap:8,alignItems:"center",marginBottom:4}}><span style={{width:10,height:10,borderRadius:2,background:pal[i%pal.length]}}/><span>{r.label}</span><strong>{fmtRep(r.value,res)}</strong><span style={{color:"var(--text-4)"}}>{Math.round(r.value/tot*100)}%</span></div>))}</div></div>); }
+  // vertical bar and line share one SVG
+  const W=Math.max(480, rows.length*64), H=220, pl=44, pb=52, pt=14, cw=(W-pl-10)/rows.length;
+  const y = v => pt + (H-pt-pb)*(1 - v/mx);
+  const pts = rows.map((r,i)=>[pl+cw*i+cw/2, y(r.value)]);
+  return (<div style={{overflowX:"auto"}}><svg width={W} height={H} style={{display:"block"}}>
+    {[0,.25,.5,.75,1].map(t=>(<g key={t}><line x1={pl} x2={W-10} y1={y(mx*t)} y2={y(mx*t)} stroke="var(--border)" strokeDasharray="3 3"/><text x={pl-6} y={y(mx*t)+4} textAnchor="end" fontSize="10" fill="var(--text-4)">{fmtRep(mx*t,res)}</text></g>))}
+    {type==="line" ? <><polyline fill="none" stroke="#2563eb" strokeWidth="2.5" points={pts.map(p=>p.join(",")).join(" ")}/>{pts.map((p,i)=><circle key={i} cx={p[0]} cy={p[1]} r="4" fill="#2563eb"><title>{rows[i].label}: {fmtRep(rows[i].value,res)}</title></circle>)}</>
+      : rows.map((r,i)=>(<rect key={i} x={pl+cw*i+cw*0.18} y={y(r.value)} width={cw*0.64} height={Math.max(1,H-pb-y(r.value))} rx="3" fill={pal[i%pal.length]}><title>{r.label}: {fmtRep(r.value,res)}</title></rect>))}
+    {rows.map((r,i)=>(<text key={i} x={pl+cw*i+cw/2} y={H-pb+14} textAnchor="middle" fontSize="10.5" fill="var(--text-2)" transform={rows.length>8?"rotate(-30 "+(pl+cw*i+cw/2)+" "+(H-pb+14)+")":""}>{r.label.length>14?r.label.slice(0,13)+"…":r.label}</text>))}
+  </svg></div>);
+};
+
+const REPORT_PRESETS = [
+  {id:"p1", name:"Hours by team (latest month)", cfg:{...DEFAULT_RCFG}},
+  {id:"p2", name:"Top contributors (6 months)", cfg:{...DEFAULT_RCFG, dataset:"members", group:"member", metric:"hours", range:"6", chart:"hbar", top:10}},
+  {id:"p3", name:"Reactive vs proactive", cfg:{...DEFAULT_RCFG, group:"nature", chart:"donut", range:"6"}},
+  {id:"p4", name:"Incidents by severity", cfg:{...DEFAULT_RCFG, dataset:"incidents", group:"severity", metric:"count", range:"all", chart:"donut"}},
+  {id:"p5", name:"Cost by work category", cfg:{...DEFAULT_RCFG, group:"cat", metric:"cost", range:"6", chart:"hbar"}},
+  {id:"p6", name:"Activities by status", cfg:{...DEFAULT_RCFG, dataset:"activities", group:"status", metric:"count", range:"all", chart:"donut"}},
+  {id:"p7", name:"Monthly hours trend", cfg:{...DEFAULT_RCFG, group:"month", range:"12", chart:"line"}},
+];
+
+const CustomReportsView = ({logs, acts, mis, users, teams, isAdmin, user, slaTargets, toast}) => {
+  const [cfg,setCfg] = useState(DEFAULT_RCFG); const [res,setRes] = useState(null); const [err,setErr] = useState(""); const [name,setName] = useState("");
+  const [saved,setSaved] = useState(()=>{ try { return JSON.parse(localStorage.getItem("isms_custom_reports")||"[]"); } catch(e) { return []; } });
+  const scopeTeam = isAdmin ? "" : (user.team||"");
+  const data = {logs, acts, mis, users, slaTargets, scopeTeam};
+  const gen = (c) => { try { setRes(runReport(c, data)); setErr(""); } catch(e) { setRes(null); setErr(e.message||String(e)); } };
+  React.useEffect(()=>{ gen(cfg); }, []);
+  const def = REPORT_DEFS[cfg.dataset];
+  const set = (p) => { const n = {...cfg, ...p};
+    if(p.dataset) { const d = REPORT_DEFS[p.dataset]; n.group = Object.keys(d.groups)[0]; n.metric = Object.keys(d.metrics)[0]; }
+    setCfg(n); };
+  const persist = a => { setSaved(a); try { localStorage.setItem("isms_custom_reports", JSON.stringify(a)); } catch(e) {} };
+  const csv = () => { if(!res) return; const q = v => '"'+String(v).replace(/"/g,'""')+'"';
+    const lines = [q(res.title)+","+q(res.scope+" · "+res.period), "Group,Value,Records"].concat(res.rows.map(r=>[q(r.label),Math.round(r.value*100)/100,r.n].join(","))); if(res.total!==null) lines.push(["Total",Math.round(res.total*100)/100,""].join(","));
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([lines.join("\n")],{type:"text/csv"})); a.download = "isms_report.csv"; a.click(); toast("Report exported"); };
+  const print = () => { if(!res) return; const w = window.open("","_blank"); if(!w) { toast("Allow pop-ups to print","err"); return; }
+    const esc = s => String(s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+    w.document.write("<html><head><title>"+esc(res.title)+"</title><style>body{font-family:Arial,sans-serif;padding:24px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:6px 10px;text-align:left}th{background:#f3f4f6}</style></head><body><h2>"+esc(res.title)+"</h2><p>"+esc(res.scope)+" · "+esc(res.period)+"</p><table><tr><th>Group</th><th>Value</th><th>Records</th></tr>"+res.rows.map(r=>"<tr><td>"+esc(r.label)+"</td><td>"+esc(fmtRep(r.value,res))+"</td><td>"+r.n+"</td></tr>").join("")+(res.total!==null?"<tr><th>Total</th><th>"+esc(fmtRep(res.total,res))+"</th><th></th></tr>":"")+"</table></body></html>");
+    w.document.close(); w.focus(); w.print(); };
+  const save = () => { if(!name.trim()) { toast("Name the report first","err"); return; } persist([...saved.filter(s=>s.name!==name.trim()), {id:"S"+Date.now(), name:name.trim(), cfg}]); setName(""); toast("Report saved"); };
+  const load = c => { setCfg(c); gen(c); };
+  const lbl = {fontSize:11,fontWeight:600,color:"var(--text-3)",marginBottom:4};
+  const Pill = ({on,children,onClick,del}) => <span style={{display:"inline-flex",alignItems:"center",gap:4,padding:"4px 11px",borderRadius:14,border:"1.5px solid var(--border-2)",background:"var(--surface)",fontSize:12,fontWeight:600}}><span onClick={onClick} style={{cursor:"pointer"}}>{children}</span>{del && <span onClick={del} title="Delete" style={{cursor:"pointer",color:"var(--text-4)"}}>✕</span>}</span>;
+  return (<div data-testid="custom-reports">
+    <PageHero icon="📊" title="Custom Reports" subtitle="Pick what to measure, how to group it and over which period, then generate the report from live data"/>
+    <Card style={{margin:"16px 0"}}>
+      <div style={{fontWeight:700,fontSize:13,marginBottom:10}}>📂 Saved and ready-made reports</div>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        {REPORT_PRESETS.map(p=><Pill key={p.id} onClick={()=>load({...p.cfg, team:"All"})}>{p.name}</Pill>)}
+        {saved.map(p=><Pill key={p.id} onClick={()=>load(p.cfg)} del={()=>persist(saved.filter(s=>s.id!==p.id))}>⭐ {p.name}</Pill>)}
+      </div>
+    </Card>
+    <Card style={{marginBottom:16}}>
+      <div style={{fontWeight:700,fontSize:13,marginBottom:12}}>⚙️ Report builder</div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:12,marginBottom:14}}>
+        <div><div style={lbl}>Report on</div><select aria-label="Report on" style={sS} value={cfg.dataset} onChange={e=>set({dataset:e.target.value})}>{Object.keys(REPORT_DEFS).map(k=><option key={k} value={k}>{REPORT_DEFS[k].label}</option>)}</select></div>
+        <div><div style={lbl}>Measure</div><select aria-label="Measure" style={sS} value={cfg.metric} onChange={e=>set({metric:e.target.value})}>{Object.keys(def.metrics).map(k=><option key={k} value={k}>{def.metrics[k]}</option>)}</select></div>
+        <div><div style={lbl}>Group by</div><select aria-label="Group by" style={sS} value={cfg.group} onChange={e=>set({group:e.target.value})}>{Object.keys(def.groups).map(k=><option key={k} value={k}>{def.groups[k]}</option>)}</select></div>
+        <div><div style={lbl}>Team</div><select aria-label="Team" style={sS} value={isAdmin?cfg.team:(user.team||"All")} disabled={!isAdmin} onChange={e=>set({team:e.target.value})}>{isAdmin?["All",...teams.map(t=>t.name)].map(t=><option key={t}>{t}</option>):<option>{user.team||"All"}</option>}</select></div>
+        <div><div style={lbl}>Period</div><select aria-label="Period" style={sS} value={cfg.range} onChange={e=>set({range:e.target.value})}>{Object.keys(REPORT_RANGES).map(k=><option key={k} value={k}>{REPORT_RANGES[k]}</option>)}</select></div>
+        {cfg.range==="custom" && <><div><div style={lbl}>From</div><input type="date" aria-label="From" style={sS} value={cfg.from} onChange={e=>set({from:e.target.value})}/></div><div><div style={lbl}>To</div><input type="date" aria-label="To" style={sS} value={cfg.to} onChange={e=>set({to:e.target.value})}/></div></>}
+        <div><div style={lbl}>Chart</div><select aria-label="Chart" style={sS} value={cfg.chart} onChange={e=>set({chart:e.target.value})}><option value="bar">Bar chart</option><option value="hbar">Horizontal bars</option><option value="line">Line chart</option><option value="donut">Doughnut</option></select></div>
+        <div><div style={lbl}>Show top</div><select aria-label="Show top" style={sS} value={cfg.top} onChange={e=>set({top:+e.target.value})}>{[5,8,10,15,20].map(n=><option key={n} value={n}>{n}</option>)}</select></div>
+      </div>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+        <Btn onClick={()=>gen(cfg)}>▶ Generate report</Btn>
+        <input value={name} onChange={e=>setName(e.target.value)} placeholder="Name to save this setup" style={{...sS,width:200}}/><Btn sm v="sec" onClick={save}>Save</Btn>
+      </div>
+    </Card>
+    {err && <Card style={{marginBottom:16,borderLeft:"4px solid #dc2626"}}><div style={{fontSize:13,color:"#b91c1c"}}>Could not generate the report: {err}</div></Card>}
+    {res && <div data-testid="report-result"><Card>
+      <div style={{display:"flex",gap:10,alignItems:"flex-start",flexWrap:"wrap",marginBottom:12}}>
+        <div style={{flex:1,minWidth:220}}><div style={{fontWeight:800,fontSize:16}}>{res.title}</div><div style={{fontSize:12,color:"var(--text-3)"}}>{res.scope} · {res.period} · {res.groups} group{res.groups===1?"":"s"}{res.total!==null?" · total "+fmtRep(res.total,res):""}</div>{res.note && <div style={{fontSize:11,color:"var(--text-4)",marginTop:2}}>{res.note}</div>}</div>
+        <Btn sm v="sec" onClick={csv}>⬇ Export CSV</Btn><Btn sm v="sec" onClick={print}>🖨 Print</Btn>
+      </div>
+      <ReportChart res={res} type={cfg.chart}/>
+      <div style={{marginTop:16,border:"1px solid var(--border)",borderRadius:8,overflow:"hidden"}}>
+        <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) 110px 90px 80px",gap:10,padding:"8px 12px",background:"var(--surface-2)",fontSize:11,fontWeight:700,color:"var(--text-3)",textTransform:"uppercase"}}><span>{def.groups[cfg.group]}</span><span style={{textAlign:"right"}}>Value</span><span style={{textAlign:"right"}}>Share</span><span style={{textAlign:"right"}}>Records</span></div>
+        {res.rows.map(r=>(<div key={r.label} style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) 110px 90px 80px",gap:10,padding:"7px 12px",borderTop:"1px solid var(--surface-3)",fontSize:12.5}}><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.label}</span><strong style={{textAlign:"right"}}>{fmtRep(r.value,res)}</strong><span style={{textAlign:"right",color:"var(--text-3)"}}>{res.total?Math.round(r.value/res.total*100)+"%":"-"}</span><span style={{textAlign:"right",color:"var(--text-3)"}}>{r.n}</span></div>))}
+        {res.rows.length===0 && <div style={{padding:16,textAlign:"center",fontSize:13,color:"var(--text-3)"}}>No records match.</div>}
+      </div>
+    </Card></div>}
   </div>);
 };
 
@@ -6160,7 +6435,7 @@ function CloudLogin({sb, onSignedIn, startMode, note}) {
         if(pw.length < 8) { setErr("Password must be at least 8 characters"); setBusy(false); return; }
         if(pw !== pw2)    { setErr("Passwords do not match"); setBusy(false); return; }
         if(mode==="up") {
-          const r = await sb.auth.signUp({email:em, password:pw});
+          const r = await sb.auth.signUp({email:em, password:pw, options:{emailRedirectTo:window.location.origin}});
           if(r.error) throw r.error;
           if(r.data && r.data.session) await onSignedIn();
           else setInfo("Account created. Check your email to confirm it, then sign in.");
@@ -7651,7 +7926,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       mgrSec:"Reports & Analytics",
       role:"mgr", guideGroup:"📈 Reports & Analytics", guideColor:"#d97706", guideBg:"#fffbeb",
       desc:"Configure report dimensions, date ranges, team/member filters, and chart types to answer specific management questions on demand.",
-      benefits:["Answers ad-hoc executive questions without waiting for BI or IT teams","Tailored analysis without any coding or data engineering","Enables what-if comparisons across teams, time periods, or work types"],
+      benefits:["Pick the data, measure, grouping, team and period, then generate a chart and table from live data","Export to CSV, print, and save your own report setups","Answers ad-hoc executive questions without waiting for BI or IT teams","Tailored analysis without any coding or data engineering","Enables what-if comparisons across teams, time periods, or work types"],
     },
     {
       id:"planning", icon:"📅", label:"Capacity Planning",
@@ -7747,6 +8022,13 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       role:"all", guideGroup:"📋 Activity & Time Management", guideColor:"#059669", guideBg:"#f0fdf4",
       desc:"Personal weekly view of hours logged per day against an 8-hour day, reactive versus planned share, where the time went, missing days and follow-up actions that are overdue.",
       benefits:["Shows gaps and overload while there is still time to fix the week","Makes the reactive share visible so interruptions can be discussed with evidence","Collects your overdue incident follow-ups in one place"],
+    },
+    {
+      id:"cab", icon:"✅", label:"Change Approvals",
+      mgrSec:"Operations",
+      role:"mgr", guideGroup:"📋 Activity & Time Management", guideColor:"#059669", guideBg:"#f0fdf4",
+      desc:"Change advisory approval workflow: request approval for a Change with impact, test and rollback plans, route it to approvers, record approve or reject decisions with comments, and mark the outcome after implementation.",
+      benefits:["Stops risky changes starting without review: high-risk changes need two approvals","Every request, decision and outcome is kept and appears in the audit log","Tracks change success rate so approval rules can be tuned"],
     },
     {
       id:"services", icon:"🧩", label:"Service Catalogue",
@@ -10845,80 +11127,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
   };
 
   // == CUSTOM REPORTS =======================
-  const PageCustomReports = () => (
-    <div>
-      <PageHero icon="📊" title="Custom Reports" subtitle="Build and save your own views — filter by team, date, work type and more"/>
-      <div style={{fontSize:12,color:"var(--text-3)",marginBottom:20}}>Build and save tailored reports</div>
-      <Card style={{marginBottom:16}}>
-        <div style={{fontWeight:700,fontSize:13,marginBottom:12}}>📂 Saved Reports</div>
-        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          {["🔒 Security Monthly","☁️ Cloud Utilization","🚨 Incident Breakdown","🏆 Top Contributors","⏰ Overdue Activities","🏖 Leave Impact Q1"].map(r=>(
-            <button key={r} onClick={()=>{goPage("reports");showToast(`Opening: ${r}`,"ok");}} style={{padding:"5px 12px",borderRadius:"var(--radius-xl)",fontSize:12,fontWeight:600,border:"1.5px solid var(--border-2)",background:"var(--surface)",cursor:"pointer",color:"var(--text-2)"}}>{r}</button>
-          ))}
-        </div>
-      </Card>
-      <div style={{background:"var(--surface-2)",border:"1px solid var(--border)",borderRadius:12,padding:18,marginBottom:16}}>
-        <div style={{fontWeight:700,fontSize:13,marginBottom:12}}>⚙️ Report Builder</div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:14}}>
-          {[["Report Type",["Team Utilization","Member Hours","Activity Summary","Incident Analysis","Category Breakdown","Project Progress"]],
-            ["Filter: Team",isAdmin?["All Teams",...teams.map(t=>t.name)]:[user.team||"All"]],
-            ["Group By",["Team","Member","Category","Activity Type","Status","Priority"]],
-            ["Chart Type",["Bar Chart","Horizontal Bar","Line Chart","Doughnut","Pie Chart"]],
-            ["Date Range",[currentMonthLabel(),"Q1 2025","Last 3 Months","Last 6 Months"]],
-          ].map(([label,opts])=>(
-            <div key={label}>
-              <div style={{fontSize:11,fontWeight:600,color:"var(--text-3)",marginBottom:4}}>{label}</div>
-              <select style={sS}>{opts.map(o=><option key={o}>{o}</option>)}</select>
-            </div>
-          ))}
-        </div>
-        <div style={{fontSize:11,fontWeight:700,color:"var(--text-3)",marginBottom:8}}>METRICS:</div>
-        <div style={{display:"flex",gap:7,flexWrap:"wrap",marginBottom:14}}>
-          {["Hours Logged","Utilization %","Est Time","Activity Count","Leave Hours","Net Capacity","Completion %","Suspended Count"].map((chip,i)=>(
-            <button key={chip} style={{padding:"4px 11px",borderRadius:"var(--radius-xl)",fontSize:12,fontWeight:600,border:`1.5px solid ${i<2?"var(--brand)":"var(--border-2)"}`,background:i<2?"var(--brand)":"#fff",color:i<2?"#fff":"var(--text-3)",cursor:"pointer"}}>{chip}</button>
-          ))}
-        </div>
-        <Btn onClick={()=>{
-          // Navigate to the relevant pre-built report tab
-          const sel = document.querySelector && document.querySelector("[data-report-type]");
-          goPage("reports");
-          setTimeout(()=>setReportTab("util"),50);
-          showToast("Opening Reports — select a tab for detailed data");
-        }}>▶ Open Full Reports -></Btn>
-      </div>
-      <Card>
-        <div style={{fontWeight:800,fontSize:15,marginBottom:4}}>Team Utilization Preview</div>
-        <div style={{fontSize:12,color:"var(--text-3)",marginBottom:16}}>All Teams · {currentMonthLabel()}</div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
-          <div>
-            {LIVE_CAPACITY.map(c=>{
-              const net=c.availMins-c.vacMins, pct=Math.round(c.utilMins/net*100);
-              return (
-                <div key={c.team} style={{marginBottom:11}}>
-                  <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:2}}>
-                    <span style={{fontWeight:600}}>{c.team}</span>
-                    <span style={{color:uCol(pct),fontWeight:700}}>{pct}%</span>
-                  </div>
-                  <Bar pct={pct} color={tCol(c.team)}/>
-                </div>
-              );
-            })}
-          </div>
-          <div>
-            {[{t:"alert",icon:"🔴",title:"Security 91% — Over-utilized",desc:"Consider redistributing 2 activities"},
-              {t:"warn",icon:"🟡",title:"Cloud 88% — Near capacity",desc:"Review Q2 project intake"},
-              {t:"good",icon:"🟢",title:"Storage 65% — Has headroom",desc:"Can absorb 2–3 more activities"}
-            ].map(i=>(
-              <div key={i.title} style={{display:"flex",gap:9,padding:"10px 12px",borderRadius:"var(--radius-sm)",marginBottom:8,background:i.t==="alert"?"#fef2f2":i.t==="warn"?"#fffbeb":"#f0fdf4",border:`1px solid ${i.t==="alert"?"#fecaca":i.t==="warn"?"#fde68a":"#a7f3d0"}`}}>
-                <span style={{fontSize:16}}>{i.icon}</span>
-                <div><div style={{fontSize:12,fontWeight:700,marginBottom:2}}>{i.title}</div><div style={{fontSize:11,color:"var(--text-3)"}}>{i.desc}</div></div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </Card>
-    </div>
-  );
+  const PageCustomReports = () => <CustomReportsView logs={logs} acts={acts} mis={mis} users={allUsers} teams={teams} isAdmin={isAdmin} user={user} slaTargets={slaTargets} toast={showToast}/>;
 
   // == CAPACITY PLANNING ====================
   const PagePlanning = () => (
@@ -15339,6 +15548,19 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
         why:"Lean/Kanban: more than 5% of items blocked indicates a governance gap.",
         action:{label:"Review suspended", run:()=>goPage("activities")}});
 
+      // -- 2a. Change approvals (CAB) -----------------------------------------
+      const cabPending = sAct.filter(a=>a.cab && a.cab.state==="Pending approval");
+      const mineWait = cabPending.filter(a=>(a.cab.approvers||[]).includes(user.name) && !(a.cab.approvals||[]).some(x=>x.by===user.name));
+      if(mineWait.length) add({id:"cab-mine", domain:"Delivery", sev:"high", score:78+Math.min(mineWait.length,5),
+        title:mineWait.length+" change"+(mineWait.length>1?"s":"")+" waiting for your approval", detail:mineWait.slice(0,4).map(a=>a.name).join(", ")+(mineWait.length>4?" and more":""),
+        why:"Approvers who delay hold up planned work and push people to start changes without sign-off.", action:{label:"Review approvals", run:()=>goPage("cab")}});
+      cabPending.forEach(a=>{ const days = Math.floor((Date.now()-new Date(a.cab.requestedAt||Date.now()).getTime())/86400000);
+        if(days>=3) add({id:"cab-old-"+a.id, domain:"Delivery", sev:"medium", score:52+Math.min(days,10), title:a.name+" has waited "+days+" days for approval", detail:"Approvals "+((a.cab.approvals||[]).filter(x=>x.decision==="approved").length)+"/"+a.cab.required+" · requested by "+a.cab.requestedBy,
+          why:"A stalled approval is either a blocker to unblock or a change that should be withdrawn.", action:{label:"Open approvals", run:()=>goPage("cab")}}); });
+      sAct.filter(a=>a.cab && (a.cab.state==="Pending approval"||a.cab.state==="Rejected") && (loggedByAct[a.id]||0)>=60).forEach(a=>{
+        add({id:"cab-unauth-"+a.id, domain:"Delivery", sev:"high", score:80, title:"Work logged on a change that is "+a.cab.state.toLowerCase()+": "+a.name, detail:Math.round((loggedByAct[a.id]||0)/6)/10+"h logged · "+a.team,
+          why:"Starting a change before it is approved bypasses the review that protects the service.", action:{label:"Open approvals", run:()=>goPage("cab")}}); });
+
       // -- 2b. Anomalies and single-person skill cover -----------------------
       monthAnomalies(sLog, allUsers, anchorStr).slice(0,5).forEach(an=>{
         add({id:"anom-"+an.team+"-"+an.key+"-"+an.month, domain:"Efficiency", sev:Math.abs(an.z)>=3?"high":"medium", score:46+Math.min(Math.abs(an.z),5)*2,
@@ -17987,6 +18209,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     settings: PageSettings,
     action_center: PageActionCenter,
     my_week: PageMyWeek,
+    cab: ()=><CabPage acts={acts} setActs={setActs} users={allUsers} user={user} isAdmin={isAdmin} logs={logs} mis={mis} toast={showToast}/>,
     services: ()=><ServicesPage services={services} setServices={setServices} acts={acts} logs={logs} mis={mis} users={allUsers} teamNames={teams.map(t=>t.name)} canEdit={isMgrOrAdmin} toast={showToast}/>,
     audit_log: ()=><AuditPage cloud={cloud} toast={showToast}/>,
     prod_overview: PageProdOverview,
