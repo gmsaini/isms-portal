@@ -6381,7 +6381,7 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
   const [fSkill, setFSkill] = React.useState("");
   const [srch, setSrch] = React.useState("");
   const [newSkill, setNewSkill] = React.useState("");
-  const [prep, setPrep] = React.useState(false);
+  const [prep, setPrep] = React.useState(null);   // null | "camera" | {skill,stream,lm}
   const [busy, setBusy] = React.useState(false);
   const [up, setUp] = React.useState(null);           // {ok,bad}
   const [gen, setGen] = React.useState({skill:"", count:30, difficulty:"mixed", type:"mixed", items:[], busy:false});
@@ -6417,26 +6417,31 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
   const skills = cfg.skills;
   const mine = info ? info.attempts : [];
 
+  // Step 1 (after the terms): camera permission + model. Step 2 (a fresh click): full screen + start the timer.
+  const stopStream = r => { try { if(r && r.stream) r.stream.getTracks().forEach(t=>t.stop()); } catch(e) {} };
   const begin = async skill => {
     setTerms(null);
     if(!document.documentElement.requestFullscreen) { toast("This browser or device does not support full screen, so the test cannot be taken here. Use a desktop browser.","err"); return; }
-    try { await document.documentElement.requestFullscreen(); }
-    catch(e) { toast("Full screen was blocked. Allow full screen and try again.","err"); return; }
     let stream = null, lm = null;
-    const bail = (m) => { try{ if(stream) stream.getTracks().forEach(t=>t.stop()); }catch(x){} try{ if(document.fullscreenElement) document.exitFullscreen(); }catch(x){} toast(m,"err"); };
     if(cfg.proctorCamera!==false) {
-      if(!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) { bail("This device has no camera access, so the test cannot be taken here."); return; }
+      if(!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) { toast("This device has no camera access, so the test cannot be taken here.","err"); return; }
+      setPrep("camera");
       try { stream = await navigator.mediaDevices.getUserMedia({video:{width:640,height:480,facingMode:"user"}, audio:false}); }
-      catch(e) { bail("Camera access is required for this test. Allow the camera and try again."); return; }
-      setPrep(true);
+      catch(e) { setPrep(null); toast("Camera access is required for this test. Allow the camera and try again.","err"); return; }
       try { lm = await stLoadLandmarker(); } catch(e) { lm = null; }
-      setPrep(false);
     }
-    try {
-      const d = await callAiFn(cloud, {mode:"st_start", skill});
-      setRun({...d, skill, stream, lm});
-    } catch(e) { bail(e.message); load(); }
+    setPrep({skill, stream, lm});
   };
+  const goFull = async () => {
+    const r = prep; if(!r || !r.skill) return;
+    try { await document.documentElement.requestFullscreen(); }
+    catch(e) { toast("Full screen was blocked by the browser. Click the button again and allow full screen.","err"); return; }
+    try {
+      const d = await callAiFn(cloud, {mode:"st_start", skill:r.skill});
+      setRun({...d, skill:r.skill, stream:r.stream, lm:r.lm}); setPrep(null);
+    } catch(e) { stopStream(r); setPrep(null); try{ if(document.fullscreenElement) document.exitFullscreen(); }catch(x){} toast(e.message,"err"); load(); }
+  };
+  const cancelPrep = () => { stopStream(prep); setPrep(null); };
   const closeRun = () => { setRun(null); load(); };
 
   const addQuestions = async (items) => {
@@ -6659,7 +6664,15 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
         </Card>
       )}
 
-      {prep && <div style={{position:"fixed",inset:0,zIndex:99998,background:"var(--bg, #f6f7fb)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"var(--text-1)"}}>Preparing camera proctoring... the test starts in a moment.</div>}
+      {prep && <div style={{position:"fixed",inset:0,zIndex:99998,background:"var(--bg, #f6f7fb)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+        <div style={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:16,padding:"28px 32px",maxWidth:480,textAlign:"center"}}>
+          {prep==="camera" ? <div style={{fontWeight:700,color:"var(--text-1)"}}>Preparing camera proctoring... allow the camera if your browser asks.</div> : <>
+            <div style={{fontSize:36}}>✅</div>
+            <div style={{fontSize:18,fontWeight:800,color:"var(--text-1)",margin:"6px 0"}}>Ready to start the {prep.skill} test</div>
+            <div style={{fontSize:13,color:"var(--text-2)",lineHeight:1.6,marginBottom:16}}>{prep.stream ? (prep.lm ? "Camera is on and proctoring is ready." : "Camera is on, but face analysis could not load on this device, so the camera will be on but not analysed.") : "No camera is required."}<br/>Click below to go full screen. <b>The timer starts as soon as the test opens</b>, and leaving full screen ends the test.</div>
+            <div style={{display:"flex",gap:10,justifyContent:"center"}}><Btn v="sec" onClick={cancelPrep}>Cancel</Btn><Btn onClick={goFull}>Enter full screen and start</Btn></div>
+          </>}
+        </div></div>}
       {terms && <StTerms cfg={cfg} skill={terms} onCancel={()=>setTerms(null)} onAccept={()=>begin(terms)}/>}
       {run && <StRunner cloud={cloud} run={run} cfg={cfg} onClose={closeRun}/>}
     </div>
