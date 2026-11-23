@@ -5509,6 +5509,82 @@ const SkillsTab = ({logs, users, teams}) => {
     </Card></div>);
 };
 
+// ===== Stage 6: change calendar, runbook library, improvement matrix =====
+const ChangeCalendar = ({acts, logs, mis, users, anchorStr}) => {
+  const risk = useMemo(()=>{ const m={}; changeRiskRows(acts, logs, mis, users, anchorStr).forEach(r=>{ m[r.a.id]=r; }); return m; }, [acts, logs, mis, users, anchorStr]);
+  const dayMs = 86400000, t = d => new Date(d+"T00:00:00Z").getTime();
+  const lo = t(anchorStr)-7*dayMs, hi = t(anchorStr)+35*dayMs;
+  const all = acts.filter(a=>a.status==="Active" && a.type==="Change" && a.date).sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+  let rows = all.filter(a=>t(a.date)>=lo && t(a.date)<=hi);
+  const fallback = rows.length===0; if(fallback) rows = all.slice(-12);
+  const conflicts = a => {
+    const c = []; const d = t(a.date);
+    const same = all.filter(x=>x.id!==a.id && x.team===a.team && x.date===a.date); if(same.length) c.push("same day as "+same.length+" other "+a.team+" change"+(same.length>1?"s":""));
+    const inc = mis.filter(m=>(m.severity==="Sev1"||m.severity==="Sev2") && incTeams(m).has(a.team) && m.startedAt && Math.abs(t(String(m.startedAt).slice(0,10))-d)<=dayMs); if(inc.length) c.push("within a day of "+inc[0].severity+" "+(inc[0].incidentNo||inc[0].id));
+    const lv = LEAVE.filter(l=>l.team===a.team && l.from<=a.date && l.to>=a.date); if(lv.length>=2) c.push(lv.length+" engineers on leave"); else if(lv.length===1) c.push(lv[0].member+" on leave");
+    const r = risk[a.id]; if(r && r.util>=90) c.push("team at "+r.util+"% utilisation");
+    return c;
+  };
+  const weekOf = ds => { const d=new Date(ds+"T00:00:00Z"); const dow=(d.getUTCDay()+6)%7; return new Date(d.getTime()-dow*dayMs).toISOString().slice(0,10); };
+  const weeks = {}; rows.forEach(a=>{ (weeks[weekOf(a.date)]=weeks[weekOf(a.date)]||[]).push(a); });
+  const bc = b => b==="High"?["#b91c1c","#fef2f2"]:b==="Medium"?["#a16207","#fffbeb"]:["#166534","#f0fdf4"];
+  return (<div data-testid="change-calendar">
+    <div style={{fontSize:12,color:"var(--text-3)",marginBottom:10}}>Active changes by planned date, with clashes flagged: same team same day, a Sev1/Sev2 incident within a day, engineers on leave, or a team above 90% utilisation.{fallback?" No changes fall in the next 5 weeks, so the latest planned ones are shown.":""}</div>
+    {rows.length===0 && <Card style={{textAlign:"center",padding:30,fontSize:13}}>No active changes with a planned date.</Card>}
+    {Object.keys(weeks).sort().map(w=>(<div key={w} style={{marginBottom:12}}>
+      <div style={{fontSize:12,fontWeight:700,color:"var(--text-3)",marginBottom:4}}>Week of {w}</div>
+      {weeks[w].map(a=>{ const c=conflicts(a); const r=risk[a.id]; const [col,bg]=bc(r?r.band:"Low"); return (
+        <Card key={a.id} style={{padding:"10px 12px",marginBottom:6,borderLeft:"4px solid "+(c.length?"#f59e0b":"var(--border)")}}>
+          <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+            <span style={{fontSize:12,fontWeight:700,minWidth:82}}>{a.date}</span>
+            <span style={{flex:1,fontSize:13,fontWeight:600}}>{a.name} <span style={{fontWeight:400,color:"var(--text-4)"}}>· {a.team}</span></span>
+            {r && <span style={{fontSize:11,fontWeight:700,color:col,background:bg,borderRadius:10,padding:"2px 9px"}}>risk {r.score} {r.band}</span>}
+          </div>
+          {c.length>0 && <div style={{fontSize:11,color:"#92400e",marginTop:4}}>⚠ {c.join(" · ")}</div>}
+        </Card>); })}
+    </div>))}
+  </div>);
+};
+
+const RunbookTab = ({mis, toast}) => {
+  const [q,setQ] = useState("");
+  const all = mis.filter(m=>(m.status==="Resolved"||m.status==="Closed") && (m.rootCause||m.resolutionSummary));
+  const list = all.filter(m=>!q.trim() || (String(m.name)+" "+(m.impactedServices||"")+" "+(m.rootCause||"")+" "+(m.resolutionSummary||"")).toLowerCase().includes(q.trim().toLowerCase()));
+  const md = m => "# "+(m.incidentNo||m.id)+" "+m.name+"\\n\\n**Severity:** "+m.severity+"  \\n**Services:** "+(m.impactedServices||"n/a")+"\\n\\n## Symptoms\\n"+(m.desc||"n/a")+"\\n\\n## Likely cause\\n"+(m.rootCause||"n/a")+"\\n\\n## Fix that worked\\n"+(m.resolutionSummary||"n/a")+((m.actionItems||[]).length?"\\n\\n## Prevent recurrence\\n"+m.actionItems.map(a=>"- "+a.text+(a.owner?" ("+a.owner+")":"")).join("\\n"):"")+"\\n";
+  return (<div data-testid="runbooks">
+    <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:10,flexWrap:"wrap"}}>
+      <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search symptoms, services, causes, fixes" style={{flex:1,minWidth:220,padding:"8px 10px",border:"1px solid var(--border-2)",borderRadius:8,fontSize:13}}/>
+      <span style={{fontSize:12,color:"var(--text-3)"}}>{list.length} of {all.length} resolved incidents with a recorded cause or fix</span>
+    </div>
+    {list.length===0 && <Card style={{textAlign:"center",padding:30,fontSize:13}}>Nothing found. Runbook entries come from the root cause and resolution summary recorded when an incident is resolved.</Card>}
+    {list.map(m=>(<Card key={m.id} style={{marginBottom:8}}>
+      <div style={{display:"flex",gap:8,alignItems:"center"}}><div style={{flex:1,fontWeight:700,fontSize:13}}>{m.incidentNo||m.id} {m.name} <span style={{fontWeight:400,color:"var(--text-4)"}}>· {m.severity}{m.impactedServices?" · "+m.impactedServices:""}</span></div>
+        <Btn sm v="sec" onClick={()=>{ try { navigator.clipboard.writeText(md(m)); toast("Runbook copied as markdown"); } catch(e) { toast("Copy failed","err"); } }}>Copy runbook</Btn></div>
+      {m.rootCause && <div style={{fontSize:12,marginTop:6}}><strong>Cause:</strong> {m.rootCause}</div>}
+      {m.resolutionSummary && <div style={{fontSize:12,marginTop:3}}><strong>Fix:</strong> {m.resolutionSummary}</div>}
+      {(m.actionItems||[]).length>0 && <div style={{fontSize:11,color:"var(--text-3)",marginTop:3}}>Prevent recurrence: {m.actionItems.map(a=>a.text).join("; ")}</div>}
+    </Card>))}
+  </div>);
+};
+
+const EFFORT_BY_DOMAIN = {Hygiene:1, Incidents:2, People:2, Efficiency:2, Delivery:3, Capacity:3};
+const ImprovementMatrix = ({items}) => {
+  const q = {win:[], big:[], fill:[], skip:[]};
+  items.forEach(f=>{ const impact = f.score>=60 || f.sev==="critical" || f.sev==="high"; const eff = EFFORT_BY_DOMAIN[f.domain]||2; const low = eff<=2; (impact?(low?q.win:q.big):(low?q.fill:q.skip)).push(f); });
+  const Box = ({title,sub,list,c}) => (<Card style={{borderTop:"3px solid "+c,minHeight:120}}>
+    <div style={{fontWeight:700,fontSize:13}}>{title} <span style={{fontWeight:400,color:"var(--text-4)"}}>({list.length})</span></div><div style={{fontSize:11,color:"var(--text-4)",marginBottom:6}}>{sub}</div>
+    {list.slice(0,8).map(f=>(<div key={f.id} style={{fontSize:12,padding:"3px 0",borderTop:"1px solid var(--surface-3)",cursor:"pointer"}} onClick={()=>f.action.run()} title={f.detail}>{f.title}</div>))}
+    {list.length>8 && <div style={{fontSize:11,color:"var(--text-4)"}}>+{list.length-8} more</div>}</Card>);
+  return (<div data-testid="improve-matrix">
+    <div style={{fontSize:12,color:"var(--text-3)",marginBottom:10}}>Open findings placed by impact (severity and score) and effort (typical work needed for that kind of finding). Start top-left. Click an item to jump to its fix.</div>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+      <Box title="Quick wins" sub="High impact, low effort: do first" list={q.win} c="#16a34a"/>
+      <Box title="Big bets" sub="High impact, more effort: plan and assign" list={q.big} c="#2563eb"/>
+      <Box title="Fill-ins" sub="Lower impact, low effort: batch when time allows" list={q.fill} c="#a16207"/>
+      <Box title="Reconsider" sub="Lower impact, more effort: park or drop" list={q.skip} c="#64748b"/>
+    </div></div>);
+};
+
 const DEFAULT_CATEGORIES = ["Infrastructure Build","Maintenance","Security & Compliance","Automation & Scripting","Monitoring & Alerting","Documentation"].map(n=>({name:n, active:true}));
 // Values pre-filled in the Log Time form from an activity's own settings
 const logDefaultsFrom = (a, f) => ({
@@ -7380,7 +7456,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       mgrSec:"Productivity",
       role:"mgr", guideGroup:"🚀 Productivity Intelligence", guideColor:"#0891b2", guideBg:"#ecfeff",
       desc:"Rule-based intelligence engine that scans activities, time logs, incidents and capacity, ranks what needs attention, and offers one-click actions, a team health scorecard, a demand forecast and an executive summary. Also includes change risk scoring, an AI 'Ask your data' assistant, SLA compliance and a one-click digest to email or chat.",
-      benefits:["Anomaly alerts when a team's hours, reactive share or cost swing far from its own history","Skills & cover tab: who has done what, with warnings where only one person covers a skill area","Rating buttons on AI answers","Change risk tab scores active Change and Project work 0-100, with the factors and ways to lower the risk","Ask your data: type a question in plain English and get a calculated answer (AI plans the query, your browser runs it)","Resolution SLA tile and findings for breached or at-risk incidents","Send digest emails or posts the critical and high findings to Teams/Slack","Turns raw data into a prioritised to-do list with one-click fixes","Detects overruns, idle work, overload, recurring toil, open incidents and audit gaps","Team health scorecard and next-month forecast","Executive summary export (CSV / print to PDF)"],
+      benefits:["Assign an owner or snooze any finding, with a this-month count of new versus fixed findings","Improvement backlog places findings on an impact versus effort grid so quick wins come first","Change calendar flags clashes: same-day changes, nearby Sev1/Sev2 incidents, leave and overloaded teams","Anomaly alerts when a team's hours, reactive share or cost swing far from its own history","Skills & cover tab: who has done what, with warnings where only one person covers a skill area","Rating buttons on AI answers","Change risk tab scores active Change and Project work 0-100, with the factors and ways to lower the risk","Ask your data: type a question in plain English and get a calculated answer (AI plans the query, your browser runs it)","Resolution SLA tile and findings for breached or at-risk incidents","Send digest emails or posts the critical and high findings to Teams/Slack","Turns raw data into a prioritised to-do list with one-click fixes","Detects overruns, idle work, overload, recurring toil, open incidents and audit gaps","Team health scorecard and next-month forecast","Executive summary export (CSV / print to PDF)"],
     },
     {
       id:"prod_overview", icon:"🚀", label:"Overview",
@@ -7445,7 +7521,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       mgrSec:"Operations",
       role:"mgr", guideGroup:"🚨 Major Incident Management", guideColor:"#dc2626", guideBg:"#fef2f2",
       desc:"Dedicated Sev1/Sev2 incident registry with MTTR tracking, estimated cost analysis, team contribution matrix, and cross-team time logging.",
-      benefits:["Similar past incidents shown in each incident, with their causes and fixes","Problems tab groups recurring incidents and creates a problem record with a permanent-fix task","Shift handover brief built from live data, ready to copy","Resolution SLA countdown per severity with breach warnings","Follow-up actions with owners and due dates, AI root-cause suggestions and post-incident review drafts","Quantifies the true financial cost of every major incident for executive reporting","Tracks MTTR trends to measure improvement from problem management actions","Attributes effort across all responding teams — supporting fair recognition and SLA reviews"],
+      benefits:["Runbook library built from resolved incidents: symptoms, cause and fix, searchable and copyable as markdown","Similar past incidents shown in each incident, with their causes and fixes","Problems tab groups recurring incidents and creates a problem record with a permanent-fix task","Shift handover brief built from live data, ready to copy","Resolution SLA countdown per severity with breach warnings","Follow-up actions with owners and due dates, AI root-cause suggestions and post-incident review drafts","Quantifies the true financial cost of every major incident for executive reporting","Tracks MTTR trends to measure improvement from problem management actions","Attributes effort across all responding teams — supporting fair recognition and SLA reviews"],
     },
     {
       id:"timelog", icon:"⏱", label:"Time Log", mgrLabel:"Team Time Log", mbrLabel:"My Time Log",
@@ -14914,6 +14990,9 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     const setTab = t => { window.__acTab = t; _setTab(t); };
     const [domain, setDomain] = React.useState("All");
     const [showDismissed, setShowDismissed] = React.useState(false);
+    const [track, _setTrack] = React.useState(()=>{ try { return JSON.parse(localStorage.getItem("isms_ac_track")||"{}"); } catch(e) { return {}; } });
+    const setTrack = (id, patch) => _setTrack(prev=>{ const n={...prev,[id]:{...(prev[id]||{}),...patch}}; try { localStorage.setItem("isms_ac_track", JSON.stringify(n)); } catch(e) {} return n; });
+    const [hist, setHist] = React.useState({seen:{},fixed:[]});
     const [dismissed, _setDismissed] = React.useState(()=>{ try { return JSON.parse(localStorage.getItem("isms_ac_dismissed")||"{}"); } catch(e) { return {}; } });
     const setDismissed = fn => _setDismissed(prev=>{ const n = typeof fn==="function"?fn(prev):fn; try { localStorage.setItem("isms_ac_dismissed", JSON.stringify(n)); } catch(e) {} return n; });
 
@@ -15147,7 +15226,21 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
 
     const sevMeta = {critical:{c:"#b91c1c",bg:"#fef2f2",l:"Critical"}, high:{c:"#c2410c",bg:"#fff7ed",l:"High"}, medium:{c:"#a16207",bg:"#fefce8",l:"Medium"}, info:{c:"#1d4ed8",bg:"#eff6ff",l:"Info"}};
     const domains = ["All", ...Array.from(new Set(model.F.map(f=>f.domain)))];
-    const active = model.F.filter(f=>!dismissed[f.id]);
+    const active = model.F.filter(f=>!dismissed[f.id] && !(track[f.id] && track[f.id].snooze && track[f.id].snooze>today()));
+    const snoozedCount = model.F.filter(f=>!dismissed[f.id] && track[f.id] && track[f.id].snooze && track[f.id].snooze>today()).length;
+    React.useEffect(()=>{
+      const ids = new Set(model.F.map(f=>f.id)); const t0 = today(); let h; try { h = JSON.parse(localStorage.getItem("isms_ac_hist")||"{}"); } catch(e) { h = {}; }
+      h.seen = h.seen||{}; h.fixed = h.fixed||[];
+      model.F.forEach(f=>{ if(!h.seen[f.id]) h.seen[f.id] = {title:f.title, first:t0}; h.seen[f.id].open = true; h.seen[f.id].title = f.title; });
+      Object.keys(h.seen).forEach(id=>{ if(h.seen[id].open && !ids.has(id)) { h.seen[id].open = false; h.fixed.push({id, title:h.seen[id].title, date:t0}); } });
+      h.fixed = h.fixed.slice(-200);
+      try { localStorage.setItem("isms_ac_hist", JSON.stringify(h)); } catch(e) {}
+      setHist(h);
+    }, [model.F]);
+    const monthPfx = today().slice(0,7);
+    const newThisMonth = Object.values(hist.seen||{}).filter(x=>(x.first||"").startsWith(monthPfx)).length;
+    const fixedThisMonth = (hist.fixed||[]).filter(x=>(x.date||"").startsWith(monthPfx)).length;
+    const ownerNames = (isAdmin ? allUsers.filter(u=>u.team) : allUsers.filter(u=>u.team===user.team)).map(u=>u.name).filter(Boolean).sort();
     const shown = active.filter(f=>domain==="All"||f.domain===domain);
     const dismissedList = model.F.filter(f=>dismissed[f.id]);
     const cnt = s => active.filter(f=>f.sev===s).length;
@@ -15255,12 +15348,13 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
         </div>
 
         <div style={{display:"flex",borderBottom:"2px solid var(--border)",marginBottom:16}}>
-          <TabBtn id="actions" label={"Recommended actions ("+active.length+")"}/><TabBtn id="score" label="Team scorecard"/><TabBtn id="forecast" label="Forecast & trend"/><TabBtn id="risk" label="Change risk"/><TabBtn id="skills" label="Skills & cover"/><TabBtn id="roi" label="Automation ROI"/><TabBtn id="summary" label="Executive summary"/><TabBtn id="ai" label="✨ AI insights"/><TabBtn id="data" label="💬 Ask your data"/>
+          <TabBtn id="actions" label={"Recommended actions ("+active.length+")"}/><TabBtn id="score" label="Team scorecard"/><TabBtn id="forecast" label="Forecast & trend"/><TabBtn id="risk" label="Change risk"/><TabBtn id="skills" label="Skills & cover"/><TabBtn id="calendar" label="Change calendar"/><TabBtn id="backlog" label="Improvement backlog"/><TabBtn id="roi" label="Automation ROI"/><TabBtn id="summary" label="Executive summary"/><TabBtn id="ai" label="✨ AI insights"/><TabBtn id="data" label="💬 Ask your data"/>
         </div>
 
         {tab==="actions" && (<div>
           <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12,alignItems:"center"}}>
             {domains.map(d=>(<button key={d} onClick={()=>setDomain(d)} style={{padding:"5px 12px",borderRadius:20,fontSize:12,fontWeight:600,cursor:"pointer",border:"1px solid "+(domain===d?"var(--brand)":"var(--border)"),background:domain===d?"var(--brand-light)":"var(--surface)",color:domain===d?"var(--brand)":"var(--text-2)"}}>{d}{d!=="All"?" ("+active.filter(f=>f.domain===d).length+")":""}</button>))}
+            <span data-testid="fixed-new" style={{fontSize:11,color:"var(--text-3)",marginLeft:6}}>This month: {newThisMonth} new · {fixedThisMonth} fixed{snoozedCount?" · "+snoozedCount+" snoozed":""}</span>
             {dismissedList.length>0 && <button onClick={()=>setShowDismissed(v=>!v)} style={{marginLeft:"auto",fontSize:12,background:"none",border:"none",color:"var(--text-3)",cursor:"pointer",textDecoration:"underline"}}>{showDismissed?"Hide":"Show"} dismissed ({dismissedList.length})</button>}
           </div>
           {shown.length===0 && <Card style={{textAlign:"center",padding:40}}><div style={{fontSize:32}}>✅</div><div style={{fontWeight:700,marginTop:6}}>Nothing needs attention here</div><div style={{fontSize:12,color:"var(--text-3)"}}>The engine re-checks every time your data changes.</div></Card>}
@@ -15275,6 +15369,11 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
                   <div style={{fontSize:14,fontWeight:700,color:"var(--text-1)",marginTop:4}}>{f.title}</div>
                   <div style={{fontSize:12,color:"var(--text-2)",marginTop:2}}>{f.detail}</div>
                   <div style={{fontSize:11,color:"var(--text-3)",marginTop:3}}>💡 {f.why}</div>
+                  <div style={{display:"flex",gap:8,alignItems:"center",marginTop:6,flexWrap:"wrap"}}>
+                    <select aria-label="Assign owner" value={(track[f.id]&&track[f.id].owner)||""} onChange={e=>setTrack(f.id,{owner:e.target.value})} style={{fontSize:11,padding:"2px 6px",borderRadius:6,border:"1px solid var(--border-2)",maxWidth:170}}><option value="">Assign owner…</option>{ownerNames.map(n=><option key={n}>{n}</option>)}</select>
+                    <select aria-label="Snooze" value="" onChange={e=>{ const d=+e.target.value; if(d){ setTrack(f.id,{snooze:new Date(Date.now()+d*86400000).toISOString().slice(0,10)}); showToast("Snoozed for "+d+" day"+(d>1?"s":"")); } }} style={{fontSize:11,padding:"2px 6px",borderRadius:6,border:"1px solid var(--border-2)"}}><option value="">Snooze…</option><option value="1">1 day</option><option value="3">3 days</option><option value="7">1 week</option><option value="30">30 days</option></select>
+                    {track[f.id]&&track[f.id].owner && <span style={{fontSize:11,color:"#1d4ed8",background:"#eff6ff",borderRadius:10,padding:"1px 8px"}}>👤 {track[f.id].owner}</span>}
+                  </div>
                 </div>
                 <div style={{display:"flex",flexDirection:"column",gap:6,alignItems:"stretch",minWidth:150}}>
                   <button onClick={()=>{ f.action.run(); }} style={{padding:"8px 14px",borderRadius:"var(--radius-md)",border:"none",background:"var(--brand)",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}}>{f.action.label}</button>
@@ -15342,6 +15441,8 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
           </div>);
         })()}
 
+        {tab==="calendar" && <ChangeCalendar acts={isAdmin?acts:acts.filter(a=>a.team===user.team)} logs={isAdmin?logs:logs.filter(l=>l.team===user.team)} mis={isAdmin?mis:mis.filter(m=>m.team===user.team||(m.teamsInvolved||[]).includes(user.team))} users={isAdmin?allUsers:allUsers.filter(u=>u.team===user.team)} anchorStr={model.anchorStr}/>}
+        {tab==="backlog" && <ImprovementMatrix items={active}/>}
         {tab==="skills" && (()=>{
           const susers = (isAdmin ? allUsers.filter(u=>u.team) : allUsers.filter(u=>u.team===user.team));
           const tms = [...new Set(susers.map(u=>u.team))];
@@ -16664,7 +16765,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
 
         {/* == Tabs == */}
         <div style={{display:"flex",gap:4,marginBottom:18,borderBottom:"2px solid var(--border)",paddingBottom:0}}>
-          {[["dashboard","📊 Dashboard"],["incidents","📋 Incident List"],["problems","🔁 Problems"],["handover","📋 Shift handover"],["analytics","📈 Analytics"]].map(([id,label])=>(
+          {[["dashboard","📊 Dashboard"],["incidents","📋 Incident List"],["problems","🔁 Problems"],["handover","📋 Shift handover"],["runbooks","📚 Runbooks"],["analytics","📈 Analytics"]].map(([id,label])=>(
             <button key={id} onClick={()=>setMiTab(id)} style={{
               padding:"8px 18px",border:"none",cursor:"pointer",fontSize:13,fontWeight:600,
               background:"transparent",borderBottom:`2px solid ${miTab===id?"var(--brand)":"transparent"}`,
@@ -16843,6 +16944,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
 
         {/* == TAB: ANALYTICS == */}
         {miTab==="problems" && <ProblemsTab mis={mis} setMis={setMis} setActs={setActs} user={user} toast={showToast} nextId={nextActId}/>}
+        {miTab==="runbooks" && <RunbookTab mis={mis} toast={showToast}/>}
         {miTab==="handover" && <HandoverTab mis={mis} acts={acts} targets={slaTargets} toast={showToast}/>}
         {miTab==="analytics" && (
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
