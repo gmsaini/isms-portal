@@ -6137,6 +6137,7 @@ function stClassify(res) {
   }
   return "ok";
 }
+const stSpeechCtor = () => (typeof window!=="undefined") ? (window.SpeechRecognition||window.webkitSpeechRecognition||null) : null;
 const ST_EVENT_MIN = {gaze:2, head:2, noface:3, multi:1.5};   // seconds a condition must last to count as an event
 const ST_EVENT_LABEL = {gaze:"looked away from screen", head:"turned head away", noface:"face not visible", multi:"more than one face"};
 function stProctorSummary(st) {
@@ -6164,6 +6165,7 @@ function StTerms({cfg, skill, onCancel, onAccept}) {
           <li style={li}>Multiple-choice answers are scored automatically. Written answers are scored by AI against a reference answer, so answer clearly and precisely.</li>
           {cfg.proctorCamera!==false && <li style={li}><b>Camera proctoring.</b> Your camera must stay on. Your face, head position and eye direction are analysed <b>on your device</b> to produce a proctoring score. <b>No video or images are recorded or uploaded</b> - only counts of events (for example "looked away", "face not visible", "more than one face") and the score are saved. Turning the camera off ends the test.</li>}
           {cfg.proctorCamera!==false && <li style={li}>Sit alone, face the screen in good light and keep your face visible. Camera analysis is approximate and can be wrong, so the proctoring score is only an indicator that your manager may review; it does not by itself fail you.</li>}
+          {cfg.allowVoice!==false && stSpeechCtor() && <li style={li}><b>Voice answers (optional).</b> For written questions you can speak instead of typing. Speech is converted to text by your browser's speech service (in Chrome the audio is sent to Google for transcription). <b>The audio is not recorded or stored by this portal</b>; only the resulting text answer is saved, and you can edit it before submitting.</li>}
           <li style={li}>Your result, answers, violations{cfg.proctorCamera!==false?" and proctoring score":""} are recorded and visible to your manager and administrators.</li>
         </ol>
         <label style={{display:"flex",gap:9,alignItems:"flex-start",margin:"16px 0",fontSize:13,color:"var(--text-1)",cursor:"pointer"}}>
@@ -6188,6 +6190,24 @@ function StRunner({cloud, run, cfg, onClose}) {
   const [busy, setBusy] = React.useState(false);
   const [confirm, setConfirm] = React.useState(false);
   const [flags, setFlags] = React.useState({});
+  const [listening, setListening] = React.useState(false);
+  const [interim, setInterim] = React.useState("");
+  const [vlang, setVlang] = React.useState("en-US");
+  const recRef = React.useRef(null); const wantVoice = React.useRef(false);
+  const stopVoice = () => { wantVoice.current = false; try { if(recRef.current) recRef.current.stop(); } catch(e) {} recRef.current = null; setListening(false); setInterim(""); };
+  const startVoice = qid => {
+    const C = stSpeechCtor(); if(!C) return; stopVoice();
+    const r = new C(); r.continuous = true; r.interimResults = true; r.lang = vlang; wantVoice.current = true;
+    r.onresult = e => {
+      let fin = "", tmp = "";
+      for(let i=e.resultIndex;i<e.results.length;i++){ const t = e.results[i][0].transcript; if(e.results[i].isFinal) fin += t; else tmp += t; }
+      if(fin) setAnswers(a=>{ const cur = a[qid]||""; return {...a,[qid]:(cur+(cur&&!/\s$/.test(cur)?" ":"")+fin.trim()).slice(0,1500)}; });
+      setInterim(tmp);
+    };
+    r.onerror = e => { if(e.error==="not-allowed"||e.error==="service-not-allowed") { wantVoice.current=false; setListening(false); } };
+    r.onend = () => { if(wantVoice.current && recRef.current===r) { try { r.start(); } catch(x) { setListening(false); } } else setListening(false); };
+    recRef.current = r; try { r.start(); setListening(true); } catch(e) { setListening(false); }
+  };
   const ended = React.useRef(false); const armed = React.useRef(false);
   const videoRef = React.useRef(null);
   const pst = React.useRef({total:0, by:{ok:0,gaze:0,head:0,noface:0,multi:0}, events:[], cur:null, curLen:0, t0:Date.now()});
@@ -6204,13 +6224,13 @@ function StRunner({cloud, run, cfg, onClose}) {
 
   const stopCam = () => { try { if(run.stream) run.stream.getTracks().forEach(t=>t.stop()); if(run.lm && run.lm.close && !window.__stLandmarker) run.lm.close(); } catch(e) {} };
   const terminate = React.useCallback(reason => {
-    if(ended.current) return; ended.current = true;
+    if(ended.current) return; ended.current = true; stopVoice();
     callAiFn(cloud, {mode:"st_terminate", attemptId, reason, proctor:proctor()}).catch(()=>{});
     stopCam(); exitFs(); setEnd({type:"terminated", reason});
   }, [cloud, attemptId]);
 
   const submit = React.useCallback(async () => {
-    if(ended.current) return; ended.current = true; setBusy(true); setConfirm(false);
+    if(ended.current) return; ended.current = true; stopVoice(); setBusy(true); setConfirm(false);
     try {
       const res = await callAiFn(cloud, {mode:"st_submit", attemptId, answers:ans.current, proctor:proctor()});
       stopCam(); exitFs(); setEnd(res.status==="submitted" ? {type:"result",res} : {type:"failed",msg:res.message});
@@ -6255,6 +6275,8 @@ function StRunner({cloud, run, cfg, onClose}) {
     return ()=>clearInterval(iv);
   }, [end]);
   React.useEffect(()=>{ if(left<=0 && !ended.current && !end) submit(); }, [left, end, submit]);
+  React.useEffect(()=>{ stopVoice(); }, [idx]); // eslint-disable-line
+  React.useEffect(()=>()=>{ wantVoice.current=false; try{ if(recRef.current) recRef.current.stop(); }catch(e){} }, []);
 
   React.useEffect(()=>{
     const v = videoRef.current, stream = run.stream; if(!stream) return;
@@ -6336,7 +6358,17 @@ function StRunner({cloud, run, cfg, onClose}) {
               </div>
             ) : (
               <textarea value={answers[q.id]||""} onChange={e=>setAnswers(a=>({...a,[q.id]:e.target.value.slice(0,1500)}))} onPaste={e=>e.preventDefault()} rows={7}
-                placeholder="Type your answer (pasting is disabled)" style={{...iS,width:"100%",resize:"vertical",boxSizing:"border-box",userSelect:"text"}}/>
+                placeholder={run.voice?"Type or speak your answer (pasting is disabled)":"Type your answer (pasting is disabled)"} style={{...iS,width:"100%",resize:"vertical",boxSizing:"border-box",userSelect:"text"}}/>
+            )}
+            {q.type==="short" && run.voice && (
+              <div style={{marginTop:10,display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+                <Btn v={listening?"dan":"sec"} sm onClick={()=>listening?stopVoice():startVoice(q.id)}>{listening?"⏹ Stop speaking":"🎤 Speak your answer"}</Btn>
+                <select value={vlang} onChange={e=>{ stopVoice(); setVlang(e.target.value); }} aria-label="Speech language" style={{...sS,width:"auto",fontSize:12,padding:"4px 8px"}}>
+                  {[["en-US","English (US)"],["en-IN","English (India)"],["en-GB","English (UK)"]].map(([v,l])=><option key={v} value={v}>{l}</option>)}
+                </select>
+                {listening && <span style={{fontSize:12,color:"#dc2626",fontWeight:700}}>● Listening...</span>}
+                {interim && <span style={{fontSize:12,color:"var(--text-3)",fontStyle:"italic"}} data-testid="interim">{interim}</span>}
+              </div>
             )}
           </div>
           <div style={{display:"flex",justifyContent:"space-between",marginTop:14,gap:10}}>
@@ -6428,7 +6460,7 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
   const load = React.useCallback(async () => {
     if(!sb) return;
     setLoading(true); setErr("");
-    try { const d = await callAiFn(cloud, {mode:"st_list"}); setInfo(d); setCfgForm(f=>f||{skills:d.config.skills.join(", "), passMark:d.config.passMark, timeLimitMin:d.config.timeLimitMin, cooldownDays:d.config.cooldownDays, proctorCamera:d.config.proctorCamera!==false, validityMonths:d.config.validityMonths==null?12:d.config.validityMonths}); setGen(g=>g.skill?g:{...g, skill:d.config.skills[0]}); }
+    try { const d = await callAiFn(cloud, {mode:"st_list"}); setInfo(d); setCfgForm(f=>f||{skills:d.config.skills.join(", "), passMark:d.config.passMark, timeLimitMin:d.config.timeLimitMin, cooldownDays:d.config.cooldownDays, proctorCamera:d.config.proctorCamera!==false, validityMonths:d.config.validityMonths==null?12:d.config.validityMonths, allowVoice:d.config.allowVoice!==false}); setGen(g=>g.skill?g:{...g, skill:d.config.skills[0]}); }
     catch(e) { setErr(e.message); }
     setLoading(false);
   }, [sb, cloud]);
@@ -6460,7 +6492,12 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
   const begin = async skill => {
     setTerms(null);
     if(!document.documentElement.requestFullscreen) { toast("This browser or device does not support full screen, so the test cannot be taken here. Use a desktop browser.","err"); return; }
-    let stream = null, lm = null;
+    let stream = null, lm = null, voice = false;
+    if(cfg.allowVoice!==false && stSpeechCtor() && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      // ask for the microphone now (before full screen) so no permission prompt can appear during the test
+      setPrep("camera");
+      try { const ms = await navigator.mediaDevices.getUserMedia({audio:true}); ms.getTracks().forEach(t=>t.stop()); voice = true; } catch(e) { voice = false; }
+    }
     if(cfg.proctorCamera!==false) {
       if(!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) { toast("This device has no camera access, so the test cannot be taken here.","err"); return; }
       setPrep("camera");
@@ -6468,7 +6505,7 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
       catch(e) { setPrep(null); toast("Camera access is required for this test. Allow the camera and try again.","err"); return; }
       try { lm = await stLoadLandmarker(); } catch(e) { lm = null; }
     }
-    setPrep({skill, stream, lm});
+    setPrep({skill, stream, lm, voice});
   };
   const goFull = async () => {
     const r = prep; if(!r || !r.skill) return;
@@ -6476,7 +6513,7 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
     catch(e) { toast("Full screen was blocked by the browser. Click the button again and allow full screen.","err"); return; }
     try {
       const d = await callAiFn(cloud, {mode:"st_start", skill:r.skill});
-      setRun({...d, skill:r.skill, stream:r.stream, lm:r.lm}); setPrep(null);
+      setRun({...d, skill:r.skill, stream:r.stream, lm:r.lm, voice:r.voice}); setPrep(null);
     } catch(e) { stopStream(r); setPrep(null); try{ if(document.fullscreenElement) document.exitFullscreen(); }catch(x){} toast(e.message,"err"); load(); }
   };
   const cancelPrep = () => { stopStream(prep); setPrep(null); };
@@ -6529,7 +6566,7 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
   const saveCfg = async () => {
     const sk = cfgForm.skills.split(",").map(s=>s.trim()).filter(Boolean);
     if(!sk.length) { toast("Add at least one skill","err"); return; }
-    const data = {skills:[...new Set(sk)], passMark:Math.min(100,Math.max(1,Number(cfgForm.passMark)||70)), timeLimitMin:Math.min(180,Math.max(5,Number(cfgForm.timeLimitMin)||45)), cooldownDays:Math.min(365,Math.max(0,Number(cfgForm.cooldownDays)||0)), proctorCamera:cfgForm.proctorCamera!==false, validityMonths:Math.min(60,Math.max(0,Number(cfgForm.validityMonths)||0))};
+    const data = {skills:[...new Set(sk)], passMark:Math.min(100,Math.max(1,Number(cfgForm.passMark)||70)), timeLimitMin:Math.min(180,Math.max(5,Number(cfgForm.timeLimitMin)||45)), cooldownDays:Math.min(365,Math.max(0,Number(cfgForm.cooldownDays)||0)), proctorCamera:cfgForm.proctorCamera!==false, validityMonths:Math.min(60,Math.max(0,Number(cfgForm.validityMonths)||0)), allowVoice:cfgForm.allowVoice!==false};
     const {error} = await sb.from("app_settings").upsert({key:"skillcfg", data}, {onConflict:"key"});
     if(error) { toast(error.message,"err"); return; } toast("Settings saved"); load();
   };
@@ -6748,6 +6785,7 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
             <Lbl t="Result validity (months, 0 = never expires)"><input type="number" value={cfgForm.validityMonths==null?12:cfgForm.validityMonths} onChange={e=>setCfgForm(f=>({...f,validityMonths:e.target.value}))} style={iS}/></Lbl>
             <Lbl t="Days before a retake"><input type="number" value={cfgForm.cooldownDays} onChange={e=>setCfgForm(f=>({...f,cooldownDays:e.target.value}))} style={iS}/></Lbl>
             <label style={{display:"flex",gap:8,alignItems:"flex-start",fontSize:13,color:"var(--text-2)",cursor:"pointer"}}><input type="checkbox" checked={cfgForm.proctorCamera!==false} onChange={e=>setCfgForm(f=>({...f,proctorCamera:e.target.checked}))} style={{marginTop:3}}/><span>Require camera proctoring (face, head and eye-direction analysis on the device; no video is stored)</span></label>
+            <label style={{display:"flex",gap:8,alignItems:"flex-start",fontSize:13,color:"var(--text-2)",cursor:"pointer"}}><input type="checkbox" checked={cfgForm.allowVoice!==false} onChange={e=>setCfgForm(f=>({...f,allowVoice:e.target.checked}))} style={{marginTop:3}}/><span>Allow voice answers for written questions (browser speech-to-text; no audio is stored)</span></label>
             <div><Btn onClick={saveCfg}>Save settings</Btn></div>
             <div style={{fontSize:12,color:"var(--text-3)"}}>Renaming a skill does not move existing questions or results; they stay under the old name.</div>
           </div>
@@ -6756,10 +6794,10 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
 
       {prep && <div style={{position:"fixed",inset:0,zIndex:99998,background:"var(--bg, #f6f7fb)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
         <div style={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:16,padding:"28px 32px",maxWidth:480,textAlign:"center"}}>
-          {prep==="camera" ? <div style={{fontWeight:700,color:"var(--text-1)"}}>Preparing camera proctoring... allow the camera if your browser asks.</div> : <>
+          {prep==="camera" ? <div style={{fontWeight:700,color:"var(--text-1)"}}>Preparing the test... allow the camera and microphone if your browser asks.</div> : <>
             <div style={{fontSize:36}}>✅</div>
             <div style={{fontSize:18,fontWeight:800,color:"var(--text-1)",margin:"6px 0"}}>Ready to start the {prep.skill} test</div>
-            <div style={{fontSize:13,color:"var(--text-2)",lineHeight:1.6,marginBottom:16}}>{prep.stream ? (prep.lm ? "Camera is on and proctoring is ready." : "Camera is on, but face analysis could not load on this device, so the camera will be on but not analysed.") : "No camera is required."}<br/>Click below to go full screen. <b>The timer starts as soon as the test opens</b>, and leaving full screen ends the test.</div>
+            <div style={{fontSize:13,color:"var(--text-2)",lineHeight:1.6,marginBottom:16}}>{prep.voice ? "Voice answers are available for written questions. " : ""}{prep.stream ? (prep.lm ? "Camera is on and proctoring is ready." : "Camera is on, but face analysis could not load on this device, so the camera will be on but not analysed.") : "No camera is required."}<br/>Click below to go full screen. <b>The timer starts as soon as the test opens</b>, and leaving full screen ends the test.</div>
             <div style={{display:"flex",gap:10,justifyContent:"center"}}><Btn v="sec" onClick={cancelPrep}>Cancel</Btn><Btn onClick={goFull}>Enter full screen and start</Btn></div>
           </>}
         </div></div>}
