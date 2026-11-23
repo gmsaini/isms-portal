@@ -5499,7 +5499,7 @@ const SkillsTab = ({logs, users, teams}) => {
     </div>
     <Card style={{overflowX:"auto"}}>
       <table style={{borderCollapse:"collapse",fontSize:12,width:"100%"}}>
-        <thead><tr><th style={{textAlign:"left",padding:"6px 8px"}}>Work category</th>{sm.members.map(m=><th key={m.id} style={{padding:"6px 8px",fontWeight:600,whiteSpace:"nowrap"}}>{m.name.split(" ")[0]}</th>)}<th style={{padding:"6px 8px"}}>Cover</th></tr></thead>
+        <thead><tr><th style={{textAlign:"left",padding:"8px 10px",minWidth:190}}>Work category</th>{sm.members.map(m=><th key={m.id} style={{padding:"8px 10px",fontWeight:600,whiteSpace:"nowrap",textAlign:"center",minWidth:60}}>{m.name.split(" ")[0]}</th>)}<th style={{padding:"8px 10px",textAlign:"center"}}>Cover</th></tr></thead>
         <tbody>{sm.rows.slice(0,14).map(r=>(<tr key={r.cat} style={{borderTop:"1px solid var(--surface-3)"}}>
           <td style={{padding:"6px 8px",fontWeight:600}}>{r.cat}</td>
           {sm.members.map(m=>{ const h=(r.by[m.id]||0)/60; return <td key={m.id} style={{textAlign:"center",padding:"6px 8px",background:h>=8?"rgba(37,99,235,"+(0.1+Math.min(0.5,h/mx*0.5))+")":"transparent",color:h?"var(--text-1)":"var(--text-4)"}}>{h?Math.round(h):"·"}</td>; })}
@@ -5535,12 +5535,13 @@ const ChangeCalendar = ({acts, logs, mis, users, anchorStr}) => {
       <div style={{fontSize:12,fontWeight:700,color:"var(--text-3)",marginBottom:4}}>Week of {w}</div>
       {weeks[w].map(a=>{ const c=conflicts(a); const r=risk[a.id]; const [col,bg]=bc(r?r.band:"Low"); return (
         <Card key={a.id} style={{padding:"10px 12px",marginBottom:6,borderLeft:"4px solid "+(c.length?"#f59e0b":"var(--border)")}}>
-          <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
-            <span style={{fontSize:12,fontWeight:700,minWidth:82}}>{a.date}</span>
-            <span style={{flex:1,fontSize:13,fontWeight:600}}>{a.name} <span style={{fontWeight:400,color:"var(--text-4)"}}>· {a.team}</span></span>
-            {r && <span style={{fontSize:11,fontWeight:700,color:col,background:bg,borderRadius:10,padding:"2px 9px"}}>risk {r.score} {r.band}</span>}
+          <div style={{display:"grid",gridTemplateColumns:"88px minmax(0,1fr) 84px 112px",gap:12,alignItems:"center"}}>
+            <span style={{fontSize:12,fontWeight:700,fontVariantNumeric:"tabular-nums"}}>{a.date}</span>
+            <span style={{fontSize:13,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={a.name}>{a.name}</span>
+            <span style={{fontSize:12,color:"var(--text-3)"}}>{a.team}</span>
+            {r ? <span style={{fontSize:11,fontWeight:700,color:col,background:bg,borderRadius:10,padding:"3px 0",textAlign:"center"}}>risk {r.score} · {r.band}</span> : <span/>}
           </div>
-          {c.length>0 && <div style={{fontSize:11,color:"#92400e",marginTop:4}}>⚠ {c.join(" · ")}</div>}
+          {c.length>0 && <div style={{fontSize:11.5,color:"#92400e",marginTop:5,paddingLeft:100}}>⚠ {c.join(" · ")}</div>}
         </Card>); })}
     </div>))}
   </div>);
@@ -15318,7 +15319,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     };
 
     const TabBtn = ({id,label}) => (
-      <button onClick={()=>setTab(id)} style={{padding:"9px 16px",border:"none",background:"transparent",cursor:"pointer",fontSize:13,fontWeight:600,fontFamily:"inherit",
+      <button onClick={()=>setTab(id)} style={{padding:"10px 14px",border:"none",background:"transparent",cursor:"pointer",fontSize:13,fontWeight:600,fontFamily:"inherit",whiteSpace:"nowrap",flex:"0 0 auto",
         color:tab===id?"var(--brand)":"var(--text-3)",borderBottom:"2px solid "+(tab===id?"var(--brand)":"transparent"),marginBottom:-2}}>{label}</button>
     );
     const Tile = ({label,val,sub,color}) => (
@@ -15347,37 +15348,38 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
           <Tile label="Next month" val={model.projHrs!==null?Math.round(model.projHrs/Math.max(1,model.totalCap)*100)+"%":"-"} sub="forecast of capacity" color={model.projHrs!==null&&model.projHrs/Math.max(1,model.totalCap)>1?"#b91c1c":undefined}/>
         </div>
 
-        <div style={{display:"flex",borderBottom:"2px solid var(--border)",marginBottom:16}}>
-          <TabBtn id="actions" label={"Recommended actions ("+active.length+")"}/><TabBtn id="score" label="Team scorecard"/><TabBtn id="forecast" label="Forecast & trend"/><TabBtn id="risk" label="Change risk"/><TabBtn id="skills" label="Skills & cover"/><TabBtn id="calendar" label="Change calendar"/><TabBtn id="backlog" label="Improvement backlog"/><TabBtn id="roi" label="Automation ROI"/><TabBtn id="summary" label="Executive summary"/><TabBtn id="ai" label="✨ AI insights"/><TabBtn id="data" label="💬 Ask your data"/>
+        <div style={{display:"flex",borderBottom:"2px solid var(--border)",marginBottom:16,overflowX:"auto",scrollbarWidth:"thin"}}>
+          <TabBtn id="actions" label={"Actions ("+active.length+")"}/><TabBtn id="score" label="Scorecard"/><TabBtn id="forecast" label="Forecast"/><TabBtn id="risk" label="Change risk"/><TabBtn id="skills" label="Skills"/><TabBtn id="calendar" label="Calendar"/><TabBtn id="backlog" label="Backlog"/><TabBtn id="roi" label="Automation ROI"/><TabBtn id="summary" label="Summary"/><TabBtn id="ai" label="✨ AI insights"/><TabBtn id="data" label="💬 Ask data"/>
         </div>
 
         {tab==="actions" && (<div>
           <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12,alignItems:"center"}}>
             {domains.map(d=>(<button key={d} onClick={()=>setDomain(d)} style={{padding:"5px 12px",borderRadius:20,fontSize:12,fontWeight:600,cursor:"pointer",border:"1px solid "+(domain===d?"var(--brand)":"var(--border)"),background:domain===d?"var(--brand-light)":"var(--surface)",color:domain===d?"var(--brand)":"var(--text-2)"}}>{d}{d!=="All"?" ("+active.filter(f=>f.domain===d).length+")":""}</button>))}
-            <span data-testid="fixed-new" style={{fontSize:11,color:"var(--text-3)",marginLeft:6}}>This month: {newThisMonth} new · {fixedThisMonth} fixed{snoozedCount?" · "+snoozedCount+" snoozed":""}</span>
-            {dismissedList.length>0 && <button onClick={()=>setShowDismissed(v=>!v)} style={{marginLeft:"auto",fontSize:12,background:"none",border:"none",color:"var(--text-3)",cursor:"pointer",textDecoration:"underline"}}>{showDismissed?"Hide":"Show"} dismissed ({dismissedList.length})</button>}
+            <span data-testid="fixed-new" style={{fontSize:11,color:"var(--text-3)",marginLeft:"auto",whiteSpace:"nowrap"}}>This month: {newThisMonth} new · {fixedThisMonth} fixed{snoozedCount?" · "+snoozedCount+" snoozed":""}</span>
+            {dismissedList.length>0 && <button onClick={()=>setShowDismissed(v=>!v)} style={{marginLeft:8,fontSize:12,background:"none",border:"none",color:"var(--text-3)",cursor:"pointer",textDecoration:"underline"}}>{showDismissed?"Hide":"Show"} dismissed ({dismissedList.length})</button>}
           </div>
           {shown.length===0 && <Card style={{textAlign:"center",padding:40}}><div style={{fontSize:32}}>✅</div><div style={{fontWeight:700,marginTop:6}}>Nothing needs attention here</div><div style={{fontSize:12,color:"var(--text-3)"}}>The engine re-checks every time your data changes.</div></Card>}
           <div style={{display:"grid",gap:10}}>
-            {shown.map(f=>{ const m=sevMeta[f.sev]; return (
-              <Card key={f.id} style={{padding:"14px 16px",borderLeft:"4px solid "+m.c,display:"flex",gap:14,alignItems:"center",flexWrap:"wrap"}}>
-                <div style={{flex:"1 1 320px",minWidth:0}}>
-                  <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-                    <span style={{fontSize:10,fontWeight:800,padding:"2px 8px",borderRadius:10,background:m.bg,color:m.c,textTransform:"uppercase"}}>{m.l}</span>
-                    <span style={{fontSize:11,color:"var(--text-3)",fontWeight:600}}>{f.domain}</span>
+            {shown.map(f=>{ const m=sevMeta[f.sev]; const tr=track[f.id]||{}; return (
+              <Card key={f.id} style={{padding:0,borderLeft:"4px solid "+m.c,overflow:"hidden"}}>
+                <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:16,alignItems:"start",padding:"14px 16px 10px"}}>
+                  <div style={{minWidth:0}}>
+                    <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                      <span style={{fontSize:10,fontWeight:800,padding:"2px 8px",borderRadius:10,background:m.bg,color:m.c,textTransform:"uppercase",letterSpacing:.3}}>{m.l}</span>
+                      <span style={{fontSize:11,color:"var(--text-3)",fontWeight:600}}>{f.domain}</span>
+                      {tr.owner && <span style={{fontSize:11,color:"#1d4ed8",background:"#eff6ff",borderRadius:10,padding:"1px 8px",fontWeight:600}}>👤 {tr.owner}</span>}
+                    </div>
+                    <div style={{fontSize:14,fontWeight:700,color:"var(--text-1)",marginTop:6,lineHeight:1.35}}>{f.title}</div>
+                    <div style={{fontSize:12.5,color:"var(--text-2)",marginTop:3,lineHeight:1.45}}>{f.detail}</div>
+                    <div style={{fontSize:11.5,color:"var(--text-3)",marginTop:5,lineHeight:1.45}}>💡 {f.why}</div>
                   </div>
-                  <div style={{fontSize:14,fontWeight:700,color:"var(--text-1)",marginTop:4}}>{f.title}</div>
-                  <div style={{fontSize:12,color:"var(--text-2)",marginTop:2}}>{f.detail}</div>
-                  <div style={{fontSize:11,color:"var(--text-3)",marginTop:3}}>💡 {f.why}</div>
-                  <div style={{display:"flex",gap:8,alignItems:"center",marginTop:6,flexWrap:"wrap"}}>
-                    <select aria-label="Assign owner" value={(track[f.id]&&track[f.id].owner)||""} onChange={e=>setTrack(f.id,{owner:e.target.value})} style={{fontSize:11,padding:"2px 6px",borderRadius:6,border:"1px solid var(--border-2)",maxWidth:170}}><option value="">Assign owner…</option>{ownerNames.map(n=><option key={n}>{n}</option>)}</select>
-                    <select aria-label="Snooze" value="" onChange={e=>{ const d=+e.target.value; if(d){ setTrack(f.id,{snooze:new Date(Date.now()+d*86400000).toISOString().slice(0,10)}); showToast("Snoozed for "+d+" day"+(d>1?"s":"")); } }} style={{fontSize:11,padding:"2px 6px",borderRadius:6,border:"1px solid var(--border-2)"}}><option value="">Snooze…</option><option value="1">1 day</option><option value="3">3 days</option><option value="7">1 week</option><option value="30">30 days</option></select>
-                    {track[f.id]&&track[f.id].owner && <span style={{fontSize:11,color:"#1d4ed8",background:"#eff6ff",borderRadius:10,padding:"1px 8px"}}>👤 {track[f.id].owner}</span>}
-                  </div>
+                  <button onClick={()=>{ f.action.run(); }} style={{padding:"8px 16px",minWidth:150,borderRadius:"var(--radius-md)",border:"none",background:"var(--brand)",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>{f.action.label}</button>
                 </div>
-                <div style={{display:"flex",flexDirection:"column",gap:6,alignItems:"stretch",minWidth:150}}>
-                  <button onClick={()=>{ f.action.run(); }} style={{padding:"8px 14px",borderRadius:"var(--radius-md)",border:"none",background:"var(--brand)",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}}>{f.action.label}</button>
-                  <button onClick={()=>setDismissed(p=>({...p,[f.id]:model.anchorStr}))} style={{padding:"5px 14px",borderRadius:"var(--radius-md)",border:"1px solid var(--border)",background:"var(--surface)",color:"var(--text-3)",fontSize:11,cursor:"pointer"}}>Dismiss</button>
+                <div style={{display:"flex",gap:8,alignItems:"center",padding:"8px 16px",borderTop:"1px solid var(--surface-3)",background:"var(--surface-2)"}}>
+                  <select aria-label="Assign owner" value={tr.owner||""} onChange={e=>setTrack(f.id,{owner:e.target.value})} style={{fontSize:11.5,padding:"4px 8px",borderRadius:6,border:"1px solid var(--border-2)",background:"var(--surface)",maxWidth:180}}><option value="">Assign owner…</option>{ownerNames.map(n=><option key={n}>{n}</option>)}</select>
+                  <select aria-label="Snooze" value="" onChange={e=>{ const d=+e.target.value; if(d){ setTrack(f.id,{snooze:new Date(Date.now()+d*86400000).toISOString().slice(0,10)}); showToast("Snoozed for "+d+" day"+(d>1?"s":"")); } }} style={{fontSize:11.5,padding:"4px 8px",borderRadius:6,border:"1px solid var(--border-2)",background:"var(--surface)"}}><option value="">Snooze…</option><option value="1">1 day</option><option value="3">3 days</option><option value="7">1 week</option><option value="30">30 days</option></select>
+                  <span style={{flex:1}}/>
+                  <button onClick={()=>setDismissed(p=>({...p,[f.id]:model.anchorStr}))} style={{padding:"4px 12px",borderRadius:6,border:"1px solid var(--border)",background:"var(--surface)",color:"var(--text-3)",fontSize:11.5,cursor:"pointer"}}>Dismiss</button>
                 </div>
               </Card>); })}
           </div>
@@ -15430,11 +15432,11 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
             {rowsR.slice(0,25).map(r=>{ const [c,bg,bd]=bc(r.band); return (
               <Card key={r.a.id} style={{marginBottom:8}}>
                 <div style={{display:"flex",gap:12,alignItems:"flex-start"}}>
-                  <div style={{minWidth:64,textAlign:"center",padding:"6px 0",borderRadius:8,background:bg,border:"1px solid "+bd,color:c}}><div style={{fontSize:20,fontWeight:800}}>{r.score}</div><div style={{fontSize:10,fontWeight:700}}>{r.band}</div></div>
+                  <div style={{minWidth:64,flex:"0 0 64px",textAlign:"center",padding:"6px 0",borderRadius:8,background:bg,border:"1px solid "+bd,color:c}}><div style={{fontSize:20,fontWeight:800}}>{r.score}</div><div style={{fontSize:10,fontWeight:700}}>{r.band}</div></div>
                   <div style={{flex:1}}>
                     <div style={{fontWeight:700,fontSize:13}}>{r.a.name} <span style={{fontWeight:400,color:"var(--text-4)",fontSize:11}}>· {r.a.team} · {r.a.type}</span></div>
-                    <div style={{fontSize:11,color:"var(--text-3)",marginTop:3}}>{r.factors.length?r.factors.map(f=>"+"+f.pts+" "+f.t).join("  ·  "):"No risk factors found."}</div>
-                    {r.safer.length>0 && <div style={{fontSize:11,color:"#0c4a6e",marginTop:4}}>💡 To lower risk: {r.safer.join("; ")}.</div>}
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:6}}>{r.factors.length?r.factors.map((f,k)=>(<span key={k} style={{fontSize:11,background:"var(--surface-2)",border:"1px solid var(--border)",borderRadius:12,padding:"2px 9px",color:"var(--text-2)"}}><strong style={{color:"#b45309"}}>+{f.pts}</strong> {f.t}</span>)):<span style={{fontSize:11,color:"var(--text-3)"}}>No risk factors found.</span>}</div>
+                    {r.safer.length>0 && <div style={{fontSize:11.5,color:"#0c4a6e",marginTop:6}}>💡 To lower risk: {r.safer.join("; ")}.</div>}
                   </div>
                 </div>
               </Card>); })}
