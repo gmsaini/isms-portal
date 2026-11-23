@@ -6059,7 +6059,7 @@ const CustomReportsView = ({logs, acts, mis, users, teams, isAdmin, user, slaTar
 //  SKILL TESTS  (page: skill_tests)  - served and scored by the `ai` Edge Function (st_* modes)
 // ====================================================================
 const ST_COUNT = 30;
-const ST_TEMPLATE = 'skill,type,question,optionA,optionB,optionC,optionD,answer,difficulty\n"Control-M",mcq,"Which Control-M component schedules and monitors jobs?","Control-M/Server","Control-M/Agent only","Control-M Reports","Control-M Archive",A,easy\n"Talend",short,"What is a tMap component used for in Talend?","","","","","It joins, filters and transforms data between inputs and outputs (lookups, expressions, reject flows).",medium\n';
+const ST_TEMPLATE = 'skill,type,question,optionA,optionB,optionC,optionD,answer,difficulty,topic\n"Control-M",mcq,"Which Control-M component schedules and monitors jobs?","Control-M/Server","Control-M/Agent only","Control-M Reports","Control-M Archive",A,easy,Architecture\n"Talend",short,"What is a tMap component used for in Talend?","","","","","It joins, filters and transforms data between inputs and outputs (lookups, expressions, reject flows).",medium,Transformations\n';
 function stParseCsv(text) {
   const rows = []; let row = [], cur = "", q = false;
   for(let i=0;i<text.length;i++){
@@ -6096,7 +6096,7 @@ function stRowsToQuestions(rows, skills) {
       if(options.some(o=>!o)){ bad.push(line+"MCQ needs 4 options"); return; }
       ans = ans.toUpperCase(); if(!/^[A-D]$/.test(ans)){ bad.push(line+"MCQ answer must be A, B, C or D"); return; }
     }
-    ok.push({skill, data:{type, text, options, answer:ans, difficulty:g("difficulty")||"medium", source:"uploaded"}});
+    ok.push({skill, data:{type, text, options, answer:ans, difficulty:g("difficulty")||"medium", topic:(g("topic")||"General").slice(0,40), source:"uploaded"}});
   });
   return {ok,bad};
 }
@@ -6187,6 +6187,7 @@ function StRunner({cloud, run, cfg, onClose}) {
   const [end, setEnd] = React.useState(null);      // {type:"terminated",reason} | {type:"result",res} | {type:"failed",msg}
   const [busy, setBusy] = React.useState(false);
   const [confirm, setConfirm] = React.useState(false);
+  const [flags, setFlags] = React.useState({});
   const ended = React.useRef(false); const armed = React.useRef(false);
   const videoRef = React.useRef(null);
   const pst = React.useRef({total:0, by:{ok:0,gaze:0,head:0,noface:0,multi:0}, events:[], cur:null, curLen:0, t0:Date.now()});
@@ -6293,6 +6294,13 @@ function StRunner({cloud, run, cfg, onClose}) {
           <div style={{fontSize:40}}>{end.res.passed?"🎉":"📘"}</div>
           <div style={{fontSize:20,fontWeight:800,color:end.res.passed?"#059669":"#b45309",margin:"6px 0"}}>{end.res.passed?"Passed":"Not passed"} - {end.res.score}%</div>
           <div style={{fontSize:13,color:"var(--text-3)",marginBottom:12}}>{skill} · pass mark {end.res.passMark}%</div>
+          {(()=>{ const T={}; end.res.per.forEach(p=>{ const t=p.topic||"General"; (T[t]=T[t]||{n:0,s:0}); T[t].n++; T[t].s+=p.score; });
+            const ks=Object.keys(T); if(ks.length<2) return null; const weak=ks.filter(k=>T[k].s/T[k].n<0.6).sort((a,b)=>T[a].s/T[a].n-T[b].s/T[b].n);
+            return <div style={{marginBottom:14}}>
+              <div style={{fontSize:12,fontWeight:700,color:"var(--text-3)",marginBottom:6}}>BY TOPIC</div>
+              {ks.map(k=>{ const pc=Math.round(T[k].s/T[k].n*100); return <div key={k} style={{display:"flex",alignItems:"center",gap:8,fontSize:12.5,marginBottom:4}}><span style={{width:140,color:"var(--text-2)"}}>{k}</span><div style={{flex:1,height:8,background:"var(--surface-2,#eef1f6)",borderRadius:4}}><div style={{width:pc+"%",height:8,borderRadius:4,background:pc>=70?"#059669":pc>=50?"#d97706":"#dc2626"}}/></div><b style={{width:38,textAlign:"right"}}>{pc}%</b></div>; })}
+              {weak.length>0 && <div style={{fontSize:12.5,color:"#b45309",marginTop:8}}>Suggested revision: <b>{weak.join(", ")}</b></div>}
+            </div>; })()}
           <div style={{display:"grid",gap:6}}>
             {end.res.per.map((p,i)=>(
               <div key={p.id} style={{display:"flex",gap:8,alignItems:"flex-start",fontSize:12.5,padding:"6px 10px",borderRadius:8,background:p.score>=1?"#f0fdf4":p.score>0?"#fffbeb":"#fef2f2"}}>
@@ -6333,6 +6341,7 @@ function StRunner({cloud, run, cfg, onClose}) {
           </div>
           <div style={{display:"flex",justifyContent:"space-between",marginTop:14,gap:10}}>
             <Btn v="sec" disabled={idx===0} onClick={()=>setIdx(i=>i-1)}>← Previous</Btn>
+            <Btn v="sec" onClick={()=>setFlags(f=>({...f,[q.id]:!f[q.id]}))}>{flags[q.id]?"🚩 Marked for review":"⚑ Mark for review"}</Btn>
             {idx<questions.length-1 ? <Btn onClick={()=>setIdx(i=>i+1)}>Next →</Btn> : <Btn v="suc" onClick={()=>setConfirm(true)}>Submit test</Btn>}
           </div>
         </div>
@@ -6341,7 +6350,9 @@ function StRunner({cloud, run, cfg, onClose}) {
             <div style={{fontSize:12,fontWeight:700,color:"var(--text-3)",marginBottom:10}}>QUESTIONS</div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:6}}>
               {questions.map((x,i)=>{ const a=!!String(answers[x.id]||"").trim(); return (
-                <button key={x.id} onClick={()=>setIdx(i)} style={{padding:"6px 0",borderRadius:8,border:"1.5px solid "+(i===idx?"var(--brand)":"var(--border)"),background:a?"#dcfce7":"var(--surface)",fontSize:12,fontWeight:700,cursor:"pointer",color:"var(--text-1)"}}>{i+1}</button>); })}
+                <button key={x.id} onClick={()=>setIdx(i)} style={{padding:"6px 0",borderRadius:8,border:"1.5px solid "+(i===idx?"var(--brand)":"var(--border)"),background:flags[x.id]?"#fef3c7":a?"#dcfce7":"var(--surface)",fontSize:12,fontWeight:700,cursor:"pointer",color:"var(--text-1)"}}>{i+1}</button>); })}
+            </div>
+            <div style={{display:"flex",gap:10,flexWrap:"wrap",fontSize:10.5,color:"var(--text-3)",marginTop:8}}><span>🟩 answered</span><span>🟨 flagged</span>
             </div>
             {run.stream && <div style={{marginTop:14}}>
               <video ref={videoRef} muted playsInline data-testid="cam" style={{width:"100%",borderRadius:10,background:"#000",transform:"scaleX(-1)",display:"block"}}/>
@@ -6358,13 +6369,37 @@ function StRunner({cloud, run, cfg, onClose}) {
         <div style={{position:"fixed",inset:0,background:"rgba(14,22,38,.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100000}}>
           <div style={{background:"var(--surface)",borderRadius:14,padding:"22px 26px",maxWidth:420}}>
             <div style={{fontWeight:800,fontSize:16,marginBottom:8}}>Submit the test?</div>
-            <div style={{fontSize:13,color:"var(--text-2)",marginBottom:16}}>You answered {done} of {questions.length} questions. Unanswered questions score 0. You cannot change answers after submitting.</div>
+            <div style={{fontSize:13,color:"var(--text-2)",marginBottom:16}}>You answered {done} of {questions.length} questions{questions.some(x=>flags[x.id])?", and "+questions.filter(x=>flags[x.id]).length+" are marked for review (questions "+questions.map((x,i)=>flags[x.id]?i+1:0).filter(Boolean).join(", ")+")":""}. Unanswered questions score 0. You cannot change answers after submitting.</div>
             <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}><Btn v="sec" onClick={()=>setConfirm(false)}>Keep working</Btn><Btn v="suc" onClick={submit}>Submit now</Btn></div>
           </div>
         </div>
       )}
       {busy && <div style={{position:"fixed",inset:0,background:"rgba(255,255,255,.75)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100001,fontWeight:700}}>Scoring your answers...</div>}
     </div>
+  );
+}
+
+function VerifiedSkills({cloud, user, goPage}) {
+  const [rows, setRows] = React.useState(null);
+  React.useEffect(()=>{
+    const sb = cloud && cloud.sb; if(!sb) return; let off=false;
+    sb.from("skill_attempts").select("skill,status,score,passed,started_at").eq("user_id", user.id).limit(200)
+      .then(r=>{ if(!off) setRows((r&&r.data)||[]); }, ()=>{ if(!off) setRows([]); });
+    return ()=>{ off=true; };
+  }, [cloud, user.id]);
+  if(!cloud || !cloud.sb) return null;
+  const best = {}; (rows||[]).filter(a=>a.status==="submitted").forEach(a=>{ const c=best[a.skill]; if(!c||Number(a.score)>c.score) best[a.skill]={score:Number(a.score),passed:a.passed,at:a.started_at}; });
+  const ks = Object.keys(best);
+  return (
+    <Card style={{marginBottom:14}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+        <div style={{fontSize:14,fontWeight:700,color:"var(--text-1)"}}>🎯 Verified skills</div>
+        <Btn v="sec" sm onClick={()=>goPage("skill_tests")}>Take a skill test</Btn>
+      </div>
+      {rows===null ? <div style={{fontSize:12.5,color:"var(--text-3)"}}>Loading...</div>
+        : !ks.length ? <div style={{fontSize:12.5,color:"var(--text-3)"}}>No completed skill tests yet.</div>
+        : <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{ks.map(k=><span key={k} style={{fontSize:12.5,fontWeight:700,padding:"5px 12px",borderRadius:999,background:best[k].passed?"#dcfce7":"#fef3c7",color:best[k].passed?"#166534":"#92400e"}}>{best[k].passed?"✓ ":""}{k} · {best[k].score}% <span style={{fontWeight:500}}>({new Date(best[k].at).toLocaleDateString([], {month:"short",year:"numeric"})})</span></span>)}</div>}
+    </Card>
   );
 }
 
@@ -6393,7 +6428,7 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
   const load = React.useCallback(async () => {
     if(!sb) return;
     setLoading(true); setErr("");
-    try { const d = await callAiFn(cloud, {mode:"st_list"}); setInfo(d); setCfgForm(f=>f||{skills:d.config.skills.join(", "), passMark:d.config.passMark, timeLimitMin:d.config.timeLimitMin, cooldownDays:d.config.cooldownDays, proctorCamera:d.config.proctorCamera!==false}); setGen(g=>g.skill?g:{...g, skill:d.config.skills[0]}); }
+    try { const d = await callAiFn(cloud, {mode:"st_list"}); setInfo(d); setCfgForm(f=>f||{skills:d.config.skills.join(", "), passMark:d.config.passMark, timeLimitMin:d.config.timeLimitMin, cooldownDays:d.config.cooldownDays, proctorCamera:d.config.proctorCamera!==false, validityMonths:d.config.validityMonths==null?12:d.config.validityMonths}); setGen(g=>g.skill?g:{...g, skill:d.config.skills[0]}); }
     catch(e) { setErr(e.message); }
     setLoading(false);
   }, [sb, cloud]);
@@ -6407,7 +6442,7 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
     const {data, error} = await sb.from("skill_attempts").select("id,user_id,user_name,team,skill,status,started_at,ended_at,score,passed,data").order("started_at",{ascending:false}).limit(300);
     if(error) { toast(error.message,"err"); return; } setAttempts(data||[]);
   };
-  React.useEffect(()=>{ if(!sb||!isMgr) return; if(tab==="bank"||tab==="upload"||tab==="gen") loadBank(); if(tab==="results") loadAttempts(); }, [tab]); // eslint-disable-line
+  React.useEffect(()=>{ if(!sb||!isMgr) return; if(tab==="bank"||tab==="upload"||tab==="gen") loadBank(); if(tab==="results"||tab==="bank"||tab==="matrix") loadAttempts(); }, [tab]); // eslint-disable-line
 
   if(!sb) return (
     <div style={{maxWidth:720,margin:"0 auto"}}>
@@ -6461,9 +6496,9 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
     if(!f) return; const text = await f.text(); let res;
     try {
       if(/\.json$/i.test(f.name)) {
-        const arr = JSON.parse(text); const hdr = "skill,type,question,optionA,optionB,optionC,optionD,answer,difficulty".split(",");
+        const arr = JSON.parse(text); const hdr = "skill,type,question,optionA,optionB,optionC,optionD,answer,difficulty,topic".split(",");
         const q = s => '"'+String(s==null?"":s).replace(/"/g,'""')+'"';
-        const lines = [hdr.join(",")].concat((Array.isArray(arr)?arr:[]).map(o=>[o.skill,o.type,o.question||o.text,...(o.options||["","","",""]),o.answer,o.difficulty].map(q).join(",")));
+        const lines = [hdr.join(",")].concat((Array.isArray(arr)?arr:[]).map(o=>[o.skill,o.type,o.question||o.text,...(o.options||["","","",""]),o.answer,o.difficulty,o.topic].map(q).join(",")));
         res = stRowsToQuestions(stParseCsv(lines.join("\n")), skills);
       } else res = stRowsToQuestions(stParseCsv(text), skills);
     } catch(e) { res = {ok:[],bad:["Could not read file: "+e.message]}; }
@@ -6488,13 +6523,13 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
     setGen(g=>({...g, busy:false, items:got}));
   };
   const addGen = async () => {
-    const items = gen.items.filter(x=>x.keep).map(x=>({skill:gen.skill, data:{type:x.type,text:x.text,options:x.options,answer:x.answer,difficulty:x.difficulty,source:"ai"}}));
+    const items = gen.items.filter(x=>x.keep).map(x=>({skill:gen.skill, data:{type:x.type,text:x.text,options:x.options,answer:x.answer,difficulty:x.difficulty,topic:x.topic||"General",source:"ai"}}));
     setBusy(true); const n = await addQuestions(items); setBusy(false); if(n) setGen(g=>({...g, items:[]}));
   };
   const saveCfg = async () => {
     const sk = cfgForm.skills.split(",").map(s=>s.trim()).filter(Boolean);
     if(!sk.length) { toast("Add at least one skill","err"); return; }
-    const data = {skills:[...new Set(sk)], passMark:Math.min(100,Math.max(1,Number(cfgForm.passMark)||70)), timeLimitMin:Math.min(180,Math.max(5,Number(cfgForm.timeLimitMin)||45)), cooldownDays:Math.min(365,Math.max(0,Number(cfgForm.cooldownDays)||0)), proctorCamera:cfgForm.proctorCamera!==false};
+    const data = {skills:[...new Set(sk)], passMark:Math.min(100,Math.max(1,Number(cfgForm.passMark)||70)), timeLimitMin:Math.min(180,Math.max(5,Number(cfgForm.timeLimitMin)||45)), cooldownDays:Math.min(365,Math.max(0,Number(cfgForm.cooldownDays)||0)), proctorCamera:cfgForm.proctorCamera!==false, validityMonths:Math.min(60,Math.max(0,Number(cfgForm.validityMonths)||0))};
     const {error} = await sb.from("app_settings").upsert({key:"skillcfg", data}, {onConflict:"key"});
     if(error) { toast(error.message,"err"); return; } toast("Settings saved"); load();
   };
@@ -6505,11 +6540,20 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
     catch(e) { toast(e.message,"err"); }
     setBusy(false);
   };
+  const waive = async (id, undo) => { setBusy(true); try { await callAiFn(cloud, {mode:"st_waive", attemptId:id, undo:!!undo}); toast(undo?"Retake allowance removed":"Retake allowed - the person can start again now"); loadAttempts(); } catch(e){ toast(e.message,"err"); } setBusy(false); };
+  const exportCsv = () => {
+    const q = v => '"'+String(v==null?"":v).replace(/"/g,'""')+'"';
+    const rows = [["Person","Team","Skill","Started","Status","Score","Passed","Proctoring score","Proctoring events","Notes"]].concat(attempts.filter(a=>!fSkill||a.skill===fSkill).map(a=>{ const pr=a.data&&a.data.proctor; return [a.user_name,a.team||"",a.skill,a.started_at,stStatusLabel[a.status]||a.status,a.status==="submitted"?a.score:"",a.status==="submitted"?(a.passed?"yes":"no"):"",pr&&pr.score!=null?pr.score:"",pr?(pr.events||[]).length:"",(a.data&&a.data.reason)||""]; }));
+    const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([rows.map(r=>r.map(q).join(",")).join("\n")],{type:"text/csv"})); a.download="skill_test_results.csv"; a.click();
+  };
+  // per-question statistics from the attempts that are loaded (managers only)
+  const qStats = {};
+  attempts.forEach(a=>{ ((a.data&&a.data.perQuestion)||[]).forEach(pq=>{ const t=(qStats[pq.id]=qStats[pq.id]||{n:0,s:0}); t.n++; t.s+=pq.score; }); });
   const rescore = async id => { setBusy(true); try { const r = await callAiFn(cloud, {mode:"st_rescore", attemptId:id}); toast("Re-scored: "+r.score+"%"); loadAttempts(); } catch(e){ toast(e.message,"err"); } setBusy(false); };
   const delQ = async id => { const {error} = await sb.from("skill_questions").delete().eq("id",id); if(error){ toast(error.message,"err"); return; } setBank(b=>b.filter(x=>x.id!==id)); load(); };
   const toggleQ = async q => { const {error} = await sb.from("skill_questions").update({active:!q.active}).eq("id",q.id); if(error){ toast(error.message,"err"); return; } setBank(b=>b.map(x=>x.id===q.id?{...x,active:!x.active}:x)); load(); };
 
-  const tabs = [["take","My tests"]].concat(isMgr?[["results","Team results"],["bank","Question bank"],["upload","Upload questions"],["gen","Generate with AI"]]:[]).concat(isAdmin?[["settings","Settings"]]:[]);
+  const tabs = [["take","My tests"]].concat(isMgr?[["results","Team results"],["matrix","Skill matrix"],["bank","Question bank"],["upload","Upload questions"],["gen","Generate with AI"]]:[]).concat(isAdmin?[["settings","Settings"]]:[]);
   const th = {textAlign:"left",fontSize:11.5,fontWeight:700,color:"var(--text-3)",padding:"8px 10px",borderBottom:"1px solid var(--border)"};
   const td = {fontSize:12.5,color:"var(--text-2)",padding:"8px 10px",borderBottom:"1px solid var(--border)",verticalAlign:"top"};
   const bankFor = s => bank.filter(b=>b.skill===s && b.active).length;
@@ -6537,8 +6581,8 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
           const rows = skills.filter(s=>s.toLowerCase().includes(q)).map(s=>{
             const my = mine.filter(a=>a.skill===s);
             const best = my.filter(a=>a.status==="submitted").reduce((m,a)=>Math.max(m,Number(a.score)||0),-1);
-            const last = my[0];
-            const next = last ? new Date(last.started_at).getTime()+cfg.cooldownDays*86400000 : 0;
+            const last = my[0]; const lastCounted = my.find(a=>!a.waived);
+            const next = lastCounted ? new Date(lastCounted.started_at).getTime()+cfg.cooldownDays*86400000 : 0;
             const wait = next>Date.now();
             const ready = !!info && (info.counts[s]||0) >= ST_COUNT;
             return {s,best,last,next,wait,ready,can:ready&&!wait};
@@ -6590,6 +6634,7 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
           <div style={{display:"flex",gap:10,marginBottom:12,alignItems:"center"}}>
             <select value={fSkill} onChange={e=>setFSkill(e.target.value)} style={{...sS,width:200}}><option value="">All skills</option>{skills.map(s=><option key={s}>{s}</option>)}</select>
             <Btn v="sec" sm onClick={loadAttempts}>Refresh</Btn>
+            <Btn v="sec" sm onClick={exportCsv}>⬇ Export CSV</Btn>
           </div>
           <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}}>
             <thead><tr>{["Person","Team","Skill","Started","Status","Score","Proctoring","Notes"].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
@@ -6601,12 +6646,27 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
                   <td style={td}>{a.status==="submitted" ? <b style={{color:a.passed?"#059669":"#b45309"}}>{a.score}% {a.passed?"✓":"✗"}</b> : "-"}</td>
                   <td style={td}>{(()=>{ const pr=a.data&&a.data.proctor; if(!pr) return "-"; const [bl,bc]=stProctorBand(pr.score); const ev={}; (pr.events||[]).forEach(e=>{ ev[e.type]=(ev[e.type]||0)+1; });
                     return <div><b style={{color:bc}}>{pr.score==null?"-":pr.score} {bl}</b>{pr.analysed && <div style={{fontSize:11,color:"var(--text-3)"}}>{Object.keys(ev).map(k=>ev[k]+"x "+ST_EVENT_LABEL[k]).join(", ")||"no events"}</div>}{pr.note && <div style={{fontSize:11,color:"var(--text-3)"}}>{pr.note}</div>}</div>; })()}</td>
-                  <td style={td}>{a.data&&a.data.reason ? a.data.reason : ""}{a.status==="scoring_failed" && <> <Btn sm v="sec" disabled={busy} onClick={()=>rescore(a.id)}>Re-score</Btn></>}</td>
+                  <td style={td}>{a.data&&a.data.reason ? a.data.reason : ""}{a.status==="scoring_failed" && <> <Btn sm v="sec" disabled={busy} onClick={()=>rescore(a.id)}>Re-score</Btn></>}
+                    {a.status!=="in_progress" && a.status!=="submitted" && (a.data&&a.data.waived ? <div style={{fontSize:11.5,color:"#059669"}}>Retake allowed <a style={{cursor:"pointer",textDecoration:"underline"}} onClick={()=>waive(a.id,true)}>undo</a></div> : <div style={{marginTop:4}}><Btn sm v="sec" disabled={busy} onClick={()=>waive(a.id)}>Allow retake</Btn></div>)}</td>
                 </tr>))}
               {!attempts.length && <tr><td style={td} colSpan={8}>No attempts yet.</td></tr>}
             </tbody></table></div>
         </Card>
       )}
+
+      {tab==="matrix" && (()=>{
+        const months = cfg.validityMonths==null?12:cfg.validityMonths;
+        const people = {}; attempts.filter(a=>a.status==="submitted").forEach(a=>{ const P=(people[a.user_id]=people[a.user_id]||{name:a.user_name,team:a.team,sk:{}}); const cur=P.sk[a.skill]; if(!cur||Number(a.score)>cur.score||(Number(a.score)===cur.score&&a.started_at>cur.at)) P.sk[a.skill]={score:Number(a.score),passed:a.passed,at:a.started_at}; });
+        const list = Object.values(people).sort((x,y)=>String(x.team).localeCompare(String(y.team))||x.name.localeCompare(y.name));
+        const exp = at => months>0 && new Date(at).getTime()+months*30.4*86400000<Date.now();
+        return <Card>
+          <div style={{fontSize:12.5,color:"var(--text-3)",marginBottom:10}}>Best result per person and skill. Green = passed, amber = below the pass mark, grey strikethrough = expired{months>0?" (older than "+months+" months)":""}. Only people who have completed a test appear.</div>
+          <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}}>
+            <thead><tr>{["Person","Team"].concat(skills).map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
+            <tbody>{list.map(P=><tr key={P.name+P.team}><td style={td}>{P.name}</td><td style={td}>{P.team||"-"}</td>
+              {skills.map(sk=>{ const r=P.sk[sk]; if(!r) return <td key={sk} style={td}>-</td>; const ex=exp(r.at); return <td key={sk} style={td}><span style={{fontWeight:700,padding:"2px 8px",borderRadius:6,background:ex?"#f1f5f9":r.passed?"#dcfce7":"#fef3c7",color:ex?"#94a3b8":r.passed?"#166534":"#92400e",textDecoration:ex?"line-through":"none"}}>{r.score}%</span></td>; })}</tr>)}
+              {!list.length && <tr><td style={td} colSpan={2+skills.length}>No completed tests yet.</td></tr>}</tbody></table></div>
+        </Card>; })()}
 
       {tab==="bank" && (
         <Card>
@@ -6616,13 +6676,15 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
           <select value={fSkill} onChange={e=>setFSkill(e.target.value)} style={{...sS,width:200,marginBottom:10}}><option value="">All skills</option>{skills.map(s=><option key={s}>{s}</option>)}</select>
           <div style={{fontSize:12,color:"var(--text-3)",marginBottom:8}}>A test draws {ST_COUNT} random questions from a skill's bank, so a bigger bank gives different tests each time. A skill opens for members once it has at least {ST_COUNT} active questions.</div>
           <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}}>
-            <thead><tr>{["Skill","Type","Question","Answer","Source",""].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
+            <thead><tr>{["Skill","Type","Question","Answer","Usage",""].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
             <tbody>
               {bank.filter(b=>!fSkill||b.skill===fSkill).slice(0,300).map(b=>(
                 <tr key={b.id} style={{opacity:b.active?1:.5}}>
                   <td style={td}>{b.skill}</td><td style={td}>{b.data.type}</td>
                   <td style={{...td,maxWidth:360}}>{b.data.text}{b.data.type==="mcq" && <div style={{fontSize:11.5,color:"var(--text-3)"}}>{(b.data.options||[]).map((o,i)=>"ABCD"[i]+") "+o).join("  ")}</div>}</td>
-                  <td style={{...td,maxWidth:200}}>{b.data.answer}</td><td style={td}>{b.data.source||"-"}</td>
+                  <td style={{...td,maxWidth:200}}>{b.data.answer}</td>
+                  <td style={td}>{(()=>{ const t=qStats[b.id]; const pc=t?Math.round(t.s/t.n*100):null; const flag = t&&t.n>=5 ? (pc<20?"Very hard - check the answer":pc>95?"Too easy":null) : null;
+                    return <div><div style={{fontSize:11.5}}>{b.data.topic||"General"} · {b.data.source||"-"}</div>{t ? <div style={{fontSize:11.5}}>{t.n} answered · {pc}% correct</div> : <div style={{fontSize:11.5,color:"var(--text-3)"}}>not used yet</div>}{flag && <div style={{fontSize:11,color:"#b45309",fontWeight:700}}>⚠ {flag}</div>}</div>; })()}</td>
                   <td style={{...td,whiteSpace:"nowrap"}}><Btn sm v="sec" onClick={()=>toggleQ(b)}>{b.active?"Disable":"Enable"}</Btn> <Btn sm v="dan" onClick={()=>delQ(b.id)}>Delete</Btn></td>
                 </tr>))}
               {!bank.length && <tr><td style={td} colSpan={6}>No questions yet. Upload a file or generate with AI.</td></tr>}
@@ -6634,7 +6696,7 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
         <Card>
           <div style={{fontSize:14,fontWeight:700,marginBottom:6}}>Upload questions with answers</div>
           <div style={{fontSize:12.5,color:"var(--text-3)",lineHeight:1.6,marginBottom:12}}>
-            CSV columns: <code>skill, type, question, optionA, optionB, optionC, optionD, answer, difficulty</code>. For <b>mcq</b> the answer is a letter A-D. For <b>short</b> the answer is the reference answer the AI scores against (leave the options empty). A JSON array with the same fields (<code>skill,type,question,options[],answer,difficulty</code>) also works.
+            CSV columns: <code>skill, type, question, optionA, optionB, optionC, optionD, answer, difficulty, topic</code> (difficulty and topic are optional; topic powers the weak-area report). For <b>mcq</b> the answer is a letter A-D. For <b>short</b> the answer is the reference answer the AI scores against (leave the options empty). A JSON array with the same fields (<code>skill,type,question,options[],answer,difficulty</code>) also works.
           </div>
           <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
             <input type="file" accept=".csv,.json,text/csv,application/json" onChange={e=>{ onFile(e.target.files[0]); e.target.value=""; }}/>
@@ -6683,6 +6745,7 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
             <Lbl t="Skills (comma separated)"><input value={cfgForm.skills} onChange={e=>setCfgForm(f=>({...f,skills:e.target.value}))} style={iS}/></Lbl>
             <Lbl t="Pass mark (%)"><input type="number" value={cfgForm.passMark} onChange={e=>setCfgForm(f=>({...f,passMark:e.target.value}))} style={iS}/></Lbl>
             <Lbl t="Time limit (minutes)"><input type="number" value={cfgForm.timeLimitMin} onChange={e=>setCfgForm(f=>({...f,timeLimitMin:e.target.value}))} style={iS}/></Lbl>
+            <Lbl t="Result validity (months, 0 = never expires)"><input type="number" value={cfgForm.validityMonths==null?12:cfgForm.validityMonths} onChange={e=>setCfgForm(f=>({...f,validityMonths:e.target.value}))} style={iS}/></Lbl>
             <Lbl t="Days before a retake"><input type="number" value={cfgForm.cooldownDays} onChange={e=>setCfgForm(f=>({...f,cooldownDays:e.target.value}))} style={iS}/></Lbl>
             <label style={{display:"flex",gap:8,alignItems:"flex-start",fontSize:13,color:"var(--text-2)",cursor:"pointer"}}><input type="checkbox" checked={cfgForm.proctorCamera!==false} onChange={e=>setCfgForm(f=>({...f,proctorCamera:e.target.checked}))} style={{marginTop:3}}/><span>Require camera proctoring (face, head and eye-direction analysis on the device; no video is stored)</span></label>
             <div><Btn onClick={saveCfg}>Save settings</Btn></div>
@@ -14749,8 +14812,8 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
         <div style={{marginBottom:22}}>
           <PageHero icon="👤" title="My Profile" subtitle="Your account details, engineer level and activity history"/>
           <div style={{fontSize:12,color:"var(--text-3)",marginTop:3}}>Manage your personal information and account settings</div>
-          <div style={{marginTop:10}}><Btn v="sec" sm onClick={()=>goPage("skill_tests")}>🎯 Take a skill test</Btn></div>
         </div>
+        <VerifiedSkills cloud={cloud} user={user} goPage={goPage}/>
 
         {/* Profile header card */}
         <Card style={{marginBottom:14}}>
