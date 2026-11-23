@@ -6104,6 +6104,49 @@ const stNorm = t => String(t||"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim(
 const stFmt = d => d ? new Date(d).toLocaleString([], {dateStyle:"medium", timeStyle:"short"}) : "-";
 const stStatusLabel = {in_progress:"In progress", submitted:"Completed", terminated:"Terminated", expired:"Expired", scoring_failed:"Scoring failed"};
 
+// ---- Camera proctoring (runs fully in the browser; only counts and a score are sent, never video or images) ----
+const ST_MP_VER = "0.10.14";
+async function stLoadLandmarker() {
+  if(window.__stLandmarker) return window.__stLandmarker;          // test hook
+  const url = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@"+ST_MP_VER+"/vision_bundle.mjs";
+  const load = (async()=>{
+    const mod = await import(/* @vite-ignore */ url);
+    const fileset = await mod.FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@"+ST_MP_VER+"/wasm");
+    return mod.FaceLandmarker.createFromOptions(fileset, {
+      baseOptions:{modelAssetPath:"https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"},
+      runningMode:"VIDEO", numFaces:2, outputFaceBlendshapes:true,
+    });
+  })();
+  return Promise.race([load, new Promise((_,rej)=>setTimeout(()=>rej(new Error("timeout")),25000))]);
+}
+// one detection result -> "ok" | "noface" | "multi" | "head" | "gaze"
+function stClassify(res) {
+  const faces = (res && res.faceLandmarks) || [];
+  if(!faces.length) return "noface";
+  if(faces.length>1) return "multi";
+  const lm = faces[0];
+  if(lm[1] && lm[234] && lm[454]) {
+    const r = (lm[1].x-lm[234].x)/((lm[454].x-lm[234].x)||1e-6);
+    if(r<0.3||r>0.7) return "head";
+  }
+  const cats = res.faceBlendshapes && res.faceBlendshapes[0] && res.faceBlendshapes[0].categories;
+  if(cats) {
+    const b = {}; cats.forEach(c=>{ b[c.categoryName]=c.score; });
+    const left = ((b.eyeLookOutLeft||0)+(b.eyeLookInRight||0))/2, right = ((b.eyeLookInLeft||0)+(b.eyeLookOutRight||0))/2, up = ((b.eyeLookUpLeft||0)+(b.eyeLookUpRight||0))/2;
+    if(left>0.6||right>0.6||up>0.6) return "gaze";
+  }
+  return "ok";
+}
+const ST_EVENT_MIN = {gaze:2, head:2, noface:3, multi:1.5};   // seconds a condition must last to count as an event
+const ST_EVENT_LABEL = {gaze:"looked away from screen", head:"turned head away", noface:"face not visible", multi:"more than one face"};
+function stProctorSummary(st) {
+  const total = st.total, okPct = total ? st.by.ok/total*100 : 0;
+  const multiEv = st.events.filter(e=>e.type==="multi").length;
+  const analysed = total>=20;
+  return {analysed, camera:true, samples:total, okPct:Math.round(okPct*10)/10, score: analysed ? Math.max(0, Math.round(okPct - Math.min(40, multiEv*10))) : null, events:st.events.slice(0,100)};
+}
+const stProctorBand = sc => sc==null ? ["Not analysed","var(--text-3)"] : sc>=85 ? ["Good","#059669"] : sc>=65 ? ["Review","#b45309"] : ["Concerning","#b91c1c"];
+
 function StTerms({cfg, skill, onCancel, onAccept}) {
   const [ok, setOk] = React.useState(false);
   const li = {marginBottom:7,lineHeight:1.5};
@@ -6119,7 +6162,9 @@ function StTerms({cfg, skill, onCancel, onAccept}) {
           <li style={li}>A terminated, expired or completed test <b>counts as an attempt</b>. You can retake the test after <b>{cfg.cooldownDays} day{cfg.cooldownDays===1?"":"s"}</b>.</li>
           <li style={li}>No external help: no other people, notes, websites, AI tools or second devices. Copy, paste, right-click and keyboard shortcuts are disabled.</li>
           <li style={li}>Multiple-choice answers are scored automatically. Written answers are scored by AI against a reference answer, so answer clearly and precisely.</li>
-          <li style={li}>Your result, answers and any violations are recorded and visible to your manager and administrators.</li>
+          {cfg.proctorCamera!==false && <li style={li}><b>Camera proctoring.</b> Your camera must stay on. Your face, head position and eye direction are analysed <b>on your device</b> to produce a proctoring score. <b>No video or images are recorded or uploaded</b> - only counts of events (for example "looked away", "face not visible", "more than one face") and the score are saved. Turning the camera off ends the test.</li>}
+          {cfg.proctorCamera!==false && <li style={li}>Sit alone, face the screen in good light and keep your face visible. Camera analysis is approximate and can be wrong, so the proctoring score is only an indicator that your manager may review; it does not by itself fail you.</li>}
+          <li style={li}>Your result, answers, violations{cfg.proctorCamera!==false?" and proctoring score":""} are recorded and visible to your manager and administrators.</li>
         </ol>
         <label style={{display:"flex",gap:9,alignItems:"flex-start",margin:"16px 0",fontSize:13,color:"var(--text-1)",cursor:"pointer"}}>
           <input type="checkbox" checked={ok} onChange={e=>setOk(e.target.checked)} style={{marginTop:3}}/>
@@ -6143,22 +6188,33 @@ function StRunner({cloud, run, cfg, onClose}) {
   const [busy, setBusy] = React.useState(false);
   const [confirm, setConfirm] = React.useState(false);
   const ended = React.useRef(false); const armed = React.useRef(false);
+  const videoRef = React.useRef(null);
+  const pst = React.useRef({total:0, by:{ok:0,gaze:0,head:0,noface:0,multi:0}, events:[], cur:null, curLen:0, t0:Date.now()});
+  const [live, setLive] = React.useState(run.stream ? (run.lm ? "ok" : "on") : "off");
+  const proctor = () => {
+    const st = pst.current;
+    if(st.cur && st.cur!=="ok" && st.curLen>=ST_EVENT_MIN[st.cur]) { st.events.push({type:st.cur, at:Math.round((Date.now()-st.t0)/1000), secs:Math.round(st.curLen*10)/10}); st.cur=null; st.curLen=0; }
+    if(!run.stream) return null;
+    const sm = stProctorSummary(st); if(!run.lm) { sm.analysed=false; sm.score=null; sm.note="Camera was on but analysis could not start on this device"; }
+    return sm;
+  };
   const ans = React.useRef({}); ans.current = answers;
   const exitFs = () => { try { if(document.fullscreenElement) document.exitFullscreen(); } catch(e) {} };
 
+  const stopCam = () => { try { if(run.stream) run.stream.getTracks().forEach(t=>t.stop()); if(run.lm && run.lm.close && !window.__stLandmarker) run.lm.close(); } catch(e) {} };
   const terminate = React.useCallback(reason => {
     if(ended.current) return; ended.current = true;
-    callAiFn(cloud, {mode:"st_terminate", attemptId, reason}).catch(()=>{});
-    exitFs(); setEnd({type:"terminated", reason});
+    callAiFn(cloud, {mode:"st_terminate", attemptId, reason, proctor:proctor()}).catch(()=>{});
+    stopCam(); exitFs(); setEnd({type:"terminated", reason});
   }, [cloud, attemptId]);
 
   const submit = React.useCallback(async () => {
     if(ended.current) return; ended.current = true; setBusy(true); setConfirm(false);
     try {
-      const res = await callAiFn(cloud, {mode:"st_submit", attemptId, answers:ans.current});
-      exitFs(); setEnd(res.status==="submitted" ? {type:"result",res} : {type:"failed",msg:res.message});
+      const res = await callAiFn(cloud, {mode:"st_submit", attemptId, answers:ans.current, proctor:proctor()});
+      stopCam(); exitFs(); setEnd(res.status==="submitted" ? {type:"result",res} : {type:"failed",msg:res.message});
     } catch(e) {
-      exitFs(); setEnd({type:"failed", msg:e.message});
+      stopCam(); exitFs(); setEnd({type:"failed", msg:e.message});
     }
     setBusy(false);
   }, [cloud, attemptId]);
@@ -6198,6 +6254,23 @@ function StRunner({cloud, run, cfg, onClose}) {
     return ()=>clearInterval(iv);
   }, [end]);
   React.useEffect(()=>{ if(left<=0 && !ended.current && !end) submit(); }, [left, end, submit]);
+
+  React.useEffect(()=>{
+    const v = videoRef.current, stream = run.stream; if(!stream) return;
+    if(v) { v.srcObject = stream; v.play && v.play().catch(()=>{}); }
+    const tracks = stream.getVideoTracks();
+    const onEnd = () => { if(armed.current && !ended.current) terminate("Camera was turned off"); };
+    tracks.forEach(t=>t.addEventListener("ended", onEnd));
+    let iv = null;
+    if(run.lm) iv = setInterval(()=>{
+      if(ended.current || !v || v.readyState<2) return;
+      let state; try { state = stClassify(run.lm.detectForVideo(v, performance.now())); } catch(e) { return; }
+      const st = pst.current; st.total++; st.by[state]++; setLive(state);
+      if(st.cur===state) st.curLen += 0.25;
+      else { if(st.cur && st.cur!=="ok" && st.curLen>=ST_EVENT_MIN[st.cur]) st.events.push({type:st.cur, at:Math.round((Date.now()-st.t0)/1000), secs:Math.round(st.curLen*10)/10}); st.cur=state; st.curLen=0.25; }
+    }, 250);
+    return ()=>{ if(iv) clearInterval(iv); tracks.forEach(t=>t.removeEventListener("ended", onEnd)); };
+  }, [terminate]); // eslint-disable-line
 
   const q = questions[idx]; const mm = String(Math.floor(Math.max(0,left)/60)).padStart(2,"0"), ss = String(Math.max(0,left)%60).padStart(2,"0");
   const done = questions.filter(x=>String(answers[x.id]||"").trim()).length;
@@ -6270,6 +6343,12 @@ function StRunner({cloud, run, cfg, onClose}) {
               {questions.map((x,i)=>{ const a=!!String(answers[x.id]||"").trim(); return (
                 <button key={x.id} onClick={()=>setIdx(i)} style={{padding:"6px 0",borderRadius:8,border:"1.5px solid "+(i===idx?"var(--brand)":"var(--border)"),background:a?"#dcfce7":"var(--surface)",fontSize:12,fontWeight:700,cursor:"pointer",color:"var(--text-1)"}}>{i+1}</button>); })}
             </div>
+            {run.stream && <div style={{marginTop:14}}>
+              <video ref={videoRef} muted playsInline data-testid="cam" style={{width:"100%",borderRadius:10,background:"#000",transform:"scaleX(-1)",display:"block"}}/>
+              <div style={{fontSize:11.5,marginTop:6,fontWeight:700,color:live==="ok"?"#059669":live==="on"?"var(--text-3)":"#b45309"}} data-testid="camstate">
+                {live==="ok"?"● Camera OK":live==="on"?"● Camera on":live==="gaze"?"● Please look at the screen":live==="head"?"● Please face the screen":live==="noface"?"● Face not visible":live==="multi"?"● More than one face detected":""}
+              </div>
+            </div>}
             <div style={{marginTop:14}}><Btn v="suc" style={{width:"100%",justifyContent:"center"}} onClick={()=>setConfirm(true)}>Submit test</Btn></div>
             <div style={{fontSize:11,color:"var(--text-3)",marginTop:10,lineHeight:1.5}}>Leaving this window or exiting full screen terminates the test.</div>
           </div>
@@ -6302,6 +6381,7 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
   const [fSkill, setFSkill] = React.useState("");
   const [srch, setSrch] = React.useState("");
   const [newSkill, setNewSkill] = React.useState("");
+  const [prep, setPrep] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [up, setUp] = React.useState(null);           // {ok,bad}
   const [gen, setGen] = React.useState({skill:"", count:30, difficulty:"mixed", type:"mixed", items:[], busy:false});
@@ -6310,7 +6390,7 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
   const load = React.useCallback(async () => {
     if(!sb) return;
     setLoading(true); setErr("");
-    try { const d = await callAiFn(cloud, {mode:"st_list"}); setInfo(d); setCfgForm(f=>f||{skills:d.config.skills.join(", "), passMark:d.config.passMark, timeLimitMin:d.config.timeLimitMin, cooldownDays:d.config.cooldownDays}); setGen(g=>g.skill?g:{...g, skill:d.config.skills[0]}); }
+    try { const d = await callAiFn(cloud, {mode:"st_list"}); setInfo(d); setCfgForm(f=>f||{skills:d.config.skills.join(", "), passMark:d.config.passMark, timeLimitMin:d.config.timeLimitMin, cooldownDays:d.config.cooldownDays, proctorCamera:d.config.proctorCamera!==false}); setGen(g=>g.skill?g:{...g, skill:d.config.skills[0]}); }
     catch(e) { setErr(e.message); }
     setLoading(false);
   }, [sb, cloud]);
@@ -6342,10 +6422,20 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
     if(!document.documentElement.requestFullscreen) { toast("This browser or device does not support full screen, so the test cannot be taken here. Use a desktop browser.","err"); return; }
     try { await document.documentElement.requestFullscreen(); }
     catch(e) { toast("Full screen was blocked. Allow full screen and try again.","err"); return; }
+    let stream = null, lm = null;
+    const bail = (m) => { try{ if(stream) stream.getTracks().forEach(t=>t.stop()); }catch(x){} try{ if(document.fullscreenElement) document.exitFullscreen(); }catch(x){} toast(m,"err"); };
+    if(cfg.proctorCamera!==false) {
+      if(!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) { bail("This device has no camera access, so the test cannot be taken here."); return; }
+      try { stream = await navigator.mediaDevices.getUserMedia({video:{width:640,height:480,facingMode:"user"}, audio:false}); }
+      catch(e) { bail("Camera access is required for this test. Allow the camera and try again."); return; }
+      setPrep(true);
+      try { lm = await stLoadLandmarker(); } catch(e) { lm = null; }
+      setPrep(false);
+    }
     try {
       const d = await callAiFn(cloud, {mode:"st_start", skill});
-      setRun({...d, skill});
-    } catch(e) { try{ if(document.fullscreenElement) document.exitFullscreen(); }catch(x){} toast(e.message,"err"); load(); }
+      setRun({...d, skill, stream, lm});
+    } catch(e) { bail(e.message); load(); }
   };
   const closeRun = () => { setRun(null); load(); };
 
@@ -6396,7 +6486,7 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
   const saveCfg = async () => {
     const sk = cfgForm.skills.split(",").map(s=>s.trim()).filter(Boolean);
     if(!sk.length) { toast("Add at least one skill","err"); return; }
-    const data = {skills:[...new Set(sk)], passMark:Math.min(100,Math.max(1,Number(cfgForm.passMark)||70)), timeLimitMin:Math.min(180,Math.max(5,Number(cfgForm.timeLimitMin)||45)), cooldownDays:Math.min(365,Math.max(0,Number(cfgForm.cooldownDays)||0))};
+    const data = {skills:[...new Set(sk)], passMark:Math.min(100,Math.max(1,Number(cfgForm.passMark)||70)), timeLimitMin:Math.min(180,Math.max(5,Number(cfgForm.timeLimitMin)||45)), cooldownDays:Math.min(365,Math.max(0,Number(cfgForm.cooldownDays)||0)), proctorCamera:cfgForm.proctorCamera!==false};
     const {error} = await sb.from("app_settings").upsert({key:"skillcfg", data}, {onConflict:"key"});
     if(error) { toast(error.message,"err"); return; } toast("Settings saved"); load();
   };
@@ -6470,16 +6560,18 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
             <Btn v="sec" sm onClick={loadAttempts}>Refresh</Btn>
           </div>
           <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}}>
-            <thead><tr>{["Person","Team","Skill","Started","Status","Score","Notes"].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
+            <thead><tr>{["Person","Team","Skill","Started","Status","Score","Proctoring","Notes"].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
             <tbody>
               {attempts.filter(a=>!fSkill||a.skill===fSkill).map(a=>(
                 <tr key={a.id}>
                   <td style={td}>{a.user_name}</td><td style={td}>{a.team||"-"}</td><td style={td}>{a.skill}</td><td style={td}>{stFmt(a.started_at)}</td>
                   <td style={td}>{stStatusLabel[a.status]||a.status}</td>
                   <td style={td}>{a.status==="submitted" ? <b style={{color:a.passed?"#059669":"#b45309"}}>{a.score}% {a.passed?"✓":"✗"}</b> : "-"}</td>
+                  <td style={td}>{(()=>{ const pr=a.data&&a.data.proctor; if(!pr) return "-"; const [bl,bc]=stProctorBand(pr.score); const ev={}; (pr.events||[]).forEach(e=>{ ev[e.type]=(ev[e.type]||0)+1; });
+                    return <div><b style={{color:bc}}>{pr.score==null?"-":pr.score} {bl}</b>{pr.analysed && <div style={{fontSize:11,color:"var(--text-3)"}}>{Object.keys(ev).map(k=>ev[k]+"x "+ST_EVENT_LABEL[k]).join(", ")||"no events"}</div>}{pr.note && <div style={{fontSize:11,color:"var(--text-3)"}}>{pr.note}</div>}</div>; })()}</td>
                   <td style={td}>{a.data&&a.data.reason ? a.data.reason : ""}{a.status==="scoring_failed" && <> <Btn sm v="sec" disabled={busy} onClick={()=>rescore(a.id)}>Re-score</Btn></>}</td>
                 </tr>))}
-              {!attempts.length && <tr><td style={td} colSpan={7}>No attempts yet.</td></tr>}
+              {!attempts.length && <tr><td style={td} colSpan={8}>No attempts yet.</td></tr>}
             </tbody></table></div>
         </Card>
       )}
@@ -6560,12 +6652,14 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
             <Lbl t="Pass mark (%)"><input type="number" value={cfgForm.passMark} onChange={e=>setCfgForm(f=>({...f,passMark:e.target.value}))} style={iS}/></Lbl>
             <Lbl t="Time limit (minutes)"><input type="number" value={cfgForm.timeLimitMin} onChange={e=>setCfgForm(f=>({...f,timeLimitMin:e.target.value}))} style={iS}/></Lbl>
             <Lbl t="Days before a retake"><input type="number" value={cfgForm.cooldownDays} onChange={e=>setCfgForm(f=>({...f,cooldownDays:e.target.value}))} style={iS}/></Lbl>
+            <label style={{display:"flex",gap:8,alignItems:"flex-start",fontSize:13,color:"var(--text-2)",cursor:"pointer"}}><input type="checkbox" checked={cfgForm.proctorCamera!==false} onChange={e=>setCfgForm(f=>({...f,proctorCamera:e.target.checked}))} style={{marginTop:3}}/><span>Require camera proctoring (face, head and eye-direction analysis on the device; no video is stored)</span></label>
             <div><Btn onClick={saveCfg}>Save settings</Btn></div>
             <div style={{fontSize:12,color:"var(--text-3)"}}>Renaming a skill does not move existing questions or results; they stay under the old name.</div>
           </div>
         </Card>
       )}
 
+      {prep && <div style={{position:"fixed",inset:0,zIndex:99998,background:"var(--bg, #f6f7fb)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"var(--text-1)"}}>Preparing camera proctoring... the test starts in a moment.</div>}
       {terms && <StTerms cfg={cfg} skill={terms} onCancel={()=>setTerms(null)} onAccept={()=>begin(terms)}/>}
       {run && <StRunner cloud={cloud} run={run} cfg={cfg} onClose={closeRun}/>}
     </div>
