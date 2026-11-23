@@ -5586,6 +5586,200 @@ const ImprovementMatrix = ({items}) => {
     </div></div>);
 };
 
+// ===== Audit log: who changed what =====
+const AUDIT_ENT = {users:"member", teams:"team", acts:"activity", mis:"incident", logs:"time log", settings:"setting"};
+const AUDIT_MASK = new Set(["password"]);
+const AUDIT_SKIP = new Set(["lastLogin"]);
+const auditLabel = (name, it) => name==="acts" ? (it.name||it.id) : name==="mis" ? ((it.incidentNo||it.id)+" "+(it.name||"")).trim() : name==="logs" ? ((it.member||"")+" · "+(it.activity||it.actId||"")+" · "+(it.mins||0)+"m") : name==="settings" ? it.key : (it.name||it.id||"");
+const auditShort = v => { if(v===undefined||v===null||v==="") return "(empty)"; if(typeof v==="object") return Array.isArray(v) ? "["+v.length+" items]" : "{…}"; const t=String(v); return t.length>70?t.slice(0,70)+"…":t; };
+function auditDiff(name, prev, items, now, actor) {
+  const c = CLOUD_COLL[name]; const byKey = {}; items.forEach(it=>{ byKey[c.key(it)] = it; });
+  const ev = [];
+  now.forEach((j,k)=>{ if(!prev.has(k)) ev.push({kind:"created", k, it:byKey[k]}); else if(prev.get(k)!==j) ev.push({kind:"updated", k, it:byKey[k], before:prev.get(k)}); });
+  prev.forEach((j,k)=>{ if(!now.has(k)) { let it={}; try { it = JSON.parse(j); } catch(e) {} ev.push({kind:"deleted", k, it}); } });
+  if(!ev.length) return [];
+  const base = {at:new Date().toISOString(), actor:(actor&&actor.name)||"", actorId:(actor&&actor.id)||"", role:(actor&&actor.role)||"", entity:AUDIT_ENT[name]||name};
+  if(ev.length > 40) {
+    const n = {created:0,updated:0,deleted:0}; ev.forEach(e=>{ n[e.kind]++; });
+    return [{...base, action:"bulk", entityId:"", summary:Object.keys(n).filter(x=>n[x]).map(x=>n[x]+" "+base.entity+(n[x]>1?"s":"")+" "+x).join(", "), changes:[]}];
+  }
+  return ev.map(e=>{
+    let changes = [];
+    if(e.kind==="updated") {
+      let b = {}; try { b = JSON.parse(e.before); } catch(x) {}
+      const a = e.it||{}; const keys = [...new Set([...Object.keys(b), ...Object.keys(a)])];
+      keys.forEach(f=>{ if(AUDIT_SKIP.has(f)) return; if(_canon(b[f])===_canon(a[f])) return;
+        changes.push(AUDIT_MASK.has(f) ? {f, from:"", to:"(changed)"} : {f, from:auditShort(b[f]), to:auditShort(a[f])}); });
+      if(!changes.length) return null;
+      changes = changes.slice(0,12);
+    }
+    return {...base, action:e.kind, entityId:String(e.k), summary:auditLabel(name, e.it||{}), changes};
+  }).filter(Boolean);
+}
+function auditWrite(cloud, entries) {
+  if(!entries || !entries.length) return;
+  if(!cloud) {
+    try { const cur = JSON.parse(localStorage.getItem("isms_audit")||"[]"); localStorage.setItem("isms_audit", JSON.stringify(cur.concat(entries).slice(-2000))); } catch(e) {}
+    return;
+  }
+  const rows = entries.map(e=>({action:e.action, entity:e.entity, entity_id:e.entityId||null, summary:(e.summary||"").slice(0,300), changes:e.changes||[]}));
+  (async()=>{
+    for(let i=0;i<rows.length;i+=200) {
+      try { const r = await cloud.sb.from("audit_log").insert(rows.slice(i,i+200)); if(r && r.error) { window.__auditErr = r.error.message; console.warn("Audit log not saved:", r.error.message); return; } window.__auditErr = ""; }
+      catch(e) { window.__auditErr = e.message||String(e); return; }
+    }
+  })();
+}
+async function auditLoad(cloud) {
+  if(!cloud) { try { return {rows:JSON.parse(localStorage.getItem("isms_audit")||"[]").slice().reverse(), err:""}; } catch(e) { return {rows:[], err:""}; } }
+  const r = await cloud.sb.from("audit_log").select("*").order("at",{ascending:false}).limit(1000);
+  if(r.error) return {rows:[], err:r.error.message};
+  return {rows:(r.data||[]).map(x=>({at:x.at, actor:x.actor, actorId:x.actor_id, role:x.role, action:x.action, entity:x.entity, entityId:x.entity_id, summary:x.summary, changes:x.changes||[]})), err:""};
+}
+
+const AuditPage = ({cloud, toast}) => {
+  const [rows,setRows] = useState([]); const [busy,setBusy] = useState(true); const [err,setErr] = useState("");
+  const [f,setF] = useState({q:"",entity:"",action:"",actor:"",from:""}); const [open,setOpen] = useState({}); const [lim,setLim] = useState(100);
+  const load = async () => { setBusy(true); const r = await auditLoad(cloud); setRows(r.rows); setErr(r.err); setBusy(false); };
+  React.useEffect(()=>{ load(); }, []);
+  const actors = [...new Set(rows.map(r=>r.actor).filter(Boolean))].sort();
+  const entities = [...new Set(rows.map(r=>r.entity).filter(Boolean))].sort();
+  const list = rows.filter(r=>(!f.entity||r.entity===f.entity) && (!f.action||r.action===f.action) && (!f.actor||r.actor===f.actor) && (!f.from||String(r.at).slice(0,10)>=f.from) &&
+    (!f.q.trim() || (String(r.summary)+" "+r.actor+" "+r.entity+" "+(r.changes||[]).map(c=>c.f+" "+c.from+" "+c.to).join(" ")).toLowerCase().includes(f.q.trim().toLowerCase())));
+  const exportCsv = () => {
+    const q = v => '"'+String(v==null?"":v).replace(/"/g,'""')+'"';
+    const csv = ["When,Who,Role,Action,Type,Item,Changes"].concat(list.map(r=>[r.at,r.actor,r.role,r.action,r.entity,r.summary,(r.changes||[]).map(c=>c.f+": "+c.from+" -> "+c.to).join("; ")].map(q).join(","))).join("\n");
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv],{type:"text/csv"})); a.download = "isms_audit_log.csv"; a.click(); toast("Audit log exported");
+  };
+  const col = a => a==="created"?["#166534","#f0fdf4"]:a==="deleted"?["#b91c1c","#fef2f2"]:a==="updated"?["#1d4ed8","#eff6ff"]:a==="bulk"?["#a16207","#fffbeb"]:["#475569","#f1f5f9"];
+  const sel = {padding:"6px 8px",borderRadius:7,border:"1px solid var(--border-2)",fontSize:12.5,background:"var(--surface)"};
+  return (<div data-testid="audit-page">
+    <PageHero icon="🧾" title="Audit Log" subtitle={cloud?"Who changed what, from the database · newest first · read-only":"Who changed what in this browser · newest first (cloud mode keeps a shared, tamper-resistant log)"}/>
+    {err && <div style={{margin:"12px 0",padding:"10px 12px",borderRadius:8,background:"#fffbeb",border:"1px solid #fde68a",fontSize:12.5,color:"#92400e"}}>Could not read the audit table: {err}. Run <code>cloud/audit_log.sql</code> once in the Supabase SQL Editor.</div>}
+    <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",margin:"14px 0"}}>
+      <input value={f.q} onChange={e=>setF({...f,q:e.target.value})} placeholder="Search item, person or field" style={{...sel,flex:"1 1 220px"}}/>
+      <select value={f.entity} onChange={e=>setF({...f,entity:e.target.value})} style={sel}><option value="">All types</option>{entities.map(x=><option key={x}>{x}</option>)}</select>
+      <select value={f.action} onChange={e=>setF({...f,action:e.target.value})} style={sel}><option value="">All actions</option>{["created","updated","deleted","bulk","signed in"].map(x=><option key={x}>{x}</option>)}</select>
+      <select value={f.actor} onChange={e=>setF({...f,actor:e.target.value})} style={sel}><option value="">Everyone</option>{actors.map(x=><option key={x}>{x}</option>)}</select>
+      <input type="date" value={f.from} onChange={e=>setF({...f,from:e.target.value})} style={sel} title="From date"/>
+      <Btn sm v="sec" onClick={load}>{busy?"Loading…":"Refresh"}</Btn><Btn sm onClick={exportCsv} disabled={!list.length}>⬇ Export CSV</Btn>
+    </div>
+    <Card style={{padding:0,overflow:"hidden"}}>
+      <div style={{display:"grid",gridTemplateColumns:"150px 150px 90px 100px minmax(0,1fr)",gap:12,padding:"9px 14px",background:"var(--surface-2)",fontSize:11,fontWeight:700,color:"var(--text-3)",textTransform:"uppercase",letterSpacing:.4}}><span>When</span><span>Who</span><span>Action</span><span>Type</span><span>Item</span></div>
+      {!busy && list.length===0 && <div style={{padding:30,textAlign:"center",fontSize:13,color:"var(--text-3)"}}>No entries{rows.length?" match these filters":" yet. Changes made from now on will appear here"}.</div>}
+      {list.slice(0,lim).map((r,i)=>{ const [c,bg]=col(r.action); const has=(r.changes||[]).length>0; return (
+        <div key={i} style={{borderTop:"1px solid var(--surface-3)"}}>
+          <div onClick={()=>has&&setOpen(o=>({...o,[i]:!o[i]}))} style={{display:"grid",gridTemplateColumns:"150px 150px 90px 100px minmax(0,1fr)",gap:12,padding:"9px 14px",alignItems:"center",fontSize:12.5,cursor:has?"pointer":"default"}}>
+            <span style={{color:"var(--text-3)",fontVariantNumeric:"tabular-nums"}}>{new Date(r.at).toLocaleString([], {year:"2-digit",month:"short",day:"2-digit",hour:"2-digit",minute:"2-digit"})}</span>
+            <span style={{fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.actor||"system"}</span>
+            <span style={{fontSize:11,fontWeight:700,color:c,background:bg,borderRadius:10,padding:"2px 0",textAlign:"center"}}>{r.action}</span>
+            <span style={{color:"var(--text-3)"}}>{r.entity}</span>
+            <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={r.summary}>{r.summary}{has && <span style={{color:"var(--text-4)"}}> · {r.changes.length} field{r.changes.length>1?"s":""} {open[i]?"▾":"▸"}</span>}</span>
+          </div>
+          {open[i] && has && <div style={{padding:"4px 14px 10px 164px",fontSize:12}}>{r.changes.map((x,k)=>(<div key={k} style={{padding:"2px 0"}}><strong>{x.f}</strong>: <span style={{color:"var(--text-3)"}}>{x.from}</span> → <span>{x.to}</span></div>))}</div>}
+        </div>); })}
+      {list.length>lim && <div style={{padding:12,textAlign:"center",borderTop:"1px solid var(--surface-3)"}}><Btn sm v="sec" onClick={()=>setLim(l=>l+200)}>Show more ({list.length-lim} left)</Btn></div>}
+    </Card>
+  </div>);
+};
+
+// ===== Service catalogue and cost per service =====
+const SVC_TIERS = ["Tier 1","Tier 2","Tier 3"];
+const incServiceIds = (m, services) => {
+  const ids = new Set(m.serviceIds||[]); const txt = String(m.impactedServices||"").toLowerCase();
+  services.forEach(s=>{ if(s.active!==false && txt && txt.includes(String(s.name).toLowerCase())) ids.add(s.id); });
+  return [...ids];
+};
+function suggestServices(mis, existing) {
+  const have = new Set(existing.map(s=>s.name.toLowerCase())); const seen = {}; 
+  mis.forEach(m=>String(m.impactedServices||"").split(/[,;]/).map(x=>x.trim()).filter(x=>x.length>1).forEach(n=>{
+    const k=n.toLowerCase(); if(have.has(k)) return; const o=seen[k]||(seen[k]={name:n,teams:{}}); (m.teamsInvolved||[]).forEach(t=>{ o.teams[t]=(o.teams[t]||0)+1; });
+  }));
+  return Object.values(seen).map((o,i)=>({id:"SVC-"+Date.now().toString(36).slice(-4)+i, name:o.name, tier:"Tier 2", ownerTeam:Object.keys(o.teams).sort((a,b)=>o.teams[b]-o.teams[a])[0]||"", description:"", active:true}));
+}
+function serviceCosts(services, acts, logs, mis, users, fromMonth) {
+  const rate = {}; users.forEach(u=>{ rate[u.id]=u.costPerHour||0; });
+  const actSvc = {}; acts.forEach(a=>{ if(a.service) actSvc[a.id]=a.service; });
+  const misById = {}; mis.forEach(m=>{ misById[m.id]=m; });
+  const rows = {}; const row = id => rows[id]||(rows[id]={id, incidents:0, incHours:0, incCost:0, workCost:0, workHours:0});
+  const inRange = d => !fromMonth || String(d||"").slice(0,7) >= fromMonth;
+  let linked = 0, total = 0;
+  mis.forEach(m=>{ if(!inRange((m.startedAt||m.date||""))) return; const ids = incServiceIds(m, services); const dur = (m.startedAt&&m.resolvedAt)?(new Date(m.resolvedAt)-new Date(m.startedAt))/3600000:0;
+    (ids.length?ids:["__none"]).forEach(id=>{ const r=row(id); r.incidents++; r.incHours += dur/(ids.length||1); }); });
+  logs.forEach(l=>{ if(!inRange(l.date)) return; const c = l.mins/60*(rate[l.userId]||0); total += c;
+    const m = misById[l.actId];
+    if(m) { const ids = incServiceIds(m, services); if(ids.length) { linked += c; ids.forEach(id=>{ row(id).incCost += c/ids.length; }); } else row("__none").incCost += c; }
+    else if(actSvc[l.actId]) { linked += c; const r=row(actSvc[l.actId]); r.workCost += c; r.workHours += l.mins/60; } });
+  const list = services.map(s=>{ const r=rows[s.id]||{incidents:0,incHours:0,incCost:0,workCost:0,workHours:0}; const t=r.incCost+r.workCost; return {...s, incidents:r.incidents, incHours:Math.round(r.incHours*10)/10, incCost:r.incCost, workCost:r.workCost, workHours:Math.round(r.workHours*10)/10, total:t, perIncident:r.incidents?r.incCost/r.incidents:0}; });
+  const un = rows["__none"]||{incidents:0,incCost:0};
+  return {list:list.sort((a,b)=>b.total-a.total), unassigned:{incidents:un.incidents, incCost:un.incCost}, coverage: total?Math.round(linked/total*100):null, total, linked};
+}
+const fmtUsd = n => "$"+Math.round(n).toLocaleString();
+
+const ServicesPage = ({services, setServices, acts, logs, mis, users, teamNames, canEdit, toast}) => {
+  const [tab,setTab] = useState("catalogue"); const [nf,setNf] = useState({name:"",tier:"Tier 2",ownerTeam:"",description:""}); const [range,setRange] = useState("6");
+  const months = [...new Set(logs.map(l=>(l.date||"").slice(0,7)).filter(Boolean))].sort();
+  const from = range==="all" ? "" : months[Math.max(0, months.length-(+range))] || "";
+  const cost = useMemo(()=>serviceCosts(services, acts, logs, mis, users, from), [services, acts, logs, mis, users, from]);
+  const mx = Math.max(1, ...cost.list.map(r=>r.total));
+  const add = () => { if(!nf.name.trim()) { toast("Service name required","err"); return; } if(services.some(s=>s.name.toLowerCase()===nf.name.trim().toLowerCase())) { toast("That service already exists","err"); return; }
+    setServices([...services, {id:"SVC-"+Date.now().toString(36), name:nf.name.trim(), tier:nf.tier, ownerTeam:nf.ownerTeam, description:nf.description.trim(), active:true}]); setNf({name:"",tier:"Tier 2",ownerTeam:"",description:""}); toast("Service added"); };
+  const upd = (id, p) => setServices(services.map(s=>s.id===id?{...s,...p}:s));
+  const inp = {padding:"6px 8px",borderRadius:7,border:"1px solid var(--border-2)",fontSize:12.5,background:"var(--surface)"};
+  const TabB = ({id,label}) => <button onClick={()=>setTab(id)} style={{padding:"10px 16px",border:"none",background:"transparent",cursor:"pointer",fontSize:13,fontWeight:600,color:tab===id?"var(--brand)":"var(--text-3)",borderBottom:"2px solid "+(tab===id?"var(--brand)":"transparent"),marginBottom:-2}}>{label}</button>;
+  const tierCol = t => t==="Tier 1"?["#b91c1c","#fef2f2"]:t==="Tier 2"?["#a16207","#fffbeb"]:["#475569","#f1f5f9"];
+  return (<div data-testid="services-page">
+    <PageHero icon="🧩" title="Service Catalogue" subtitle="The services you run, who owns them, and what they cost in incidents and engineering effort"/>
+    <div style={{display:"flex",borderBottom:"2px solid var(--border)",margin:"14px 0 16px"}}><TabB id="catalogue" label={"Catalogue ("+services.length+")"}/><TabB id="cost" label="Cost per service"/></div>
+    {tab==="catalogue" && (<div>
+      {canEdit && <Card style={{marginBottom:12}}>
+        <div style={{fontWeight:700,fontSize:13,marginBottom:8}}>Add a service</div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+          <input value={nf.name} onChange={e=>setNf({...nf,name:e.target.value})} placeholder="Service name, e.g. Payments API" style={{...inp,flex:"1 1 200px"}} onKeyDown={e=>{ if(e.key==="Enter") add(); }}/>
+          <select value={nf.tier} onChange={e=>setNf({...nf,tier:e.target.value})} style={inp}>{SVC_TIERS.map(t=><option key={t}>{t}</option>)}</select>
+          <select value={nf.ownerTeam} onChange={e=>setNf({...nf,ownerTeam:e.target.value})} style={inp}><option value="">Owner team…</option>{teamNames.map(t=><option key={t}>{t}</option>)}</select>
+          <input value={nf.description} onChange={e=>setNf({...nf,description:e.target.value})} placeholder="What it does (optional)" style={{...inp,flex:"2 1 220px"}}/>
+          <Btn sm onClick={add}>Add</Btn>
+          <Btn sm v="sec" onClick={()=>{ const s=suggestServices(mis, services); if(!s.length) { toast("No new services found in incident data"); return; } setServices([...services, ...s]); toast(s.length+" services created from incident data. Please set owner and tier."); }}>Suggest from incidents</Btn>
+        </div></Card>}
+      <Card style={{padding:0,overflow:"hidden"}}>
+        <div style={{display:"grid",gridTemplateColumns:"minmax(0,1.3fr) 90px 120px 90px minmax(0,1.6fr) 70px",gap:12,padding:"9px 14px",background:"var(--surface-2)",fontSize:11,fontWeight:700,color:"var(--text-3)",textTransform:"uppercase",letterSpacing:.4}}><span>Service</span><span>Tier</span><span>Owner</span><span>Incidents</span><span>Description</span><span>Active</span></div>
+        {services.length===0 && <div style={{padding:28,textAlign:"center",fontSize:13,color:"var(--text-3)"}}>No services yet. Add one above, or use "Suggest from incidents" to build the list from the services named in your incidents.</div>}
+        {services.map(s=>{ const n = mis.filter(m=>incServiceIds(m,services).includes(s.id)).length; const [c,bg]=tierCol(s.tier); return (
+          <div key={s.id} style={{display:"grid",gridTemplateColumns:"minmax(0,1.3fr) 90px 120px 90px minmax(0,1.6fr) 70px",gap:12,padding:"9px 14px",borderTop:"1px solid var(--surface-3)",alignItems:"center",fontSize:12.5,opacity:s.active===false?.5:1}}>
+            <span style={{fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={s.name}>{s.name}</span>
+            {canEdit ? <select value={s.tier} onChange={e=>upd(s.id,{tier:e.target.value})} style={{...inp,padding:"3px 4px",color:c,background:bg,fontWeight:700}}>{SVC_TIERS.map(t=><option key={t}>{t}</option>)}</select> : <span style={{color:c,background:bg,fontWeight:700,borderRadius:10,padding:"2px 8px",textAlign:"center"}}>{s.tier}</span>}
+            {canEdit ? <select value={s.ownerTeam||""} onChange={e=>upd(s.id,{ownerTeam:e.target.value})} style={{...inp,padding:"3px 4px"}}><option value="">-</option>{teamNames.map(t=><option key={t}>{t}</option>)}</select> : <span>{s.ownerTeam||"-"}</span>}
+            <span style={{fontWeight:700}}>{n}</span>
+            {canEdit ? <input value={s.description||""} onChange={e=>upd(s.id,{description:e.target.value})} style={{...inp,padding:"3px 6px",width:"100%",boxSizing:"border-box"}}/> : <span style={{color:"var(--text-3)"}}>{s.description}</span>}
+            <label style={{display:"flex",alignItems:"center",gap:4,fontSize:12}}><input type="checkbox" disabled={!canEdit} checked={s.active!==false} onChange={e=>upd(s.id,{active:e.target.checked})}/></label>
+          </div>); })}
+      </Card>
+      <div style={{fontSize:11.5,color:"var(--text-4)",marginTop:8}}>Incidents are linked to a service when you tick it on the incident, or when the service name appears in the incident's "Impacted services" text. Activities are linked from the Service field in the activity form.</div>
+    </div>)}
+    {tab==="cost" && (<div data-testid="service-cost">
+      <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:12,flexWrap:"wrap"}}>
+        <select value={range} onChange={e=>setRange(e.target.value)} style={inp}><option value="3">Last 3 months</option><option value="6">Last 6 months</option><option value="12">Last 12 months</option><option value="all">All time</option></select>
+        <span style={{fontSize:12,color:"var(--text-3)"}}>Cost = logged hours x each person's hourly rate. Incident effort is split evenly across the services an incident touched.</span>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:12,marginBottom:14}}>
+        <Card><div style={{fontSize:11,color:"var(--text-4)"}}>Linked to a service</div><div style={{fontSize:24,fontWeight:800}}>{fmtUsd(cost.linked)}</div><div style={{fontSize:11,color:"var(--text-3)"}}>{cost.coverage===null?"no data":cost.coverage+"% of all logged cost"}</div></Card>
+        <Card><div style={{fontSize:11,color:"var(--text-4)"}}>Most expensive service</div><div style={{fontSize:18,fontWeight:800,marginTop:4}}>{cost.list[0]&&cost.list[0].total>0?cost.list[0].name:"-"}</div><div style={{fontSize:11,color:"var(--text-3)"}}>{cost.list[0]&&cost.list[0].total>0?fmtUsd(cost.list[0].total):""}</div></Card>
+        <Card><div style={{fontSize:11,color:"var(--text-4)"}}>Incidents with no service</div><div style={{fontSize:24,fontWeight:800,color:cost.unassigned.incidents?"#c2410c":"#16a34a"}}>{cost.unassigned.incidents}</div><div style={{fontSize:11,color:"var(--text-3)"}}>{fmtUsd(cost.unassigned.incCost)} effort not attributed</div></Card>
+      </div>
+      <Card style={{padding:0,overflow:"hidden"}}>
+        <div style={{display:"grid",gridTemplateColumns:"minmax(0,1.3fr) 70px 80px 80px 100px 100px minmax(120px,1.2fr)",gap:12,padding:"9px 14px",background:"var(--surface-2)",fontSize:11,fontWeight:700,color:"var(--text-3)",textTransform:"uppercase",letterSpacing:.4}}><span>Service</span><span>Tier</span><span style={{textAlign:"right"}}>Incidents</span><span style={{textAlign:"right"}}>Incident h</span><span style={{textAlign:"right"}}>Incident cost</span><span style={{textAlign:"right"}}>Work cost</span><span>Total</span></div>
+        {cost.list.length===0 && <div style={{padding:28,textAlign:"center",fontSize:13,color:"var(--text-3)"}}>Add services first.</div>}
+        {cost.list.map(r=>(<div key={r.id} style={{display:"grid",gridTemplateColumns:"minmax(0,1.3fr) 70px 80px 80px 100px 100px minmax(120px,1.2fr)",gap:12,padding:"9px 14px",borderTop:"1px solid var(--surface-3)",alignItems:"center",fontSize:12.5}}>
+          <span style={{fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={r.name}>{r.name}</span><span style={{color:"var(--text-3)"}}>{r.tier}</span>
+          <span style={{textAlign:"right"}}>{r.incidents}</span><span style={{textAlign:"right"}}>{r.incHours}</span><span style={{textAlign:"right"}}>{fmtUsd(r.incCost)}</span><span style={{textAlign:"right"}}>{fmtUsd(r.workCost)}</span>
+          <span style={{display:"flex",alignItems:"center",gap:8}}><div style={{flex:1,height:8,background:"var(--surface-3)",borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:(r.total/mx*100)+"%",background:"var(--brand)"}}/></div><strong style={{minWidth:64,textAlign:"right"}}>{fmtUsd(r.total)}</strong></span>
+        </div>))}
+      </Card>
+    </div>)}
+  </div>);
+};
+
 const DEFAULT_CATEGORIES = ["Infrastructure Build","Maintenance","Security & Compliance","Automation & Scripting","Monitoring & Alerting","Documentation"].map(n=>({name:n, active:true}));
 // Values pre-filled in the Log Time form from an activity's own settings
 const logDefaultsFrom = (a, f) => ({
@@ -6886,6 +7080,13 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     try { const sv = localStorage.getItem('isms_sla'); if(sv) return {...DEFAULT_SLA, ...JSON.parse(sv)}; } catch(e) {}
     return DEFAULT_SLA;
   });
+  const [services, setServicesRaw] = useState(()=>{
+    if(cloud) { const row = (cloud.data.settings||[]).find(x=>x.key==="services"); return (row && Array.isArray(row.items)) ? row.items : []; }
+    try { const sv = localStorage.getItem('isms_services'); if(sv) { const a = JSON.parse(sv); if(Array.isArray(a)) return a; } } catch(e) {}
+    return [];
+  });
+  const setServices = (next) => { catsDirty.current = true; setServicesRaw(next); };
+  React.useEffect(()=>{ if(cloud) return; try{ localStorage.setItem('isms_services', JSON.stringify(services)); }catch(e){} }, [services]);
   const updateSla = (next) => { catsDirty.current = true; setSlaTargets(next); };
   React.useEffect(()=>{ if(cloud) return; try{ localStorage.setItem('isms_sla', JSON.stringify(slaTargets)); }catch(e){} }, [slaTargets]);
   const [newCat, setNewCat] = useState("");
@@ -6922,7 +7123,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     if(!cloud) return;
     let stop = false, busy = false;
     const setters = {users:setAllUsers, teams:setTeams, acts:setActs, mis:setMis, logs:setLogs,
-      settings:(arr)=>{ const r = arr.find(x=>x.key==="categories"); if(r && Array.isArray(r.items) && r.items.length) setCategories(r.items); const q = arr.find(x=>x.key==="sla"); if(q && q.targets) setSlaTargets({...DEFAULT_SLA, ...q.targets}); }};
+      settings:(arr)=>{ const r = arr.find(x=>x.key==="categories"); if(r && Array.isArray(r.items) && r.items.length) setCategories(r.items); const q = arr.find(x=>x.key==="sla"); if(q && q.targets) setSlaTargets({...DEFAULT_SLA, ...q.targets}); const sv = arr.find(x=>x.key==="services"); if(sv && Array.isArray(sv.items)) setServicesRaw(sv.items); }};
     const pull = async () => {
       if(stop || busy || document.hidden) return;
       if(Object.values(syncDirty.current).some(Boolean)) return;   // unsaved local edits - do not overwrite
@@ -6932,7 +7133,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
         if(Object.values(syncDirty.current).some(Boolean)) { busy = false; return; }
         Object.keys(setters).forEach(k=>{
           const ns = cloudSnap(k, fresh[k]);
-          if(!cloudSnapSame(ns, cloud.snaps[k])) { cloud.snaps[k] = ns; setters[k](fresh[k]); }
+          if(!cloudSnapSame(ns, cloud.snaps[k])) { cloud.snaps[k] = ns; if(k!=="settings") auditPrev.current[k] = ns; setters[k](fresh[k]); }
         });
       } catch(e) { console.warn("Cloud refresh failed:", e); }
       busy = false;
@@ -6941,12 +7142,21 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     window.addEventListener("focus", pull);
     return ()=>{ stop = true; clearInterval(iv); window.removeEventListener("focus", pull); };
   }, []);
-  React.useEffect(()=>{ cloudSave("users", allUsers); }, [allUsers]);
-  React.useEffect(()=>{ cloudSave("teams", teams);    }, [teams]);
-  React.useEffect(()=>{ cloudSave("acts",  acts);     }, [acts]);
-  React.useEffect(()=>{ cloudSave("mis",   mis);      }, [mis]);
-  React.useEffect(()=>{ cloudSave("logs",  logs);     }, [logs]);
-  React.useEffect(()=>{ if(catsDirty.current) cloudSave("settings", [{key:"categories", items:categories},{key:"sla", targets:slaTargets}]); }, [categories, slaTargets]);
+  // Audit trail: diff each collection against its previous state and record who changed what
+  const auditPrev = React.useRef({});
+  const auditTrack = (name, items) => {
+    const now = cloudSnap(name, items); const prev = auditPrev.current[name]; auditPrev.current[name] = now;
+    if(!prev) return;
+    auditWrite(cloud, auditDiff(name, prev, items, now, user));
+  };
+  React.useEffect(()=>{ if(user && user.id) auditWrite(cloud, [{at:new Date().toISOString(), actor:user.name, actorId:user.id, role:user.role, action:"signed in", entity:"session", entityId:user.id, summary:user.name+" signed in", changes:[]}]); }, [user && user.id]);
+  React.useEffect(()=>{ auditTrack("users", allUsers); cloudSave("users", allUsers); }, [allUsers]);
+  React.useEffect(()=>{ auditTrack("teams", teams); cloudSave("teams", teams);    }, [teams]);
+  React.useEffect(()=>{ auditTrack("acts", acts); cloudSave("acts",  acts);     }, [acts]);
+  React.useEffect(()=>{ auditTrack("mis", mis); cloudSave("mis",   mis);      }, [mis]);
+  React.useEffect(()=>{ auditTrack("logs", logs); cloudSave("logs",  logs);     }, [logs]);
+  React.useEffect(()=>{ const st=[{key:"categories", items:categories},{key:"sla", targets:slaTargets},{key:"services", items:services}]; if(catsDirty.current) auditTrack("settings", st); else auditPrev.current.settings = cloudSnap("settings", st); }, [categories, slaTargets, services]);
+  React.useEffect(()=>{ if(catsDirty.current) cloudSave("settings", [{key:"categories", items:categories},{key:"sla", targets:slaTargets},{key:"services", items:services}]); }, [categories, slaTargets, services]);
   const [modal,      setModal]      = useState(null);
   const [target,     setTarget]     = useState(null);
   const [showSwitch, setShowSwitch] = useState(false);
@@ -7250,7 +7460,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
   };
 
   // forms
-  const bAct = {name:"",team:"",type:"BAU",cat:(categories.find(c=>c.active!==false)||{name:"Infrastructure Build"}).name,estMins:480,status:"Active",priority:"Medium",nature:"Proactive",workNature:"Change",ticketNo:"",jira:"",taskSize:"",complexity:"",level:"",desc:"",progress:0};
+  const bAct = {name:"",team:"",type:"BAU",cat:(categories.find(c=>c.active!==false)||{name:"Infrastructure Build"}).name,service:"",estMins:480,status:"Active",priority:"Medium",nature:"Proactive",workNature:"Change",ticketNo:"",jira:"",taskSize:"",complexity:"",level:"",desc:"",progress:0};
   const bLog = {actId:"",mins:30,notes:"",date:today(),ticketRef:"",nature:"Proactive",workType:"Project",workNature:"Change",cat:"",priority:"Medium"};
   const [aForm, setAForm] = useState(bAct);
   const [lForm, setLForm] = useState(bLog);
@@ -7377,7 +7587,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
 
   const delAct    = id => { setActs(p=>p.filter(a=>a.id!==id)); showToast("Activity removed"); };
   const delLog    = id => { setLogs(p=>p.filter(l=>l.id!==id)); showToast("Entry deleted"); };
-  const openEditA = a => { setTarget(a); setAForm({name:a.name,team:a.team,type:a.type,cat:a.cat,estMins:a.estMins,status:a.status,priority:a.priority||"Medium",nature:a.nature||"Proactive",workNature:a.workNature||"Change",ticketNo:a.ticketNo||"",jira:a.jira||"",taskSize:a.taskSize||"",complexity:a.complexity||"",level:a.level||"",desc:a.desc,progress:a.progress||0}); setModal("act"); };
+  const openEditA = a => { setTarget(a); setAForm({name:a.name,team:a.team,type:a.type,cat:a.cat,estMins:a.estMins,status:a.status,priority:a.priority||"Medium",nature:a.nature||"Proactive",workNature:a.workNature||"Change",ticketNo:a.ticketNo||"",jira:a.jira||"",taskSize:a.taskSize||"",complexity:a.complexity||"",level:a.level||"",desc:a.desc,progress:a.progress||0,service:a.service||""}); setModal("act"); };
   const openEditL = l  => { setTarget(l); setLForm({actId:l.actId,mins:l.mins,notes:l.notes,date:l.date,ticketRef:l.ticketRef||"",nature:l.nature||"Proactive",workType:l.workType||"Project",workNature:l.workNature||"Change",cat:l.cat||"",priority:l.priority||"Medium"}); setModal("log"); };
 
   // Re-ID all non-MI activities in alphabetical order (ACT-001, ACT-002, ...)
@@ -7539,6 +7749,13 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       benefits:["Shows gaps and overload while there is still time to fix the week","Makes the reactive share visible so interruptions can be discussed with evidence","Collects your overdue incident follow-ups in one place"],
     },
     {
+      id:"services", icon:"🧩", label:"Service Catalogue",
+      mgrSec:"Operations",
+      role:"mgr", guideGroup:"🚨 Major Incident Management", guideColor:"#dc2626", guideBg:"#fef2f2",
+      desc:"List of the services the teams run, with tier and owning team. Incidents and activities link to services, and the cost view shows incident count, downtime hours and engineering cost per service.",
+      benefits:["Shows which services cost the most to keep running, in people-hours and dollars","Links incidents to the service they hit so repeat offenders stand out","Suggests the first catalogue from the services already named in your incidents"],
+    },
+    {
       id:"teams", icon:"👥", label:"Team Management", mgrLabel:"Team Management", mbrLabel:"Team View",
       mgrSec:"Operations", mbrSec:"Team",
       role:"all", guideGroup:"👥 User & Team Management", guideColor:"#7c3aed", guideBg:"#f5f3ff",
@@ -7577,6 +7794,13 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     },
 
     // == System ================================================
+    {
+      id:"audit_log", icon:"🧾", label:"Audit Log",
+      mgrSec:"System",
+      role:"admin", guideGroup:"👥 User & Team Management", guideColor:"#7c3aed", guideBg:"#f5f3ff",
+      desc:"Append-only record of who created, changed or deleted activities, incidents, time logs, members, teams and settings, with the fields that changed. Administrators can search, filter and export it.",
+      benefits:["Answers who changed what and when, for audits and incident reviews","Cloud mode stores it in a database table nobody can edit or delete through the app","Password changes are recorded without their values"],
+    },
     {
       id:"usermgmt", icon:"🔐", label:"User Management",
       mgrSec:"System",
@@ -15122,6 +15346,17 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
           why:"A swing of more than two standard deviations from the team's own history usually has a cause worth finding: a project, an incident wave, a staffing change or a logging gap.",
           action:{label:"Open team scorecard", run:()=>{ window.__acTab="score"; goPage("action_center"); }}});
       });
+      services.filter(sv=>sv.active!==false).forEach(sv=>{
+        const hit = sMis.filter(m=>incServiceIds(m, services).includes(sv.id));
+        const lim = sv.tier==="Tier 1" ? 2 : 3;
+        if(hit.length >= lim) {
+          const hrs = hit.reduce((x,m)=>x+((m.startedAt&&m.resolvedAt)?(new Date(m.resolvedAt)-new Date(m.startedAt))/3600000:0),0);
+          add({id:"svc-"+sv.id, domain:"Incidents", sev:sv.tier==="Tier 1"?"high":"medium", score:50+hit.length*3+(sv.tier==="Tier 1"?8:0),
+            title:sv.name+" ("+sv.tier+") has had "+hit.length+" major incidents", detail:Math.round(hrs*10)/10+" hours to resolve in total"+(sv.ownerTeam?" · owner: "+sv.ownerTeam:""),
+            why:"A service that keeps appearing in incidents is a candidate for a problem record and a permanent fix.",
+            action:{label:"Open incidents", run:()=>{ window.__miTab="problems"; goPage("major_incidents"); }}});
+        }
+      });
       teamNames.forEach(t=>{
         const sm = skillMatrix(sLog, sUsers, t);
         const one = sm.rows.filter(r=>r.total>=40 && r.cover===1).slice(0,4);
@@ -15223,7 +15458,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
 
       F.sort((a,b)=>b.score-a.score);
       return {F, series, projHrs, scorecard, anchorStr, monthKey, totalCap, nAct:sAct.length, nUsers:sUsers.length, nLogs:sLog.length, toil, inflight, avgRate, autoBuild, autoBasis, slaStats};
-    }, [acts, logs, mis, allUsers, isAdmin, user, prodData, slaTargets]);
+    }, [acts, logs, mis, allUsers, isAdmin, user, prodData, slaTargets, services]);
 
     const sevMeta = {critical:{c:"#b91c1c",bg:"#fef2f2",l:"Critical"}, high:{c:"#c2410c",bg:"#fff7ed",l:"High"}, medium:{c:"#a16207",bg:"#fefce8",l:"Medium"}, info:{c:"#1d4ed8",bg:"#eff6ff",l:"Info"}};
     const domains = ["All", ...Array.from(new Set(model.F.map(f=>f.domain)))];
@@ -16557,7 +16792,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     const [miTab, _setMiTab] = React.useState(window.__miTab||"dashboard");
     const setMiTab = (t)=>{ window.__miTab=t; _setMiTab(t); };
     const [createOpen, setCreateOpen] = React.useState(false);
-    const [miForm, setMiForm] = React.useState({incidentNo:"",name:"",severity:"Sev1",impactedServices:"",teamsInvolved:[],desc:""});
+    const [miForm, setMiForm] = React.useState({incidentNo:"",name:"",severity:"Sev1",impactedServices:"",serviceIds:[],teamsInvolved:[],desc:""});
     const [flow, setFlow] = React.useState(null);          // {mi, mode: "resolve" | "close" | "reopen" | "view"}
     const [flowForm, setFlowForm] = React.useState({summary:"", root:"", when:"", note:""});
     const [aiBox, setAiBox] = React.useState({busy:false, err:"", kind:"", text:"", rca:null});
@@ -16654,7 +16889,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
         id:uid("MI"), incidentNo:miForm.incidentNo, name:miForm.name,
         severity:miForm.severity, status:"Open",
         startedAt:new Date().toISOString(), resolvedAt:null,
-        impactedServices:miForm.impactedServices,
+        impactedServices:miForm.impactedServices, serviceIds:miForm.serviceIds||[],
         teamsInvolved:miForm.teamsInvolved,
         rootCause:"", isMajorIncident:true,
         team:"Cross-Team", type:"Incident", cat:"Maintenance",
@@ -16664,7 +16899,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       };
       setMis(p=>[newMI,...p]);
       setCreateOpen(false);
-      setMiForm({incidentNo:"",name:"",severity:"Sev1",impactedServices:"",teamsInvolved:[],desc:""});
+      setMiForm({incidentNo:"",name:"",severity:"Sev1",impactedServices:"",serviceIds:[],teamsInvolved:[],desc:""});
       showToast(`Major Incident ${miForm.incidentNo} raised`);
     };
 
@@ -17085,6 +17320,10 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
               <input style={iS} value={miForm.impactedServices} placeholder="e.g. ERP, CRM, VPN, Internet"
                 onChange={e=>setMiForm(f=>({...f,impactedServices:e.target.value}))}/>
             </Lbl>
+            {services.filter(x=>x.active!==false).length>0 && <div style={{gridColumn:"1/-1"}}>
+              <div style={{fontSize:12,fontWeight:600,marginBottom:4}}>Link catalogue services</div>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{services.filter(x=>x.active!==false).map(x=>{ const on=(miForm.serviceIds||[]).includes(x.id); return <button type="button" key={x.id} onClick={()=>setMiForm(f=>({...f,serviceIds:on?(f.serviceIds||[]).filter(i=>i!==x.id):[...(f.serviceIds||[]),x.id]}))} style={{fontSize:12,padding:"3px 10px",borderRadius:14,border:"1px solid "+(on?"var(--brand)":"var(--border-2)"),background:on?"var(--brand-light)":"var(--surface)",color:on?"var(--brand)":"var(--text-2)",cursor:"pointer"}}>{x.name}</button>; })}</div>
+            </div>}
 
             <Lbl t="Teams Involved">
               <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:4}}>
@@ -17205,6 +17444,11 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
                         <div style={{flex:1}}><strong>{h.action}</strong>{" by " + h.by}{h.note ? <div style={{color:"var(--text-3)",marginTop:2,whiteSpace:"pre-wrap"}}>{h.note}</div> : null}</div>
                       </div>
                     ))}
+                  {services.filter(x=>x.active!==false).length>0 && <div data-testid="mi-services" style={{margin:"10px 0"}}>
+                    <div style={{fontWeight:700,fontSize:12,color:"var(--text-3)",textTransform:"uppercase",letterSpacing:.5,marginBottom:6}}>Services affected</div>
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{services.filter(x=>x.active!==false).map(x=>{ const on=incServiceIds(cur,services).includes(x.id); const explicit=(cur.serviceIds||[]).includes(x.id);
+                      return <button type="button" key={x.id} disabled={!isMgrOrAdmin} title={on&&!explicit?"Matched from the Impacted services text":""} onClick={()=>setMis(p=>p.map(m=>m.id===cur.id?{...m,serviceIds:explicit?(m.serviceIds||[]).filter(i=>i!==x.id):[...(m.serviceIds||[]),x.id]}:m))} style={{fontSize:12,padding:"3px 10px",borderRadius:14,border:"1px solid "+(on?"var(--brand)":"var(--border-2)"),background:on?"var(--brand-light)":"var(--surface)",color:on?"var(--brand)":"var(--text-3)",cursor:isMgrOrAdmin?"pointer":"default"}}>{x.name}</button>; })}</div>
+                  </div>}
                   <SimilarBox cur={cur} mis={mis}/>
                   <div style={{fontWeight:700,fontSize:12,color:"var(--text-3)",textTransform:"uppercase",letterSpacing:.5,margin:"16px 0 8px"}}>Follow-up actions {(cur.actionItems||[]).length>0 && <span style={{textTransform:"none",fontWeight:500}}>({(cur.actionItems||[]).filter(a=>a.done).length}/{(cur.actionItems||[]).length} done)</span>}</div>
                   {(cur.actionItems||[]).length===0 && <div style={{fontSize:12.5,color:"var(--text-4)",marginBottom:6}}>No follow-up actions yet. Add the fixes that stop this happening again.</div>}
@@ -17743,6 +17987,8 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     settings: PageSettings,
     action_center: PageActionCenter,
     my_week: PageMyWeek,
+    services: ()=><ServicesPage services={services} setServices={setServices} acts={acts} logs={logs} mis={mis} users={allUsers} teamNames={teams.map(t=>t.name)} canEdit={isMgrOrAdmin} toast={showToast}/>,
+    audit_log: ()=><AuditPage cloud={cloud} toast={showToast}/>,
     prod_overview: PageProdOverview,
     prod_flags: PageProdFlags,
     prod_heatmap: PageProdHeatmap,
@@ -18090,6 +18336,12 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
               </div>
             </Lbl>
 
+            {services.filter(x=>x.active!==false).length>0 && <Lbl t="Service (for cost per service)">
+              <select style={sS} value={aForm.service||""} onChange={e=>setAForm(f=>({...f,service:e.target.value}))}>
+                <option value="">— Not linked —</option>
+                {services.filter(x=>x.active!==false || x.id===aForm.service).map(x=><option key={x.id} value={x.id}>{x.name}</option>)}
+              </select>
+            </Lbl>}
             <div style={{gridColumn:"1/-1"}}><AssigneeSuggest form={aForm} users={allUsers} logs={logs} acts={acts} selfActId={target&&target.id}/></div>
             {/* Description */}
             <div style={{gridColumn:"1/-1"}}>
