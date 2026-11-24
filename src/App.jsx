@@ -5541,7 +5541,6 @@ const ChangeCalendar = ({acts, logs, mis, users, anchorStr}) => {
             <span style={{fontSize:12,color:"var(--text-3)"}}>{a.team}</span>
             {r ? <span style={{fontSize:11,fontWeight:700,color:col,background:bg,borderRadius:10,padding:"3px 0",textAlign:"center"}}>risk {r.score} · {r.band}</span> : <span/>}
           </div>
-          {a.cab && <div style={{fontSize:11.5,color:"var(--text-3)",marginTop:5,paddingLeft:100}}>Approval: {a.cab.state}{a.cab.state==="Pending approval"?" ("+cabCount(a.cab)+"/"+a.cab.required+")":""}</div>}
           {c.length>0 && <div style={{fontSize:11.5,color:"#92400e",marginTop:5,paddingLeft:100}}>⚠ {c.join(" · ")}</div>}
         </Card>); })}
     </div>))}
@@ -5610,7 +5609,6 @@ function auditDiff(name, prev, items, now, actor) {
       let b = {}; try { b = JSON.parse(e.before); } catch(x) {}
       const a = e.it||{}; const keys = [...new Set([...Object.keys(b), ...Object.keys(a)])];
       keys.forEach(f=>{ if(AUDIT_SKIP.has(f)) return; if(_canon(b[f])===_canon(a[f])) return;
-        if(f==="cab") { const bc=b.cab||{}, ac=a.cab||{}; if(bc.state!==ac.state) changes.push({f:"approval state", from:bc.state||"(none)", to:ac.state||"(none)"}); const nb=(bc.approvals||[]).length, na=(ac.approvals||[]).length; if(na>nb) { const l=ac.approvals[na-1]; changes.push({f:"decision", from:"", to:l.decision+" by "+l.by+(l.comment?": "+l.comment:"")}); } if(ac.outcome!==bc.outcome && ac.outcome) changes.push({f:"outcome", from:"", to:ac.outcome}); return; }
         changes.push(AUDIT_MASK.has(f) ? {f, from:"", to:"(changed)"} : {f, from:auditShort(b[f]), to:auditShort(a[f])}); });
       if(!changes.length) return null;
       changes = changes.slice(0,12);
@@ -5779,103 +5777,6 @@ const ServicesPage = ({services, setServices, acts, logs, mis, users, teamNames,
         </div>))}
       </Card>
     </div>)}
-  </div>);
-};
-
-// ===== CAB: change approval workflow (stored on the Change activity as act.cab) =====
-const CAB_STATES = ["Pending approval","Approved","Rejected","Implemented","Withdrawn"];
-const cabRequired = (score, emergency) => emergency ? 1 : (score >= 60 ? 2 : 1);
-const cabCount = (cab) => ((cab && cab.approvals) || []).filter(x=>x.decision==="approved").length;
-function cabDecide(act, user, decision, comment) {
-  const cab = act.cab || {}; const approvals = (cab.approvals||[]).filter(x=>x.by!==user.name).concat([{by:user.name, decision, comment:(comment||"").trim(), at:new Date().toISOString()}]);
-  const ok = approvals.filter(x=>x.decision==="approved").length;
-  const state = approvals.some(x=>x.decision==="rejected") ? "Rejected" : ok >= (cab.required||1) ? "Approved" : "Pending approval";
-  return {...act, cab:{...cab, approvals, state}};
-}
-const cabChip = st => ({"Pending approval":["#a16207","#fffbeb"],"Approved":["#166534","#f0fdf4"],"Rejected":["#b91c1c","#fef2f2"],"Implemented":["#1d4ed8","#eff6ff"],"Withdrawn":["#475569","#f1f5f9"]}[st]||["#475569","#f1f5f9"]);
-
-const CabPage = ({acts, setActs, users, user, isAdmin, logs, mis, toast}) => {
-  const [tab,setTab] = useState("mine"); const [dec,setDec] = useState({}); const [open,setOpen] = useState({});
-  const [req,setReq] = useState({actId:"", plannedDate:"", window:"", impact:"", test:"", rollback:"", emergency:false, reason:"", approvers:[]});
-  const [outcome,setOutcome] = useState({});
-  const changes = acts.filter(a=>a.type==="Change");
-  const risk = useMemo(()=>{ const m={}; changeRiskRows(acts, logs, mis, users, new Date().toISOString().slice(0,10)).forEach(r=>{ m[r.a.id]=r; }); return m; }, [acts, logs, mis, users]);
-  const approvers = users.filter(u=>(u.role==="manager"||u.role==="admin") && u.status==="Active" && u.name!==user.name);
-  const eligible = changes.filter(a=>a.status==="Active" && (!a.cab || ["Rejected","Withdrawn"].includes(a.cab.state)));
-  const pending = changes.filter(a=>a.cab && a.cab.state==="Pending approval");
-  const mine = pending.filter(a=>(a.cab.approvers||[]).includes(user.name) && !(a.cab.approvals||[]).some(x=>x.by===user.name));
-  const tracked = changes.filter(a=>a.cab);
-  const upd = (id, fn, msg) => { setActs(p=>p.map(a=>a.id===id?fn(a):a)); if(msg) toast(msg); };
-  const pick = id => { const a = acts.find(x=>x.id===id); const sug = users.filter(u=>(u.role==="manager"&&a&&u.team===a.team) || u.role==="admin").filter(u=>u.status==="Active"&&u.name!==user.name).map(u=>u.name).slice(0,2); setReq(r=>({...r, actId:id, approvers:sug})); };
-  const r0 = req.actId ? risk[req.actId] : null; const need = cabRequired(r0?r0.score:0, req.emergency);
-  const submit = () => {
-    if(!req.actId) { toast("Choose a change","err"); return; }
-    if(!req.plannedDate) { toast("Planned date required","err"); return; }
-    if(!req.rollback.trim()) { toast("A rollback plan is required","err"); return; }
-    if(req.emergency && !req.reason.trim()) { toast("Explain why this is an emergency","err"); return; }
-    if(req.approvers.length < need) { toast("Choose at least "+need+" approver"+(need>1?"s":""),"err"); return; }
-    upd(req.actId, a=>({...a, date:req.plannedDate, cab:{state:"Pending approval", requestedBy:user.name, requestedAt:new Date().toISOString(), plannedDate:req.plannedDate, window:req.window.trim(), impact:req.impact.trim(), test:req.test.trim(), rollback:req.rollback.trim(), emergency:req.emergency, reason:req.reason.trim(), approvers:req.approvers, required:need, riskScore:r0?r0.score:null, riskBand:r0?r0.band:null, approvals:[]}}), "Submitted for approval");
-    setReq({actId:"", plannedDate:"", window:"", impact:"", test:"", rollback:"", emergency:false, reason:"", approvers:[]}); setTab("all");
-  };
-  const inp = {padding:"7px 9px",borderRadius:7,border:"1px solid var(--border-2)",fontSize:13,background:"var(--surface)",width:"100%",boxSizing:"border-box"};
-  const TabB = ({id,label}) => <button onClick={()=>setTab(id)} style={{padding:"10px 16px",border:"none",background:"transparent",cursor:"pointer",fontSize:13,fontWeight:600,whiteSpace:"nowrap",color:tab===id?"var(--brand)":"var(--text-3)",borderBottom:"2px solid "+(tab===id?"var(--brand)":"transparent"),marginBottom:-2}}>{label}</button>;
-  const done = tracked.filter(a=>a.cab.state==="Implemented"); const okImpl = done.filter(a=>a.cab.outcome==="Successful").length;
-  const Card1 = (a) => { const c=a.cab; const [col,bg]=cabChip(c.state); const imOpen=open[a.id]; const canDecide = c.state==="Pending approval" && (c.approvers||[]).includes(user.name) && !(c.approvals||[]).some(x=>x.by===user.name);
-    return (<Card key={a.id} style={{marginBottom:10,padding:0,overflow:"hidden",borderLeft:"4px solid "+col}}>
-      <div style={{padding:"12px 16px"}}>
-        <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
-          <span style={{fontSize:11,fontWeight:700,color:col,background:bg,borderRadius:10,padding:"2px 10px"}}>{c.state}</span>
-          {c.emergency && <span style={{fontSize:11,fontWeight:700,color:"#b91c1c",background:"#fef2f2",borderRadius:10,padding:"2px 10px"}}>Emergency</span>}
-          {c.riskScore!=null && <span style={{fontSize:11,color:"var(--text-3)"}}>risk {c.riskScore} · {c.riskBand}</span>}
-          <span style={{marginLeft:"auto",fontSize:11.5,color:"var(--text-3)"}}>{c.plannedDate||a.date}{c.window?" · "+c.window:""}</span>
-        </div>
-        <div style={{fontSize:14,fontWeight:700,marginTop:6}}>{a.name} <span style={{fontWeight:400,color:"var(--text-4)",fontSize:12}}>· {a.team}</span></div>
-        <div style={{fontSize:12,color:"var(--text-3)",marginTop:3}}>Requested by {c.requestedBy} · approvals {cabCount(c)}/{c.required} · approvers: {(c.approvers||[]).map(n=>{ const d=(c.approvals||[]).find(x=>x.by===n); return n+(d?(d.decision==="approved"?" ✓":" ✗"):" …"); }).join(", ")}</div>
-        <button onClick={()=>setOpen(o=>({...o,[a.id]:!o[a.id]}))} style={{marginTop:6,border:"none",background:"none",color:"var(--brand)",fontSize:12,cursor:"pointer",padding:0}}>{imOpen?"Hide details ▾":"Show details ▸"}</button>
-        {imOpen && <div style={{fontSize:12.5,marginTop:6,display:"grid",gap:4}}>
-          {c.impact && <div><strong>Impact:</strong> {c.impact}</div>}{c.test && <div><strong>Test plan:</strong> {c.test}</div>}<div><strong>Rollback:</strong> {c.rollback}</div>{c.reason && <div><strong>Emergency reason:</strong> {c.reason}</div>}
-          {(c.approvals||[]).map((x,i)=><div key={i} style={{color:"var(--text-3)"}}>{x.decision==="approved"?"✓ Approved":"✗ Rejected"} by {x.by} on {new Date(x.at).toLocaleDateString()}{x.comment?": "+x.comment:""}</div>)}
-          {c.outcome && <div><strong>Outcome:</strong> {c.outcome}{c.outcomeNote?" · "+c.outcomeNote:""}</div>}
-        </div>}
-      </div>
-      {(canDecide || c.state==="Approved" || (c.state==="Pending approval" && (c.requestedBy===user.name||isAdmin))) && <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",padding:"8px 16px",borderTop:"1px solid var(--surface-3)",background:"var(--surface-2)"}}>
-        {canDecide && <>
-          <input value={dec[a.id]||""} onChange={e=>setDec(d=>({...d,[a.id]:e.target.value}))} placeholder="Comment (required to reject)" style={{...inp,flex:"1 1 220px",width:"auto"}}/>
-          <Btn sm onClick={()=>upd(a.id, x=>cabDecide(x,user,"approved",dec[a.id]), "Approved")}>Approve</Btn>
-          <Btn sm v="sec" onClick={()=>{ if(!(dec[a.id]||"").trim()) { toast("Add a comment to reject","err"); return; } upd(a.id, x=>cabDecide(x,user,"rejected",dec[a.id]), "Rejected"); }}>Reject</Btn></>}
-        {c.state==="Approved" && <>
-          <select value={outcome[a.id]||""} onChange={e=>setOutcome(o=>({...o,[a.id]:e.target.value}))} style={{...inp,width:"auto"}}><option value="">Outcome…</option><option>Successful</option><option>Failed</option><option>Rolled back</option></select>
-          <Btn sm onClick={()=>{ if(!outcome[a.id]) { toast("Choose the outcome","err"); return; } upd(a.id, x=>({...x, cab:{...x.cab, state:"Implemented", outcome:outcome[a.id], implementedBy:user.name, implementedAt:new Date().toISOString()}}), "Marked implemented"); }}>Mark implemented</Btn></>}
-        {c.state==="Pending approval" && (c.requestedBy===user.name||isAdmin) && <Btn sm v="sec" onClick={()=>upd(a.id, x=>({...x, cab:{...x.cab, state:"Withdrawn"}}), "Request withdrawn")}>Withdraw</Btn>}
-      </div>}
-    </Card>); };
-  return (<div data-testid="cab-page">
-    <PageHero icon="✅" title="Change Approvals" subtitle="Request, review and approve changes before work starts · every decision is recorded in the audit log"/>
-    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:12,margin:"16px 0"}}>
-      <Card><div style={{fontSize:11,color:"var(--text-4)"}}>Waiting for you</div><div style={{fontSize:26,fontWeight:800,color:mine.length?"#c2410c":"#16a34a"}}>{mine.length}</div></Card>
-      <Card><div style={{fontSize:11,color:"var(--text-4)"}}>Pending approval</div><div style={{fontSize:26,fontWeight:800}}>{pending.length}</div></Card>
-      <Card><div style={{fontSize:11,color:"var(--text-4)"}}>Approved, not yet done</div><div style={{fontSize:26,fontWeight:800}}>{tracked.filter(a=>a.cab.state==="Approved").length}</div></Card>
-      <Card><div style={{fontSize:11,color:"var(--text-4)"}}>Change success rate</div><div style={{fontSize:26,fontWeight:800}}>{done.length?Math.round(okImpl/done.length*100)+"%":"-"}</div><div style={{fontSize:11,color:"var(--text-3)"}}>{done.length} implemented</div></Card>
-    </div>
-    <div style={{display:"flex",borderBottom:"2px solid var(--border)",marginBottom:14,overflowX:"auto"}}><TabB id="mine" label={"Waiting for me ("+mine.length+")"}/><TabB id="all" label={"All requests ("+tracked.length+")"}/><TabB id="new" label="Request approval"/></div>
-    {tab==="mine" && (mine.length? mine.map(Card1) : <Card style={{textAlign:"center",padding:30,fontSize:13}}>Nothing is waiting for your approval.</Card>)}
-    {tab==="all" && (tracked.length? [...tracked].sort((a,b)=>String(b.cab.requestedAt||"").localeCompare(String(a.cab.requestedAt||""))).map(Card1) : <Card style={{textAlign:"center",padding:30,fontSize:13}}>No approval requests yet. Use "Request approval" for an active Change.</Card>)}
-    {tab==="new" && (<div data-testid="cab-form"><Card>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:12}}>
-        <label style={{fontSize:12,fontWeight:600}}>Change<select aria-label="Change" value={req.actId} onChange={e=>pick(e.target.value)} style={{...inp,marginTop:4}}><option value="">Choose an active Change…</option>{eligible.map(a=><option key={a.id} value={a.id}>{a.name} ({a.team})</option>)}</select></label>
-        <label style={{fontSize:12,fontWeight:600}}>Planned date<input type="date" value={req.plannedDate} onChange={e=>setReq({...req,plannedDate:e.target.value})} style={{...inp,marginTop:4}}/></label>
-        <label style={{fontSize:12,fontWeight:600}}>Change window<input value={req.window} onChange={e=>setReq({...req,window:e.target.value})} placeholder="e.g. Sat 22:00 to 02:00" style={{...inp,marginTop:4}}/></label>
-        <label style={{fontSize:12,fontWeight:600,gridColumn:"1/-1"}}>Impact (who or what is affected)<textarea value={req.impact} onChange={e=>setReq({...req,impact:e.target.value})} rows={2} style={{...inp,marginTop:4,resize:"vertical"}}/></label>
-        <label style={{fontSize:12,fontWeight:600}}>Test plan<textarea value={req.test} onChange={e=>setReq({...req,test:e.target.value})} rows={2} style={{...inp,marginTop:4,resize:"vertical"}}/></label>
-        <label style={{fontSize:12,fontWeight:600}}>Rollback plan (required)<textarea value={req.rollback} onChange={e=>setReq({...req,rollback:e.target.value})} rows={2} style={{...inp,marginTop:4,resize:"vertical"}}/></label>
-      </div>
-      <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12.5,margin:"12px 0 6px"}}><input type="checkbox" checked={req.emergency} onChange={e=>setReq({...req,emergency:e.target.checked})}/> Emergency change (needs one approval and a reason)</label>
-      {req.emergency && <input value={req.reason} onChange={e=>setReq({...req,reason:e.target.value})} placeholder="Why can this not wait for the normal process?" style={{...inp,marginBottom:8}}/>}
-      <div style={{fontSize:12,fontWeight:600,margin:"8px 0 6px"}}>Approvers {req.actId && <span style={{fontWeight:400,color:"var(--text-3)"}}>· {need} needed{r0?" (risk "+r0.score+" "+r0.band+")":""}</span>}</div>
-      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>{approvers.map(u=>{ const on=req.approvers.includes(u.name); return <button key={u.id} type="button" onClick={()=>setReq(r=>({...r,approvers:on?r.approvers.filter(n=>n!==u.name):[...r.approvers,u.name]}))} style={{fontSize:12,padding:"4px 11px",borderRadius:14,border:"1px solid "+(on?"var(--brand)":"var(--border-2)"),background:on?"var(--brand-light)":"var(--surface)",color:on?"var(--brand)":"var(--text-2)",cursor:"pointer"}}>{u.name} <span style={{color:"var(--text-4)"}}>{u.role==="admin"?"admin":u.team}</span></button>; })}</div>
-      <Btn onClick={submit}>Submit for approval</Btn>
-      <div style={{fontSize:11.5,color:"var(--text-4)",marginTop:8}}>Rule: changes with risk 60 or more need two approvals; others need one. You cannot approve your own request. Any rejection stops the request.</div>
-    </Card></div>)}
   </div>);
 };
 
@@ -8959,13 +8860,6 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       role:"all", guideGroup:"📋 Activity & Time Management", guideColor:"#059669", guideBg:"#f0fdf4",
       desc:"Personal weekly view of hours logged per day against an 8-hour day, reactive versus planned share, where the time went, missing days and follow-up actions that are overdue.",
       benefits:["Shows gaps and overload while there is still time to fix the week","Makes the reactive share visible so interruptions can be discussed with evidence","Collects your overdue incident follow-ups in one place"],
-    },
-    {
-      id:"cab", icon:"✅", label:"Change Approvals",
-      mgrSec:"Operations",
-      role:"mgr", guideGroup:"📋 Activity & Time Management", guideColor:"#059669", guideBg:"#f0fdf4",
-      desc:"Change advisory approval workflow: request approval for a Change with impact, test and rollback plans, route it to approvers, record approve or reject decisions with comments, and mark the outcome after implementation.",
-      benefits:["Stops risky changes starting without review: high-risk changes need two approvals","Every request, decision and outcome is kept and appears in the audit log","Tracks change success rate so approval rules can be tuned"],
     },
     {
       id:"services", icon:"🧩", label:"Service Catalogue",
@@ -16494,19 +16388,6 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
         why:"Lean/Kanban: more than 5% of items blocked indicates a governance gap.",
         action:{label:"Review suspended", run:()=>goPage("activities")}});
 
-      // -- 2a. Change approvals (CAB) -----------------------------------------
-      const cabPending = sAct.filter(a=>a.cab && a.cab.state==="Pending approval");
-      const mineWait = cabPending.filter(a=>(a.cab.approvers||[]).includes(user.name) && !(a.cab.approvals||[]).some(x=>x.by===user.name));
-      if(mineWait.length) add({id:"cab-mine", domain:"Delivery", sev:"high", score:78+Math.min(mineWait.length,5),
-        title:mineWait.length+" change"+(mineWait.length>1?"s":"")+" waiting for your approval", detail:mineWait.slice(0,4).map(a=>a.name).join(", ")+(mineWait.length>4?" and more":""),
-        why:"Approvers who delay hold up planned work and push people to start changes without sign-off.", action:{label:"Review approvals", run:()=>goPage("cab")}});
-      cabPending.forEach(a=>{ const days = Math.floor((Date.now()-new Date(a.cab.requestedAt||Date.now()).getTime())/86400000);
-        if(days>=3) add({id:"cab-old-"+a.id, domain:"Delivery", sev:"medium", score:52+Math.min(days,10), title:a.name+" has waited "+days+" days for approval", detail:"Approvals "+((a.cab.approvals||[]).filter(x=>x.decision==="approved").length)+"/"+a.cab.required+" · requested by "+a.cab.requestedBy,
-          why:"A stalled approval is either a blocker to unblock or a change that should be withdrawn.", action:{label:"Open approvals", run:()=>goPage("cab")}}); });
-      sAct.filter(a=>a.cab && (a.cab.state==="Pending approval"||a.cab.state==="Rejected") && (loggedByAct[a.id]||0)>=60).forEach(a=>{
-        add({id:"cab-unauth-"+a.id, domain:"Delivery", sev:"high", score:80, title:"Work logged on a change that is "+a.cab.state.toLowerCase()+": "+a.name, detail:Math.round((loggedByAct[a.id]||0)/6)/10+"h logged · "+a.team,
-          why:"Starting a change before it is approved bypasses the review that protects the service.", action:{label:"Open approvals", run:()=>goPage("cab")}}); });
-
       // -- 2b. Anomalies and single-person skill cover -----------------------
       monthAnomalies(sLog, allUsers, anchorStr).slice(0,5).forEach(an=>{
         add({id:"anom-"+an.team+"-"+an.key+"-"+an.month, domain:"Efficiency", sev:Math.abs(an.z)>=3?"high":"medium", score:46+Math.min(Math.abs(an.z),5)*2,
@@ -19156,7 +19037,6 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     action_center: PageActionCenter,
     my_week: PageMyWeek,
     skill_tests: ()=><SkillTestsPage cloud={cloud} user={user} users={allUsers} isAdmin={isAdmin} isMgr={isMgrOrAdmin} toast={showToast}/>,
-    cab: ()=><CabPage acts={acts} setActs={setActs} users={allUsers} user={user} isAdmin={isAdmin} logs={logs} mis={mis} toast={showToast}/>,
     services: ()=><ServicesPage services={services} setServices={setServices} acts={acts} logs={logs} mis={mis} users={allUsers} teamNames={teams.map(t=>t.name)} canEdit={isMgrOrAdmin} toast={showToast}/>,
     audit_log: ()=><AuditPage cloud={cloud} toast={showToast}/>,
     prod_overview: PageProdOverview,
