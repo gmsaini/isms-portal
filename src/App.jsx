@@ -6101,7 +6101,40 @@ function stRowsToQuestions(rows, skills) {
   return {ok,bad};
 }
 const stNorm = t => String(t||"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
-const stFmt = d => d ? new Date(d).toLocaleString([], {dateStyle:"medium", timeStyle:"short"}) : "-";
+const stFmt = d => d ? new Date(d).toLocaleString("en-GB",{day:"numeric",month:"short",hour:"numeric",minute:"2-digit",hour12:true}) : "-";
+const stFmtDate = d => d ? new Date(/^\d{4}-\d{2}-\d{2}$/.test(d)?d+"T00:00:00":d).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"}) : "-";
+const ST_TONE = {green:["#166534","#dcfce7"],amber:["#92400e","#fef3c7"],red:["#991b1b","#fee2e2"],grey:["#475569","#eef2f6"],blue:["#1e40af","#dbeafe"]};
+function StPill({tone="grey", children, title}) { const t = ST_TONE[tone]||ST_TONE.grey; return <span title={title} style={{display:"inline-block",padding:"2px 10px",borderRadius:999,fontSize:11.5,fontWeight:700,background:t[1],color:t[0],whiteSpace:"nowrap",lineHeight:1.5}}>{children}</span>; }
+const stStatusTone = {submitted:"green", terminated:"red", expired:"amber", scoring_failed:"amber", in_progress:"blue"};
+function StStat({icon, label, value, sub, tone}) {
+  const t = ST_TONE[tone]||null;
+  return (
+    <div style={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:12,padding:"14px 16px",display:"flex",gap:12,alignItems:"center",minWidth:0}}>
+      <div style={{width:40,height:40,borderRadius:10,background:t?t[1]:"var(--surface-2,#eef2f6)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:19,flex:"none"}}>{icon}</div>
+      <div style={{minWidth:0}}>
+        <div style={{fontSize:22,fontWeight:800,color:t?t[0]:"var(--text-1)",lineHeight:1.1}}>{value}</div>
+        <div style={{fontSize:12,fontWeight:600,color:"var(--text-2)"}}>{label}</div>
+        {sub && <div style={{fontSize:11,color:"var(--text-3)"}}>{sub}</div>}
+      </div>
+    </div>
+  );
+}
+function StEmpty({icon, title, text}) {
+  return <div style={{textAlign:"center",padding:"34px 16px",color:"var(--text-3)"}}><div style={{fontSize:30,marginBottom:6}}>{icon}</div><div style={{fontSize:14,fontWeight:700,color:"var(--text-2)"}}>{title}</div>{text && <div style={{fontSize:12.5,marginTop:3}}>{text}</div>}</div>;
+}
+function StScoreBar({score, pass}) {
+  if(score==null || score<0) return <span style={{color:"var(--text-3)"}}>-</span>;
+  const ok = score>=pass;
+  return (
+    <div style={{display:"flex",alignItems:"center",gap:8,minWidth:130}}>
+      <div style={{position:"relative",flex:1,height:8,borderRadius:4,background:"var(--surface-2,#e9edf3)"}}>
+        <div style={{width:Math.min(100,score)+"%",height:8,borderRadius:4,background:ok?"#16a34a":"#f59e0b"}}/>
+        <div title={"Pass mark "+pass+"%"} style={{position:"absolute",left:pass+"%",top:-3,width:2,height:14,background:"var(--text-3)",opacity:.5}}/>
+      </div>
+      <b style={{fontSize:12.5,color:ok?"#166534":"#92400e",minWidth:38,textAlign:"right"}}>{score}%</b>
+    </div>
+  );
+}
 const stStatusLabel = {in_progress:"In progress", submitted:"Completed", terminated:"Terminated", expired:"Expired", scoring_failed:"Scoring failed"};
 
 // ---- Camera proctoring (runs fully in the browser; only counts and a score are sent, never video or images) ----
@@ -6641,82 +6674,96 @@ function SkillTestsPage({cloud, user, users, isAdmin, isMgr, toast}) {
   const toggleQ = async q => { const {error} = await sb.from("skill_questions").update({active:!q.active}).eq("id",q.id); if(error){ toast(error.message,"err"); return; } setBank(b=>b.map(x=>x.id===q.id?{...x,active:!x.active}:x)); load(); };
 
   const tabs = [["take","My tests"]].concat(isMgr?[["assign","Assignments"]]:[]).concat([["learn","Learning"]]).concat(isMgr?[["results","Team results"],["matrix","Skill matrix"],["bank","Question bank"],["upload","Upload questions"],["gen","Generate with AI"]]:[]).concat(isAdmin?[["settings","Settings"]]:[]);
-  const th = {textAlign:"left",fontSize:11.5,fontWeight:700,color:"var(--text-3)",padding:"8px 10px",borderBottom:"1px solid var(--border)"};
-  const td = {fontSize:12.5,color:"var(--text-2)",padding:"8px 10px",borderBottom:"1px solid var(--border)",verticalAlign:"top"};
+  const th = {textAlign:"left",fontSize:11,fontWeight:700,letterSpacing:.5,textTransform:"uppercase",color:"var(--text-3)",padding:"10px 14px",borderBottom:"1px solid var(--border)",background:"var(--surface-2,#f8fafc)",whiteSpace:"nowrap"};
+  const td = {fontSize:13,color:"var(--text-2)",padding:"11px 14px",borderBottom:"1px solid var(--border)",verticalAlign:"middle"};
+  const stIn = {...iS, height:38, boxSizing:"border-box"}; const stSel = {...sS, height:38, boxSizing:"border-box"};
+  const bestOf = s => mine.filter(a=>a.skill===s&&a.status==="submitted").reduce((m,a)=>Math.max(m,Number(a.score)||0),-1);
+  const passedN = skills.filter(s=>mine.some(a=>a.skill===s&&a.status==="submitted"&&a.passed)).length;
+  const availN = skills.filter(s=>skillState(s).can).length;
+  const overdueN = openAsg.filter(a=>a.due_date<stToday()).length;
+  const personalTabs = tabs.filter(t=>t[0]==="take"||t[0]==="learn"); const manageTabs = tabs.filter(t=>t[0]!=="take"&&t[0]!=="learn");
+  const tabBtn = ([k,l]) => (
+    <button key={k} onClick={()=>setTab(k)} style={{background:"none",border:"none",borderBottom:"2px solid "+(tab===k?"var(--brand)":"transparent"),marginBottom:-1,padding:"10px 14px",fontSize:13,fontWeight:tab===k?800:600,color:tab===k?"var(--brand)":"var(--text-2)",cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+      {l}{k==="take"&&openAsg.length>0 && <span style={{marginLeft:6,fontSize:10.5,fontWeight:800,padding:"1px 7px",borderRadius:999,background:overdueN?"#fee2e2":"#fef3c7",color:overdueN?"#991b1b":"#92400e"}}>{openAsg.length}</span>}
+    </button>);
   const bankFor = s => bank.filter(b=>b.skill===s && b.active).length;
 
   return (
-    <div style={{maxWidth:980,margin:"0 auto"}}>
+    <div style={{maxWidth:1080,margin:"0 auto"}}>
       <PageHero icon="🎯" title="Skill Tests" subtitle={ST_COUNT+" questions per test · full-screen, proctored by the browser · scored automatically with AI for written answers"}/>
-      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:16}}>
-        {tabs.map(([k,l])=><Btn key={k} v={tab===k?"pri":"sec"} sm onClick={()=>setTab(k)}>{l}</Btn>)}
+      <div style={{display:"flex",alignItems:"center",flexWrap:"wrap",borderBottom:"1px solid var(--border)",marginBottom:18,rowGap:0}}>
+        {personalTabs.map(tabBtn)}
+        {manageTabs.length>0 && <><span style={{width:1,height:20,background:"var(--border)",margin:"0 12px 0 10px"}}/><span style={{fontSize:10.5,fontWeight:800,letterSpacing:.8,color:"var(--text-3)",marginRight:4}}>MANAGE</span>{manageTabs.map(tabBtn)}</>}
       </div>
       {err && <Card style={{marginBottom:14,borderColor:"#fecaca",background:"#fef2f2"}}><div style={{fontSize:13,color:"#b91c1c"}}>{err}</div></Card>}
 
       {tab==="take" && (
         <>
-        {openAsg.length>0 && <Card style={{marginBottom:14,borderColor:"#fde68a",background:"#fffbeb"}}>
-          <div style={{fontWeight:800,color:"#92400e",marginBottom:8}}>📌 Assigned to you</div>
-          {openAsg.map(a=>{ const st=skillState(a.skill); const d=stDaysTo(a.due_date); return (
-            <div key={a.id} style={{display:"flex",gap:10,alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",padding:"6px 0",borderTop:"1px solid #fde68a"}}>
-              <div style={{fontSize:13,color:"var(--text-1)"}}><b>{a.skill}</b> · due {a.due_date} <span style={{fontWeight:700,color:d<0?"#b91c1c":d<=2?"#b45309":"var(--text-3)"}}>{d<0?"(overdue by "+(-d)+" day"+(d===-1?"":"s")+")":d===0?"(today)":"(in "+d+" day"+(d===1?"":"s")+")"}</span>{a.note?<div style={{fontSize:12,color:"var(--text-3)"}}>{a.note} - from {a.assigned_by}</div>:<div style={{fontSize:12,color:"var(--text-3)"}}>from {a.assigned_by}</div>}</div>
-              {st.can ? <Btn sm onClick={()=>setTerms(a.skill)}>Start test</Btn> : <span style={{fontSize:12,color:"var(--text-3)"}}>{!st.ready?"Test not available yet":"Retake on "+new Date(st.next).toLocaleDateString([], {dateStyle:"medium"})}</span>}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:12,marginBottom:14}}>
+          <StStat icon="📌" label="Assigned to you" value={openAsg.length} sub={overdueN?overdueN+" overdue":openAsg.length?"none overdue":"nothing pending"} tone={overdueN?"red":openAsg.length?"amber":null}/>
+          <StStat icon="✅" label="Skills passed" value={passedN+" / "+skills.length} sub={"pass mark "+cfg.passMark+"%"} tone={passedN?"green":null}/>
+          <StStat icon="▶️" label="Available to take" value={availN} sub={availN?"ready now":"none right now"}/>
+          <StStat icon="🏆" label="Best score" value={skills.some(s=>bestOf(s)>=0)?Math.max(...skills.map(bestOf))+"%":"-"} sub="across all skills"/>
+        </div>
+        {openAsg.length>0 && <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:12,padding:"12px 16px",marginBottom:14}}>
+          <div style={{fontWeight:800,color:"#92400e",marginBottom:6,fontSize:13.5}}>📌 Assigned to you</div>
+          {openAsg.map((a,ix)=>{ const st=skillState(a.skill); const d=stDaysTo(a.due_date); return (
+            <div key={a.id} style={{display:"flex",gap:12,alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",padding:"9px 0",borderTop:ix?"1px solid #fde68a":"none"}}>
+              <div style={{minWidth:0}}>
+                <div style={{fontSize:14,fontWeight:800,color:"var(--text-1)"}}>{a.skill} <StPill tone={d<0?"red":d<=2?"amber":"grey"}>{d<0?"Overdue by "+(-d)+" day"+(d===-1?"":"s"):d===0?"Due today":"Due in "+d+" day"+(d===1?"":"s")}</StPill></div>
+                <div style={{fontSize:12,color:"var(--text-3)",marginTop:2}}>Due {stFmtDate(a.due_date)} · from {a.assigned_by}{a.note?" · "+a.note:""}</div>
+              </div>
+              {st.can ? <Btn sm onClick={()=>setTerms(a.skill)}>Start test</Btn> : <StPill>{!st.ready?"Test not available yet":"Retake on "+stFmtDate(new Date(st.next).toISOString())}</StPill>}
             </div>); })}
-        </Card>}
-        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",marginBottom:14}}>
-          <input value={srch} onChange={e=>setSrch(e.target.value)} placeholder="Search skills..." aria-label="Search skills" style={{...iS,width:260}}/>
+        </div>}
+        <div style={{background:"var(--surface-2,#f4f6fa)",borderRadius:10,padding:"8px 14px",fontSize:12.5,color:"var(--text-2)",marginBottom:14}}>ⓘ Each test: <b>{ST_COUNT} questions</b> · <b>{cfg.timeLimitMin} min</b> · pass mark <b>{cfg.passMark}%</b> · full screen{cfg.proctorCamera!==false?" with camera":""} · retake after {cfg.cooldownDays} day{cfg.cooldownDays===1?"":"s"}</div>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",marginBottom:12}}>
+          <input value={srch} onChange={e=>setSrch(e.target.value)} placeholder="🔍 Search skills..." aria-label="Search skills" style={{...stIn,width:250}}/>
+          <div style={{display:"inline-flex",border:"1px solid var(--border)",borderRadius:10,overflow:"hidden"}}>
+            {[["list","☰ List"],["cards","▦ Cards"]].map(([v,l])=><button key={v} onClick={()=>setView(v)} style={{border:"none",padding:"8px 14px",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",background:view===v?"var(--brand)":"var(--surface)",color:view===v?"#fff":"var(--text-2)"}}>{l}</button>)}
+          </div>
+          <label style={{display:"flex",gap:6,alignItems:"center",fontSize:12.5,color:"var(--text-2)",cursor:"pointer"}}><input type="checkbox" checked={availOnly} onChange={e=>setAvailOnly(e.target.checked)}/>Available to take now</label>
           <span style={{fontSize:12.5,color:"var(--text-3)"}}>{skills.filter(s=>s.toLowerCase().includes(srch.trim().toLowerCase())).length} of {skills.length} skills</span>
           {isMgr && <div style={{display:"flex",gap:8,marginLeft:"auto"}}>
-            <input value={newSkill} onChange={e=>setNewSkill(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") addSkill(); }} placeholder="New skill name" aria-label="New skill name" style={{...iS,width:190}}/>
+            <input value={newSkill} onChange={e=>setNewSkill(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") addSkill(); }} placeholder="New skill name" aria-label="New skill name" style={{...stIn,width:180}}/>
             <Btn v="sec" disabled={busy||!newSkill.trim()} onClick={addSkill}>+ Add skill</Btn>
           </div>}
         </div>
         {(()=>{
           const q = srch.trim().toLowerCase();
           const rows = skills.filter(s=>s.toLowerCase().includes(q)).map(s=>{
-            const my = mine.filter(a=>a.skill===s);
-            const best = my.filter(a=>a.status==="submitted").reduce((m,a)=>Math.max(m,Number(a.score)||0),-1);
-            const last = my[0]; const lastCounted = my.find(a=>!a.waived);
-            const next = lastCounted ? new Date(lastCounted.started_at).getTime()+cfg.cooldownDays*86400000 : 0;
-            const wait = next>Date.now();
-            const ready = !!info && (info.counts[s]||0) >= ST_COUNT;
-            return {s,best,last,next,wait,ready,can:ready&&!wait,asg:asgBy[s]};
+            const my = mine.filter(a=>a.skill===s); const stt = skillState(s);
+            const best = bestOf(s); const last = my[0];
+            const passed = my.some(a=>a.status==="submitted"&&a.passed);
+            return {s,best,last,passed,next:stt.next,wait:stt.wait,ready:stt.ready,can:stt.can,asg:asgBy[s]};
           }).filter(r=>!availOnly||r.can);
-          const lastTxt = r => r.last ? stFmt(r.last.started_at)+" - "+stStatusLabel[r.last.status]+(r.last.status==="submitted"?" ("+r.last.score+"%)":"") : "none yet";
-          const action = r => !r.ready ? <span style={{fontSize:12.5,color:"var(--text-3)"}}>Not available yet</span>
-            : r.wait ? <span style={{fontSize:12.5,color:"#b45309"}}>Retake on {new Date(r.next).toLocaleDateString([], {dateStyle:"medium"})}</span>
+          const statusPill = r => r.passed ? <StPill tone="green">Passed</StPill> : r.best>=0 ? <StPill tone="amber">Below pass mark</StPill> : r.last ? <StPill tone={stStatusTone[r.last.status]||"grey"}>{stStatusLabel[r.last.status]}</StPill> : <StPill>Not taken</StPill>;
+          const asgPill = r => r.asg ? <StPill tone={r.asg.due_date<stToday()?"red":"amber"} title={"Assigned by "+r.asg.assigned_by}>📌 Due {stFmtDate(r.asg.due_date)}{r.asg.due_date<stToday()?" · overdue":""}</StPill> : null;
+          const lastTxt = r => r.last ? <div><div>{stFmt(r.last.started_at)}</div><div style={{fontSize:11.5,color:r.last.status==="terminated"?"#b91c1c":"var(--text-3)"}}>{stStatusLabel[r.last.status]}{r.last.status==="submitted"?" · "+r.last.score+"%":""}{r.last.status==="terminated"&&r.last.reason?" · "+r.last.reason:""}</div></div> : <span style={{color:"var(--text-3)"}}>No attempts yet</span>;
+          const action = r => !r.ready ? <StPill title="The question bank is still being prepared">Not available yet</StPill>
+            : r.wait ? <StPill tone="amber">Retake {stFmtDate(new Date(r.next).toISOString())}</StPill>
             : <Btn sm onClick={()=>setTerms(r.s)}>Start test</Btn>;
           return <>
-            <div style={{display:"flex",gap:12,alignItems:"center",marginBottom:12,flexWrap:"wrap"}}>
-              <div style={{display:"flex",gap:4}}>
-                <Btn sm v={view==="list"?"pri":"sec"} onClick={()=>setView("list")}>☰ List</Btn>
-                <Btn sm v={view==="cards"?"pri":"sec"} onClick={()=>setView("cards")}>▦ Cards</Btn>
-              </div>
-              <label style={{display:"flex",gap:6,alignItems:"center",fontSize:12.5,color:"var(--text-2)",cursor:"pointer"}}><input type="checkbox" checked={availOnly} onChange={e=>setAvailOnly(e.target.checked)}/>Available to take now</label>
-              <span style={{fontSize:12.5,color:"var(--text-3)"}}>{ST_COUNT} questions · {cfg.timeLimitMin} min · pass {cfg.passMark}%</span>
-            </div>
             {loading && !info && <div style={{fontSize:13,color:"var(--text-3)"}}>Loading...</div>}
-            {info && !rows.length && <div style={{fontSize:13,color:"var(--text-3)"}}>{srch.trim()?'No skill matches "'+srch+'".':"No skills to show."}</div>}
-            {view==="list" && rows.length>0 && <Card style={{padding:0}}><div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}} data-testid="st-list">
-              <thead><tr>{["Skill","Best score","Last attempt",""].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
+            {info && !rows.length && <Card><StEmpty icon="🔍" title={srch.trim()?'No skill matches "'+srch+'"':availOnly?"Nothing is available to take right now":"No skills to show"} text={srch.trim()||availOnly?"Try clearing the search or the filter.":isMgr?"Add a skill above to get started.":"Your manager can add skills."}/></Card>}
+            {view==="list" && rows.length>0 && <Card style={{padding:0,overflow:"hidden"}}><div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}} data-testid="st-list">
+              <thead><tr>{["Skill","Status","Best score","Last attempt",""].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
               <tbody>{rows.map(r=>(
                 <tr key={r.s}>
-                  <td style={{...td,fontWeight:700,color:"var(--text-1)"}}>{r.s}{r.asg && <div style={{fontSize:11,fontWeight:700,color:r.asg.due_date<stToday()?"#b91c1c":"#b45309"}}>📌 Assigned · due {r.asg.due_date}{r.asg.due_date<stToday()?" (overdue)":""}</div>}</td>
-                  <td style={td}>{r.best>=0?r.best+"%":"-"}</td>
-                  <td style={td}>{lastTxt(r)}{r.last&&r.last.status==="terminated"&&r.last.reason?<div style={{fontSize:11.5,color:"#b91c1c"}}>Reason: {r.last.reason}</div>:null}</td>
+                  <td style={td}><div style={{fontWeight:800,color:"var(--text-1)",fontSize:14}}>{r.s}</div>{asgPill(r) && <div style={{marginTop:3}}>{asgPill(r)}</div>}</td>
+                  <td style={td}>{statusPill(r)}</td>
+                  <td style={td}><StScoreBar score={r.best} pass={cfg.passMark}/></td>
+                  <td style={td}>{lastTxt(r)}</td>
                   <td style={{...td,textAlign:"right",whiteSpace:"nowrap"}}>{action(r)}</td>
                 </tr>))}</tbody></table></div></Card>}
-            {view==="cards" && <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(290px,1fr))",gap:14}}>
+            {view==="cards" && rows.length>0 && <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:14}}>
               {rows.map(r=>(
-                <Card key={r.s}>
-                  <div style={{fontSize:16,fontWeight:800,color:"var(--text-1)"}}>{r.s}</div>{r.asg && <div style={{fontSize:11.5,fontWeight:700,color:r.asg.due_date<stToday()?"#b91c1c":"#b45309",marginTop:2}}>📌 Assigned · due {r.asg.due_date}{r.asg.due_date<stToday()?" (overdue)":""}</div>}
-                  <div style={{fontSize:12.5,color:"var(--text-3)",margin:"4px 0 12px"}}>{ST_COUNT} questions · {cfg.timeLimitMin} min · pass {cfg.passMark}%</div>
-                  <div style={{fontSize:13,color:"var(--text-2)",lineHeight:1.7,marginBottom:12}}>
-                    Best score: <b>{r.best>=0?r.best+"%":"-"}</b><br/>
-                    Last attempt: {lastTxt(r)}
-                    {r.last && r.last.status==="terminated" && r.last.reason ? <><br/><span style={{color:"#b91c1c"}}>Reason: {r.last.reason}</span></> : null}
-                  </div>
-                  {action(r)}
+                <Card key={r.s} style={{display:"flex",flexDirection:"column",gap:10}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}><div style={{fontSize:16,fontWeight:800,color:"var(--text-1)"}}>{r.s}</div>{statusPill(r)}</div>
+                  {asgPill(r)}
+                  <div><div style={{fontSize:11,fontWeight:700,color:"var(--text-3)",marginBottom:4}}>BEST SCORE</div><StScoreBar score={r.best} pass={cfg.passMark}/></div>
+                  <div style={{fontSize:12.5,color:"var(--text-2)"}}><div style={{fontSize:11,fontWeight:700,color:"var(--text-3)",marginBottom:2}}>LAST ATTEMPT</div>{lastTxt(r)}</div>
+                  <div style={{marginTop:"auto"}}>{action(r)}</div>
                 </Card>))}
             </div>}
           </>;
@@ -6734,17 +6781,17 @@ function SkillTestsPage({cloud, user, users, isAdmin, isMgr, toast}) {
           <Card style={{marginBottom:14}}>
             <div style={{fontSize:14,fontWeight:700,marginBottom:10}}>Assign a skill test</div>
             <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-end",marginBottom:10}}>
-              <Lbl t="Skill"><select value={asgForm.skill} onChange={e=>setAsgForm(f=>({...f,skill:e.target.value}))} style={{...sS,width:190}}><option value="">Choose...</option>{skills.map(s=><option key={s}>{s}</option>)}</select></Lbl>
-              <Lbl t="Due date"><input type="date" min={today} value={asgForm.due} onChange={e=>setAsgForm(f=>({...f,due:e.target.value}))} style={{...iS,width:160}}/></Lbl>
-              <Lbl t="Note (optional)"><input value={asgForm.note} onChange={e=>setAsgForm(f=>({...f,note:e.target.value.slice(0,300)}))} placeholder="e.g. needed for the migration project" style={{...iS,width:300}}/></Lbl>
+              <Lbl t="Skill"><select value={asgForm.skill} onChange={e=>setAsgForm(f=>({...f,skill:e.target.value}))} style={{...stSel,width:190}}><option value="">Choose...</option>{skills.map(s=><option key={s}>{s}</option>)}</select></Lbl>
+              <Lbl t="Due date"><input type="date" min={today} value={asgForm.due} onChange={e=>setAsgForm(f=>({...f,due:e.target.value}))} style={{...stIn,width:160}}/></Lbl>
+              <Lbl t="Note (optional)"><input value={asgForm.note} onChange={e=>setAsgForm(f=>({...f,note:e.target.value.slice(0,300)}))} placeholder="e.g. needed for the migration project" style={{...stIn,width:300}}/></Lbl>
             </div>
             <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:6,flexWrap:"wrap"}}>
-              <input value={asgForm.q} onChange={e=>setAsgForm(f=>({...f,q:e.target.value}))} placeholder="Search people..." aria-label="Search people" style={{...iS,width:220}}/>
+              <input value={asgForm.q} onChange={e=>setAsgForm(f=>({...f,q:e.target.value}))} placeholder="Search people..." aria-label="Search people" style={{...stIn,width:220}}/>
               <Btn v="sec" sm onClick={()=>setAsgForm(f=>({...f,sel:{...f.sel,...Object.fromEntries(shown.map(u=>[u.id,true]))}}))}>Select shown ({shown.length})</Btn>
               <Btn v="sec" sm onClick={()=>setAsgForm(f=>({...f,sel:{}}))}>Clear</Btn>
               <span style={{fontSize:12.5,color:"var(--text-3)"}}>{Object.keys(asgForm.sel).filter(k=>asgForm.sel[k]).length} selected</span>
             </div>
-            <div style={{maxHeight:200,overflowY:"auto",border:"1px solid var(--border)",borderRadius:10,padding:"6px 10px",marginBottom:12}}>
+            <div style={{maxHeight:230,overflowY:"auto",border:"1px solid var(--border)",borderRadius:10,padding:"8px 12px",marginBottom:12,display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(230px,1fr))",gap:"2px 14px"}}>
               {shown.map(u=><label key={u.id} style={{display:"flex",gap:8,alignItems:"center",fontSize:13,padding:"3px 0",cursor:"pointer"}}><input type="checkbox" checked={!!asgForm.sel[u.id]} onChange={e=>setAsgForm(f=>({...f,sel:{...f.sel,[u.id]:e.target.checked}}))}/>{u.name}<span style={{color:"var(--text-3)",fontSize:11.5}}>{u.team||""}</span></label>)}
               {!shown.length && <div style={{fontSize:12.5,color:"var(--text-3)"}}>No people found.</div>}
             </div>
@@ -6753,18 +6800,18 @@ function SkillTestsPage({cloud, user, users, isAdmin, isMgr, toast}) {
           </Card>
           <Card>
             <div style={{display:"flex",gap:10,marginBottom:10,alignItems:"center"}}>
-              <select value={asgF} onChange={e=>setAsgF(e.target.value)} aria-label="Assignment filter" style={{...sS,width:170}}>{[["open","Open"],["overdue","Overdue"],["done","Completed"],["cancelled","Cancelled"],["all","All"]].map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>
+              <select value={asgF} onChange={e=>setAsgF(e.target.value)} aria-label="Assignment filter" style={{...stSel,width:170}}>{[["open","Open"],["overdue","Overdue"],["done","Completed"],["cancelled","Cancelled"],["all","All"]].map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>
               <Btn v="sec" sm onClick={loadAsgAll}>Refresh</Btn>
             </div>
-            <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}}>
-              <thead><tr>{["Person","Team","Skill","Due","Status","Assigned by",""].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
+            <div style={{overflowX:"auto",border:"1px solid var(--border)",borderRadius:10}}><table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr>{["Person","Skill","Due","Status","Assigned by",""].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
               <tbody>{list.map(a=><tr key={a.id}>
-                <td style={td}>{a.user_name}</td><td style={td}>{a.team||"-"}</td><td style={td}>{a.skill}</td><td style={td}>{a.due_date}</td>
-                <td style={td}><b style={{color:stOf(a)==="Overdue"?"#b91c1c":stOf(a)==="Completed"?"#059669":"var(--text-2)"}}>{stOf(a)}</b>{a.completed_at && <div style={{fontSize:11,color:"var(--text-3)"}}>{stFmt(a.completed_at)}</div>}</td>
+                <td style={td}><div style={{fontWeight:700,color:"var(--text-1)"}}>{a.user_name}</div><div style={{fontSize:11.5,color:"var(--text-3)"}}>{a.team||"-"}</div></td><td style={td}>{a.skill}</td><td style={{...td,whiteSpace:"nowrap"}}>{stFmtDate(a.due_date)}</td>
+                <td style={td}><StPill tone={stOf(a)==="Overdue"?"red":stOf(a)==="Completed"?"green":stOf(a)==="Open"?"blue":"grey"}>{stOf(a)}</StPill>{a.completed_at && <div style={{fontSize:11,color:"var(--text-3)",marginTop:3}}>{stFmt(a.completed_at)}</div>}</td>
                 <td style={td}>{a.assigned_by}</td>
                 <td style={{...td,whiteSpace:"nowrap"}}>{a.status==="open" && <><Btn sm v="sec" disabled={busy} onClick={()=>remind(a)}>Remind</Btn> <Btn sm v="dan" disabled={busy} onClick={()=>unassign(a)}>Cancel</Btn></>}</td>
               </tr>)}
-              {!list.length && <tr><td style={td} colSpan={7}>Nothing here.</td></tr>}</tbody></table></div>
+              </tbody></table></div>{!list.length && <StEmpty icon="📋" title="No assignments here" text="Use the form above to assign a skill test to your team."/>}
           </Card>
         </>; })()}
 
@@ -6774,7 +6821,7 @@ function SkillTestsPage({cloud, user, users, isAdmin, isMgr, toast}) {
         const bySkill = {}; list.forEach(t=>{ (bySkill[t.skill]=bySkill[t.skill]||[]).push(t); });
         return <>
           <Card style={{marginBottom:14}}>
-            <input value={lq} onChange={e=>setLq(e.target.value)} placeholder="Search learning resources..." aria-label="Search resources" style={{...iS,width:300,marginBottom:12}}/>
+            <input value={lq} onChange={e=>setLq(e.target.value)} placeholder="Search learning resources..." aria-label="Search resources" style={{...stIn,width:300,marginBottom:12}}/>
             {!list.length && <div style={{fontSize:13,color:"var(--text-3)"}}>{training.length?"Nothing matches your search.":"No learning resources yet."+(isMgr?" Add the first one below.":"")}</div>}
             {Object.keys(bySkill).sort().map(sk=><div key={sk} style={{marginBottom:12}}>
               <div style={{fontWeight:800,color:"var(--text-1)",marginBottom:4}}>{sk}</div>
@@ -6789,10 +6836,10 @@ function SkillTestsPage({cloud, user, users, isAdmin, isMgr, toast}) {
             <div style={{fontSize:14,fontWeight:700,marginBottom:6}}>Add a learning resource</div>
             <div style={{fontSize:12,color:"var(--text-3)",marginBottom:10}}>Link it to a topic and it is shown to people whose result is weak in that topic. Leave topic empty to show it for the whole skill. Topics come from your questions' topic column.</div>
             <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
-              <Lbl t="Skill"><select value={tForm.skill} onChange={e=>setTForm(f=>({...f,skill:e.target.value}))} style={{...sS,width:170}}><option value="">Choose...</option>{skills.map(s=><option key={s}>{s}</option>)}</select></Lbl>
-              <Lbl t="Topic (optional)"><input value={tForm.topic} onChange={e=>setTForm(f=>({...f,topic:e.target.value}))} style={{...iS,width:160}}/></Lbl>
-              <Lbl t="Title"><input value={tForm.title} onChange={e=>setTForm(f=>({...f,title:e.target.value}))} style={{...iS,width:240}}/></Lbl>
-              <Lbl t="Link (https://...)"><input value={tForm.url} onChange={e=>setTForm(f=>({...f,url:e.target.value}))} style={{...iS,width:280}}/></Lbl>
+              <Lbl t="Skill"><select value={tForm.skill} onChange={e=>setTForm(f=>({...f,skill:e.target.value}))} style={{...stSel,width:170}}><option value="">Choose...</option>{skills.map(s=><option key={s}>{s}</option>)}</select></Lbl>
+              <Lbl t="Topic (optional)"><input value={tForm.topic} onChange={e=>setTForm(f=>({...f,topic:e.target.value}))} style={{...stIn,width:160}}/></Lbl>
+              <Lbl t="Title"><input value={tForm.title} onChange={e=>setTForm(f=>({...f,title:e.target.value}))} style={{...stIn,width:240}}/></Lbl>
+              <Lbl t="Link (https://...)"><input value={tForm.url} onChange={e=>setTForm(f=>({...f,url:e.target.value}))} style={{...stIn,width:280}}/></Lbl>
               <Btn disabled={busy} onClick={async()=>{
                 if(!tForm.skill||!tForm.title.trim()||!/^https?:\/\/\S+$/i.test(tForm.url.trim())) { toast("Choose a skill and give a title and a full http(s) link","err"); return; }
                 setBusy(true); const ok = await saveTraining(training.concat([{skill:tForm.skill, topic:tForm.topic.trim()||"*", title:tForm.title.trim(), url:tForm.url.trim()}])); setBusy(false);
@@ -6803,27 +6850,29 @@ function SkillTestsPage({cloud, user, users, isAdmin, isMgr, toast}) {
         </>; })()}
 
       {tab==="results" && (
-        <Card>
-          <div style={{display:"flex",gap:10,marginBottom:12,alignItems:"center"}}>
-            <select value={fSkill} onChange={e=>setFSkill(e.target.value)} style={{...sS,width:200}}><option value="">All skills</option>{skills.map(s=><option key={s}>{s}</option>)}</select>
-            <Btn v="sec" sm onClick={loadAttempts}>Refresh</Btn>
+        <Card style={{padding:0,overflow:"hidden"}}>
+          <div style={{display:"flex",gap:10,padding:"14px 14px 12px",alignItems:"center",flexWrap:"wrap"}}>
+            <select value={fSkill} onChange={e=>setFSkill(e.target.value)} aria-label="Skill filter" style={{...stSel,width:200}}><option value="">All skills</option>{skills.map(s=><option key={s}>{s}</option>)}</select>
+            <Btn v="sec" sm onClick={loadAttempts}>↻ Refresh</Btn>
             <Btn v="sec" sm onClick={exportCsv}>⬇ Export CSV</Btn>
+            <span style={{fontSize:12.5,color:"var(--text-3)",marginLeft:"auto"}}>{attempts.filter(a=>!fSkill||a.skill===fSkill).length} attempts</span>
           </div>
           <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}}>
-            <thead><tr>{["Person","Team","Skill","Started","Status","Score","Proctoring","Notes"].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
+            <thead><tr>{["Person","Skill","Started","Status","Score","Proctoring","Notes"].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
             <tbody>
               {attempts.filter(a=>!fSkill||a.skill===fSkill).map(a=>(
                 <tr key={a.id}>
-                  <td style={td}>{a.user_name}</td><td style={td}>{a.team||"-"}</td><td style={td}>{a.skill}</td><td style={td}>{stFmt(a.started_at)}</td>
-                  <td style={td}>{stStatusLabel[a.status]||a.status}</td>
-                  <td style={td}>{a.status==="submitted" ? <b style={{color:a.passed?"#059669":"#b45309"}}>{a.score}% {a.passed?"✓":"✗"}</b> : "-"}</td>
-                  <td style={td}>{(()=>{ const pr=a.data&&a.data.proctor; if(!pr) return "-"; const [bl,bc]=stProctorBand(pr.score); const ev={}; (pr.events||[]).forEach(e=>{ ev[e.type]=(ev[e.type]||0)+1; });
-                    return <div><b style={{color:bc}}>{pr.score==null?"-":pr.score} {bl}</b>{pr.analysed && <div style={{fontSize:11,color:"var(--text-3)"}}>{Object.keys(ev).map(k=>ev[k]+"x "+ST_EVENT_LABEL[k]).join(", ")||"no events"}</div>}{pr.note && <div style={{fontSize:11,color:"var(--text-3)"}}>{pr.note}</div>}</div>; })()}</td>
-                  <td style={td}>{a.data&&a.data.reason ? a.data.reason : ""}{a.status==="scoring_failed" && <> <Btn sm v="sec" disabled={busy} onClick={()=>rescore(a.id)}>Re-score</Btn></>}
-                    {a.status!=="in_progress" && a.status!=="submitted" && (a.data&&a.data.waived ? <div style={{fontSize:11.5,color:"#059669"}}>Retake allowed <a style={{cursor:"pointer",textDecoration:"underline"}} onClick={()=>waive(a.id,true)}>undo</a></div> : <div style={{marginTop:4}}><Btn sm v="sec" disabled={busy} onClick={()=>waive(a.id)}>Allow retake</Btn></div>)}</td>
+                  <td style={td}><div style={{fontWeight:700,color:"var(--text-1)"}}>{a.user_name}</div><div style={{fontSize:11.5,color:"var(--text-3)"}}>{a.team||"-"}</div></td>
+                  <td style={td}>{a.skill}</td><td style={{...td,whiteSpace:"nowrap"}}>{stFmt(a.started_at)}</td>
+                  <td style={td}><StPill tone={stStatusTone[a.status]||"grey"}>{stStatusLabel[a.status]||a.status}</StPill></td>
+                  <td style={td}>{a.status==="submitted" ? <StPill tone={a.passed?"green":"amber"}>{a.score}% {a.passed?"✓ Pass":"Below"}</StPill> : <span style={{color:"var(--text-3)"}}>-</span>}</td>
+                  <td style={td}>{(()=>{ const pr=a.data&&a.data.proctor; if(!pr) return <span style={{color:"var(--text-3)"}}>-</span>; const [bl]=stProctorBand(pr.score); const tone=pr.score==null?"grey":pr.score>=85?"green":pr.score>=65?"amber":"red"; const ev={}; (pr.events||[]).forEach(e=>{ ev[e.type]=(ev[e.type]||0)+1; });
+                    return <div><StPill tone={tone}>{pr.score==null?"":pr.score+" · "}{bl}</StPill>{pr.analysed && <div style={{fontSize:11,color:"var(--text-3)",marginTop:3,maxWidth:200}}>{Object.keys(ev).map(k=>ev[k]+"x "+ST_EVENT_LABEL[k]).join(", ")||"no events"}</div>}{pr.note && <div style={{fontSize:11,color:"var(--text-3)",marginTop:3}}>{pr.note}</div>}</div>; })()}</td>
+                  <td style={{...td,maxWidth:220}}>{a.data&&a.data.reason ? <div style={{fontSize:12}}>{a.data.reason}</div> : null}{a.status==="scoring_failed" && <div style={{marginTop:4}}><Btn sm v="sec" disabled={busy} onClick={()=>rescore(a.id)}>Re-score</Btn></div>}
+                    {a.status!=="in_progress" && a.status!=="submitted" && (a.data&&a.data.waived ? <div style={{fontSize:11.5,color:"#059669",marginTop:4}}>✓ Retake allowed <a style={{cursor:"pointer",textDecoration:"underline"}} onClick={()=>waive(a.id,true)}>undo</a></div> : <div style={{marginTop:4}}><Btn sm v="sec" disabled={busy} onClick={()=>waive(a.id)}>Allow retake</Btn></div>)}</td>
                 </tr>))}
-              {!attempts.length && <tr><td style={td} colSpan={8}>No attempts yet.</td></tr>}
             </tbody></table></div>
+          {!attempts.length && <StEmpty icon="📝" title="No attempts yet" text="Results appear here once people take a test."/>}
         </Card>
       )}
 
@@ -6846,7 +6895,7 @@ function SkillTestsPage({cloud, user, users, isAdmin, isMgr, toast}) {
           <div style={{display:"flex",gap:14,flexWrap:"wrap",marginBottom:12}}>
             {skills.map(s=><div key={s} style={{fontSize:13,color:"var(--text-2)"}}><b>{s}</b>: <span style={{color:bankFor(s)>=ST_COUNT?"#059669":"#b45309",fontWeight:700}}>{bankFor(s)}/{ST_COUNT}</span> active</div>)}
           </div>
-          <select value={fSkill} onChange={e=>setFSkill(e.target.value)} style={{...sS,width:200,marginBottom:10}}><option value="">All skills</option>{skills.map(s=><option key={s}>{s}</option>)}</select>
+          <select value={fSkill} onChange={e=>setFSkill(e.target.value)} style={{...stSel,width:200,marginBottom:10}}><option value="">All skills</option>{skills.map(s=><option key={s}>{s}</option>)}</select>
           <div style={{fontSize:12,color:"var(--text-3)",marginBottom:8}}>A test draws {ST_COUNT} random questions from a skill's bank, so a bigger bank gives different tests each time. A skill opens for members once it has at least {ST_COUNT} active questions.</div>
           <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}}>
             <thead><tr>{["Skill","Type","Question","Answer","Usage",""].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
@@ -6889,10 +6938,10 @@ function SkillTestsPage({cloud, user, users, isAdmin, isMgr, toast}) {
         <Card>
           <div style={{fontSize:14,fontWeight:700,marginBottom:10}}>Generate questions with AI</div>
           <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-end",marginBottom:12}}>
-            <Lbl t="Skill"><select value={gen.skill} onChange={e=>setGen(g=>({...g,skill:e.target.value}))} style={{...sS,width:170}}>{skills.map(s=><option key={s}>{s}</option>)}</select></Lbl>
-            <Lbl t="How many (max 30)"><input type="number" min={1} max={30} value={gen.count} onChange={e=>setGen(g=>({...g,count:e.target.value}))} style={{...iS,width:110}}/></Lbl>
-            <Lbl t="Difficulty"><select value={gen.difficulty} onChange={e=>setGen(g=>({...g,difficulty:e.target.value}))} style={{...sS,width:120}}>{["mixed","easy","medium","hard"].map(x=><option key={x}>{x}</option>)}</select></Lbl>
-            <Lbl t="Type"><select value={gen.type} onChange={e=>setGen(g=>({...g,type:e.target.value}))} style={{...sS,width:150}}><option value="mixed">Mixed (MCQ + written)</option><option value="all">Mixed incl. coding</option><option value="mcq">Multiple choice</option><option value="code">Coding exercise</option><option value="short">Written answer</option></select></Lbl>
+            <Lbl t="Skill"><select value={gen.skill} onChange={e=>setGen(g=>({...g,skill:e.target.value}))} style={{...stSel,width:170}}>{skills.map(s=><option key={s}>{s}</option>)}</select></Lbl>
+            <Lbl t="How many (max 30)"><input type="number" min={1} max={30} value={gen.count} onChange={e=>setGen(g=>({...g,count:e.target.value}))} style={{...stIn,width:110}}/></Lbl>
+            <Lbl t="Difficulty"><select value={gen.difficulty} onChange={e=>setGen(g=>({...g,difficulty:e.target.value}))} style={{...stSel,width:120}}>{["mixed","easy","medium","hard"].map(x=><option key={x}>{x}</option>)}</select></Lbl>
+            <Lbl t="Type"><select value={gen.type} onChange={e=>setGen(g=>({...g,type:e.target.value}))} style={{...stSel,width:150}}><option value="mixed">Mixed (MCQ + written)</option><option value="all">Mixed incl. coding</option><option value="mcq">Multiple choice</option><option value="code">Coding exercise</option><option value="short">Written answer</option></select></Lbl>
             <Btn disabled={gen.busy} onClick={generate}>{gen.busy?"Generating...":"Generate"}</Btn>
           </div>
           <div style={{fontSize:12,color:"var(--text-3)",marginBottom:10}}>AI can be wrong. Review each question and its answer, untick any you do not trust, then add the rest to the bank.</div>
