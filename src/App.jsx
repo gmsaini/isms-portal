@@ -6059,7 +6059,7 @@ const CustomReportsView = ({logs, acts, mis, users, teams, isAdmin, user, slaTar
 //  SKILL TESTS  (page: skill_tests)  - served and scored by the `ai` Edge Function (st_* modes)
 // ====================================================================
 const ST_COUNT = 30;
-const ST_TEMPLATE = 'skill,type,question,optionA,optionB,optionC,optionD,answer,difficulty,topic\n"Control-M",mcq,"Which Control-M component schedules and monitors jobs?","Control-M/Server","Control-M/Agent only","Control-M Reports","Control-M Archive",A,easy,Architecture\n"Talend",short,"What is a tMap component used for in Talend?","","","","","It joins, filters and transforms data between inputs and outputs (lookups, expressions, reject flows).",medium,Transformations\n';
+const ST_TEMPLATE = 'skill,type,question,optionA,optionB,optionC,optionD,answer,difficulty,topic,language\n"Control-M",mcq,"Which Control-M component schedules and monitors jobs?","Control-M/Server","Control-M/Agent only","Control-M Reports","Control-M Archive",A,easy,Architecture\n"Talend",short,"What is a tMap component used for in Talend?","","","","","It joins, filters and transforms data between inputs and outputs (lookups, expressions, reject flows).",medium,Transformations,\n"Control-M",code,"Write a Control-M Automation API JSON job definition that runs the command ls -l on host agent1.","","","","","{""Folder1"":{""Type"":""Folder"",""Job1"":{""Type"":""Job:Command"",""Command"":""ls -l"",""Host"":""agent1""}}}",medium,Job definitions,json\n';
 function stParseCsv(text) {
   const rows = []; let row = [], cur = "", q = false;
   for(let i=0;i<text.length;i++){
@@ -6087,7 +6087,7 @@ function stRowsToQuestions(rows, skills) {
     const type = g("type").toLowerCase(); const text = g("question"); let ans = g("answer");
     const line = "Row "+(k+2)+": ";
     if(!skill){ bad.push(line+"unknown skill '"+g("skill")+"'"); return; }
-    if(type!=="mcq"&&type!=="short"){ bad.push(line+"type must be mcq or short"); return; }
+    if(type!=="mcq"&&type!=="short"&&type!=="code"){ bad.push(line+"type must be mcq, short or code"); return; }
     if(!text){ bad.push(line+"question is empty"); return; }
     if(!ans){ bad.push(line+"answer is empty"); return; }
     let options;
@@ -6096,7 +6096,7 @@ function stRowsToQuestions(rows, skills) {
       if(options.some(o=>!o)){ bad.push(line+"MCQ needs 4 options"); return; }
       ans = ans.toUpperCase(); if(!/^[A-D]$/.test(ans)){ bad.push(line+"MCQ answer must be A, B, C or D"); return; }
     }
-    ok.push({skill, data:{type, text, options, answer:ans, difficulty:g("difficulty")||"medium", topic:(g("topic")||"General").slice(0,40), source:"uploaded"}});
+    ok.push({skill, data:{type, text, options, answer:ans, difficulty:g("difficulty")||"medium", topic:(g("topic")||"General").slice(0,40), language:type==="code"?(g("language")||"").slice(0,20):undefined, source:"uploaded"}});
   });
   return {ok,bad};
 }
@@ -6146,6 +6146,9 @@ function stProctorSummary(st) {
   const analysed = total>=20;
   return {analysed, camera:true, samples:total, okPct:Math.round(okPct*10)/10, score: analysed ? Math.max(0, Math.round(okPct - Math.min(40, multiEv*10))) : null, events:st.events.slice(0,100)};
 }
+const stLinksFor = (training, skill, topic) => (training||[]).filter(t=>t.skill===skill && (t.topic==="*"||String(t.topic).toLowerCase()===String(topic).toLowerCase()));
+const stToday = () => { const d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
+const stDaysTo = due => Math.round((new Date(due+"T00:00:00").getTime()-new Date(stToday()+"T00:00:00").getTime())/86400000);
 const stProctorBand = sc => sc==null ? ["Not analysed","var(--text-3)"] : sc>=85 ? ["Good","#059669"] : sc>=65 ? ["Review","#b45309"] : ["Concerning","#b91c1c"];
 
 function StTerms({cfg, skill, onCancel, onAccept}) {
@@ -6322,6 +6325,8 @@ function StRunner({cloud, run, cfg, onClose}) {
               <div style={{fontSize:12,fontWeight:700,color:"var(--text-3)",marginBottom:6}}>BY TOPIC</div>
               {ks.map(k=>{ const pc=Math.round(T[k].s/T[k].n*100); return <div key={k} style={{display:"flex",alignItems:"center",gap:8,fontSize:12.5,marginBottom:4}}><span style={{width:140,color:"var(--text-2)"}}>{k}</span><div style={{flex:1,height:8,background:"var(--surface-2,#eef1f6)",borderRadius:4}}><div style={{width:pc+"%",height:8,borderRadius:4,background:pc>=70?"#059669":pc>=50?"#d97706":"#dc2626"}}/></div><b style={{width:38,textAlign:"right"}}>{pc}%</b></div>; })}
               {weak.length>0 && <div style={{fontSize:12.5,color:"#b45309",marginTop:8}}>Suggested revision: <b>{weak.join(", ")}</b></div>}
+              {weak.length>0 && (()=>{ const seen=new Set(); const links=[]; weak.forEach(w=>stLinksFor(run.training,skill,w).forEach(l=>{ if(!seen.has(l.url)){ seen.add(l.url); links.push({...l,for:w}); } })); if(!links.length) return null;
+                return <div style={{marginTop:8}}><div style={{fontSize:12,fontWeight:700,color:"var(--text-3)",marginBottom:4}}>📚 LEARNING RESOURCES</div>{links.map(l=><div key={l.url} style={{fontSize:12.5,marginBottom:3}}><a href={l.url} target="_blank" rel="noopener noreferrer" style={{color:"var(--brand)",fontWeight:600}}>{l.title}</a> <span style={{color:"var(--text-3)"}}>· {l.for}</span></div>)}</div>; })()}
             </div>; })()}
           <div style={{display:"grid",gap:6}}>
             {end.res.per.map((p,i)=>(
@@ -6346,7 +6351,7 @@ function StRunner({cloud, run, cfg, onClose}) {
       <div style={{display:"flex",gap:18,padding:20,flex:1,flexWrap:"wrap",maxWidth:1100,width:"100%",margin:"0 auto",boxSizing:"border-box"}}>
         <div style={{flex:"1 1 460px",minWidth:0}}>
           <div style={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:14,padding:"22px 24px"}}>
-            <div style={{fontSize:12,fontWeight:700,color:"var(--text-3)",marginBottom:8}}>QUESTION {idx+1} OF {questions.length} · {q.type==="mcq"?"Choose one":"Written answer"}</div>
+            <div style={{fontSize:12,fontWeight:700,color:"var(--text-3)",marginBottom:8}}>QUESTION {idx+1} OF {questions.length} · {q.type==="mcq"?"Choose one":q.type==="code"?"Coding exercise"+(q.language?" · "+q.language:""):"Written answer"}</div>
             <div style={{fontSize:15.5,fontWeight:600,color:"var(--text-1)",lineHeight:1.55,marginBottom:16,whiteSpace:"pre-wrap"}}>{q.text}</div>
             {q.type==="mcq" ? (
               <div style={{display:"grid",gap:8}}>
@@ -6356,6 +6361,12 @@ function StRunner({cloud, run, cfg, onClose}) {
                     <span><b>{L}.</b> {o}</span>
                   </label>); })}
               </div>
+            ) : q.type==="code" ? (
+              <textarea value={answers[q.id]||""} spellCheck={false} rows={14} onPaste={e=>e.preventDefault()}
+                onChange={e=>setAnswers(a=>({...a,[q.id]:e.target.value.slice(0,6000)}))}
+                onKeyDown={e=>{ if(e.key==="Tab"){ e.preventDefault(); const t=e.target, a=t.selectionStart, b=t.selectionEnd, v=t.value; const nv=(v.slice(0,a)+"  "+v.slice(b)).slice(0,6000); setAnswers(x=>({...x,[q.id]:nv})); setTimeout(()=>{ try{ t.selectionStart=t.selectionEnd=a+2; }catch(x){} },0); } }}
+                placeholder={"Write your "+(q.language||"code")+" here (pasting is disabled; Tab inserts spaces)"}
+                style={{...iS,width:"100%",resize:"vertical",boxSizing:"border-box",userSelect:"text",fontFamily:"ui-monospace,SFMono-Regular,Menlo,Consolas,monospace",fontSize:13,lineHeight:1.5,whiteSpace:"pre",overflowX:"auto"}}/>
             ) : (
               <textarea value={answers[q.id]||""} onChange={e=>setAnswers(a=>({...a,[q.id]:e.target.value.slice(0,1500)}))} onPaste={e=>e.preventDefault()} rows={7}
                 placeholder={run.voice?"Type or speak your answer (pasting is disabled)":"Type your answer (pasting is disabled)"} style={{...iS,width:"100%",resize:"vertical",boxSizing:"border-box",userSelect:"text"}}/>
@@ -6435,7 +6446,7 @@ function VerifiedSkills({cloud, user, goPage}) {
   );
 }
 
-function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
+function SkillTestsPage({cloud, user, users, isAdmin, isMgr, toast}) {
   const sb = cloud && cloud.sb;
   const [tab, setTab] = React.useState("take");
   const [info, setInfo] = React.useState(null);
@@ -6451,7 +6462,13 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
   const [view, setViewS] = React.useState(()=>{ try { return localStorage.getItem("isms_st_view")||"list"; } catch(e) { return "list"; } });
   const setView = v => { setViewS(v); try { localStorage.setItem("isms_st_view", v); } catch(e) {} };
   const [availOnly, setAvailOnly] = React.useState(false);
-  const [prep, setPrep] = React.useState(null);   // null | "camera" | {skill,stream,lm}
+  const [prep, setPrep] = React.useState(null);
+  const [asgMine, setAsgMine] = React.useState([]);
+  const [asgAll, setAsgAll] = React.useState([]);
+  const [asgF, setAsgF] = React.useState("open");
+  const [asgForm, setAsgForm] = React.useState({skill:"", due:"", note:"", sel:{}, q:""});
+  const [lq, setLq] = React.useState("");
+  const [tForm, setTForm] = React.useState({skill:"", topic:"", title:"", url:""});   // null | "camera" | {skill,stream,lm}
   const [busy, setBusy] = React.useState(false);
   const [up, setUp] = React.useState(null);           // {ok,bad}
   const [gen, setGen] = React.useState({skill:"", count:30, difficulty:"mixed", type:"mixed", items:[], busy:false});
@@ -6460,6 +6477,7 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
   const load = React.useCallback(async () => {
     if(!sb) return;
     setLoading(true); setErr("");
+    try { sb.from("skill_assignments").select("*").eq("user_id", user.id).limit(200).then(r=>setAsgMine((r&&r.data)||[]), ()=>{}); } catch(e) {}
     try { const d = await callAiFn(cloud, {mode:"st_list"}); setInfo(d); setCfgForm(f=>f||{skills:d.config.skills.join(", "), passMark:d.config.passMark, timeLimitMin:d.config.timeLimitMin, cooldownDays:d.config.cooldownDays, proctorCamera:d.config.proctorCamera!==false, validityMonths:d.config.validityMonths==null?12:d.config.validityMonths, allowVoice:d.config.allowVoice!==false}); setGen(g=>g.skill?g:{...g, skill:d.config.skills[0]}); }
     catch(e) { setErr(e.message); }
     setLoading(false);
@@ -6470,11 +6488,15 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
     const {data, error} = await sb.from("skill_questions").select("id,skill,active,data,created_at").order("created_at",{ascending:false}).limit(2000);
     if(error) { toast(error.message,"err"); return; } setBank(data||[]);
   };
+  const loadAsgAll = async () => {
+    const {data, error} = await sb.from("skill_assignments").select("*").order("created_at",{ascending:false}).limit(500);
+    if(error) { toast(error.message,"err"); return; } setAsgAll(data||[]);
+  };
   const loadAttempts = async () => {
     const {data, error} = await sb.from("skill_attempts").select("id,user_id,user_name,team,skill,status,started_at,ended_at,score,passed,data").order("started_at",{ascending:false}).limit(300);
     if(error) { toast(error.message,"err"); return; } setAttempts(data||[]);
   };
-  React.useEffect(()=>{ if(!sb||!isMgr) return; if(tab==="bank"||tab==="upload"||tab==="gen") loadBank(); if(tab==="results"||tab==="bank"||tab==="matrix") loadAttempts(); }, [tab]); // eslint-disable-line
+  React.useEffect(()=>{ if(!sb||!isMgr) return; if(tab==="bank"||tab==="upload"||tab==="gen") loadBank(); if(tab==="results"||tab==="bank"||tab==="matrix") loadAttempts(); if(tab==="assign") loadAsgAll(); }, [tab]); // eslint-disable-line
 
   if(!sb) return (
     <div style={{maxWidth:720,margin:"0 auto"}}>
@@ -6486,6 +6508,12 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
   const cfg = info ? info.config : {passMark:70,timeLimitMin:45,cooldownDays:7,skills:[]};
   const skills = cfg.skills;
   const mine = info ? info.attempts : [];
+  const training = (info && info.training) || [];
+  const skillState = s => { const my=mine.filter(a=>a.skill===s); const lc=my.find(a=>!a.waived); const next=lc?new Date(lc.started_at).getTime()+cfg.cooldownDays*86400000:0; const wait=next>Date.now(); const ready=!!info&&(info.counts[s]||0)>=ST_COUNT; return {ready,wait,next,can:ready&&!wait}; };
+  const openAsg = asgMine.filter(a=>a.status==="open").sort((x,y)=>String(x.due_date).localeCompare(String(y.due_date)));
+  const asgBy = {}; openAsg.forEach(a=>{ if(!asgBy[a.skill]) asgBy[a.skill]=a; });
+  const emailOf = id => { const u=(users||[]).find(x=>x.id===id); return u&&u.email; };
+  const sendMail = async (to, title, intro, findings) => { try { await callAiFn(cloud, {title, intro, findings, channels:["email"], to:[to]}, "notify"); return null; } catch(e) { return e.message; } };
 
   // Step 1 (after the terms): camera permission + model. Step 2 (a fresh click): full screen + start the timer.
   const stopStream = r => { try { if(r && r.stream) r.stream.getTracks().forEach(t=>t.stop()); } catch(e) {} };
@@ -6513,7 +6541,7 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
     catch(e) { toast("Full screen was blocked by the browser. Click the button again and allow full screen.","err"); return; }
     try {
       const d = await callAiFn(cloud, {mode:"st_start", skill:r.skill});
-      setRun({...d, skill:r.skill, stream:r.stream, lm:r.lm, voice:r.voice}); setPrep(null);
+      setRun({...d, skill:r.skill, stream:r.stream, lm:r.lm, voice:r.voice, training:(info&&info.training)||[]}); setPrep(null);
     } catch(e) { stopStream(r); setPrep(null); try{ if(document.fullscreenElement) document.exitFullscreen(); }catch(x){} toast(e.message,"err"); load(); }
   };
   const cancelPrep = () => { stopStream(prep); setPrep(null); };
@@ -6533,9 +6561,9 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
     if(!f) return; const text = await f.text(); let res;
     try {
       if(/\.json$/i.test(f.name)) {
-        const arr = JSON.parse(text); const hdr = "skill,type,question,optionA,optionB,optionC,optionD,answer,difficulty,topic".split(",");
+        const arr = JSON.parse(text); const hdr = "skill,type,question,optionA,optionB,optionC,optionD,answer,difficulty,topic,language".split(",");
         const q = s => '"'+String(s==null?"":s).replace(/"/g,'""')+'"';
-        const lines = [hdr.join(",")].concat((Array.isArray(arr)?arr:[]).map(o=>[o.skill,o.type,o.question||o.text,...(o.options||["","","",""]),o.answer,o.difficulty,o.topic].map(q).join(",")));
+        const lines = [hdr.join(",")].concat((Array.isArray(arr)?arr:[]).map(o=>[o.skill,o.type,o.question||o.text,...(o.options||["","","",""]),o.answer,o.difficulty,o.topic,o.language].map(q).join(",")));
         res = stRowsToQuestions(stParseCsv(lines.join("\n")), skills);
       } else res = stRowsToQuestions(stParseCsv(text), skills);
     } catch(e) { res = {ok:[],bad:["Could not read file: "+e.message]}; }
@@ -6560,7 +6588,7 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
     setGen(g=>({...g, busy:false, items:got}));
   };
   const addGen = async () => {
-    const items = gen.items.filter(x=>x.keep).map(x=>({skill:gen.skill, data:{type:x.type,text:x.text,options:x.options,answer:x.answer,difficulty:x.difficulty,topic:x.topic||"General",source:"ai"}}));
+    const items = gen.items.filter(x=>x.keep).map(x=>({skill:gen.skill, data:{type:x.type,text:x.text,options:x.options,answer:x.answer,language:x.language,difficulty:x.difficulty,topic:x.topic||"General",source:"ai"}}));
     setBusy(true); const n = await addQuestions(items); setBusy(false); if(n) setGen(g=>({...g, items:[]}));
   };
   const saveCfg = async () => {
@@ -6586,11 +6614,33 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
   // per-question statistics from the attempts that are loaded (managers only)
   const qStats = {};
   attempts.forEach(a=>{ ((a.data&&a.data.perQuestion)||[]).forEach(pq=>{ const t=(qStats[pq.id]=qStats[pq.id]||{n:0,s:0}); t.n++; t.s+=pq.score; }); });
+  const doAssign = async () => {
+    const ids = Object.keys(asgForm.sel).filter(k=>asgForm.sel[k]);
+    if(!asgForm.skill) { toast("Pick a skill","err"); return; }
+    if(!asgForm.due) { toast("Pick a due date","err"); return; }
+    if(!ids.length) { toast("Pick at least one person","err"); return; }
+    setBusy(true);
+    try {
+      const r = await callAiFn(cloud, {mode:"st_assign", skill:asgForm.skill, due:asgForm.due, note:asgForm.note, userIds:ids});
+      let mailErr = null;
+      for(const c of r.created) { const e = await sendMail(c.email, "Skill test assigned: "+asgForm.skill, user.name+" has assigned you the "+asgForm.skill+" skill test.", [{severity:"info", title:"Complete the "+asgForm.skill+" test by "+asgForm.due, detail:(asgForm.note?asgForm.note+" - ":"")+ST_COUNT+" questions, "+cfg.timeLimitMin+" min, full screen with camera. Open ISMS > Learning & Training > Skill Tests."}]); if(e) mailErr = e; }
+      toast("Assigned to "+r.created.length+(r.skipped.length?" ("+r.skipped.length+" skipped: "+r.skipped.slice(0,3).join(", ")+")":"")+(mailErr?". Email not sent: "+mailErr:r.created.length?". Email sent.":""), mailErr?"err":undefined);
+      setAsgForm(f=>({...f, sel:{}, note:""})); loadAsgAll();
+    } catch(e) { toast(e.message,"err"); }
+    setBusy(false);
+  };
+  const remind = async a => {
+    const em = emailOf(a.user_id); if(!em) { toast("No email address found for "+a.user_name,"err"); return; }
+    setBusy(true); const e = await sendMail(em, "Reminder: "+a.skill+" skill test", "This is a reminder from "+user.name+".", [{severity:a.due_date<stToday()?"overdue":"due soon", title:"Complete the "+a.skill+" skill test", detail:"due "+a.due_date}]);
+    setBusy(false); toast(e?("Could not send: "+e):"Reminder sent to "+a.user_name, e?"err":undefined);
+  };
+  const unassign = async a => { setBusy(true); try { await callAiFn(cloud, {mode:"st_unassign", id:a.id}); toast("Assignment cancelled"); loadAsgAll(); } catch(e) { toast(e.message,"err"); } setBusy(false); };
+  const saveTraining = async items => { try { await callAiFn(cloud, {mode:"st_training_save", items}); await load(); return true; } catch(e) { toast(e.message,"err"); return false; } };
   const rescore = async id => { setBusy(true); try { const r = await callAiFn(cloud, {mode:"st_rescore", attemptId:id}); toast("Re-scored: "+r.score+"%"); loadAttempts(); } catch(e){ toast(e.message,"err"); } setBusy(false); };
   const delQ = async id => { const {error} = await sb.from("skill_questions").delete().eq("id",id); if(error){ toast(error.message,"err"); return; } setBank(b=>b.filter(x=>x.id!==id)); load(); };
   const toggleQ = async q => { const {error} = await sb.from("skill_questions").update({active:!q.active}).eq("id",q.id); if(error){ toast(error.message,"err"); return; } setBank(b=>b.map(x=>x.id===q.id?{...x,active:!x.active}:x)); load(); };
 
-  const tabs = [["take","My tests"]].concat(isMgr?[["results","Team results"],["matrix","Skill matrix"],["bank","Question bank"],["upload","Upload questions"],["gen","Generate with AI"]]:[]).concat(isAdmin?[["settings","Settings"]]:[]);
+  const tabs = [["take","My tests"]].concat(isMgr?[["assign","Assignments"]]:[]).concat([["learn","Learning"]]).concat(isMgr?[["results","Team results"],["matrix","Skill matrix"],["bank","Question bank"],["upload","Upload questions"],["gen","Generate with AI"]]:[]).concat(isAdmin?[["settings","Settings"]]:[]);
   const th = {textAlign:"left",fontSize:11.5,fontWeight:700,color:"var(--text-3)",padding:"8px 10px",borderBottom:"1px solid var(--border)"};
   const td = {fontSize:12.5,color:"var(--text-2)",padding:"8px 10px",borderBottom:"1px solid var(--border)",verticalAlign:"top"};
   const bankFor = s => bank.filter(b=>b.skill===s && b.active).length;
@@ -6605,6 +6655,14 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
 
       {tab==="take" && (
         <>
+        {openAsg.length>0 && <Card style={{marginBottom:14,borderColor:"#fde68a",background:"#fffbeb"}}>
+          <div style={{fontWeight:800,color:"#92400e",marginBottom:8}}>📌 Assigned to you</div>
+          {openAsg.map(a=>{ const st=skillState(a.skill); const d=stDaysTo(a.due_date); return (
+            <div key={a.id} style={{display:"flex",gap:10,alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",padding:"6px 0",borderTop:"1px solid #fde68a"}}>
+              <div style={{fontSize:13,color:"var(--text-1)"}}><b>{a.skill}</b> · due {a.due_date} <span style={{fontWeight:700,color:d<0?"#b91c1c":d<=2?"#b45309":"var(--text-3)"}}>{d<0?"(overdue by "+(-d)+" day"+(d===-1?"":"s")+")":d===0?"(today)":"(in "+d+" day"+(d===1?"":"s")+")"}</span>{a.note?<div style={{fontSize:12,color:"var(--text-3)"}}>{a.note} - from {a.assigned_by}</div>:<div style={{fontSize:12,color:"var(--text-3)"}}>from {a.assigned_by}</div>}</div>
+              {st.can ? <Btn sm onClick={()=>setTerms(a.skill)}>Start test</Btn> : <span style={{fontSize:12,color:"var(--text-3)"}}>{!st.ready?"Test not available yet":"Retake on "+new Date(st.next).toLocaleDateString([], {dateStyle:"medium"})}</span>}
+            </div>); })}
+        </Card>}
         <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",marginBottom:14}}>
           <input value={srch} onChange={e=>setSrch(e.target.value)} placeholder="Search skills..." aria-label="Search skills" style={{...iS,width:260}}/>
           <span style={{fontSize:12.5,color:"var(--text-3)"}}>{skills.filter(s=>s.toLowerCase().includes(srch.trim().toLowerCase())).length} of {skills.length} skills</span>
@@ -6622,7 +6680,7 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
             const next = lastCounted ? new Date(lastCounted.started_at).getTime()+cfg.cooldownDays*86400000 : 0;
             const wait = next>Date.now();
             const ready = !!info && (info.counts[s]||0) >= ST_COUNT;
-            return {s,best,last,next,wait,ready,can:ready&&!wait};
+            return {s,best,last,next,wait,ready,can:ready&&!wait,asg:asgBy[s]};
           }).filter(r=>!availOnly||r.can);
           const lastTxt = r => r.last ? stFmt(r.last.started_at)+" - "+stStatusLabel[r.last.status]+(r.last.status==="submitted"?" ("+r.last.score+"%)":"") : "none yet";
           const action = r => !r.ready ? <span style={{fontSize:12.5,color:"var(--text-3)"}}>Not available yet</span>
@@ -6643,7 +6701,7 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
               <thead><tr>{["Skill","Best score","Last attempt",""].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
               <tbody>{rows.map(r=>(
                 <tr key={r.s}>
-                  <td style={{...td,fontWeight:700,color:"var(--text-1)"}}>{r.s}</td>
+                  <td style={{...td,fontWeight:700,color:"var(--text-1)"}}>{r.s}{r.asg && <div style={{fontSize:11,fontWeight:700,color:r.asg.due_date<stToday()?"#b91c1c":"#b45309"}}>📌 Assigned · due {r.asg.due_date}{r.asg.due_date<stToday()?" (overdue)":""}</div>}</td>
                   <td style={td}>{r.best>=0?r.best+"%":"-"}</td>
                   <td style={td}>{lastTxt(r)}{r.last&&r.last.status==="terminated"&&r.last.reason?<div style={{fontSize:11.5,color:"#b91c1c"}}>Reason: {r.last.reason}</div>:null}</td>
                   <td style={{...td,textAlign:"right",whiteSpace:"nowrap"}}>{action(r)}</td>
@@ -6651,7 +6709,7 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
             {view==="cards" && <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(290px,1fr))",gap:14}}>
               {rows.map(r=>(
                 <Card key={r.s}>
-                  <div style={{fontSize:16,fontWeight:800,color:"var(--text-1)"}}>{r.s}</div>
+                  <div style={{fontSize:16,fontWeight:800,color:"var(--text-1)"}}>{r.s}</div>{r.asg && <div style={{fontSize:11.5,fontWeight:700,color:r.asg.due_date<stToday()?"#b91c1c":"#b45309",marginTop:2}}>📌 Assigned · due {r.asg.due_date}{r.asg.due_date<stToday()?" (overdue)":""}</div>}
                   <div style={{fontSize:12.5,color:"var(--text-3)",margin:"4px 0 12px"}}>{ST_COUNT} questions · {cfg.timeLimitMin} min · pass {cfg.passMark}%</div>
                   <div style={{fontSize:13,color:"var(--text-2)",lineHeight:1.7,marginBottom:12}}>
                     Best score: <b>{r.best>=0?r.best+"%":"-"}</b><br/>
@@ -6665,6 +6723,84 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
         })()}
         </>
       )}
+
+      {tab==="assign" && (()=>{
+        const today = stToday();
+        const scope = (users||[]).filter(u=>u.status!=="Inactive" && (isAdmin || (u.team===user.team && u.id!==user.id)) && u.role!=="admin");
+        const shown = scope.filter(u=>!asgForm.q.trim() || (u.name||"").toLowerCase().includes(asgForm.q.trim().toLowerCase()));
+        const stOf = a => a.status==="open" ? (a.due_date<today?"Overdue":"Open") : a.status==="done"?"Completed":"Cancelled";
+        const list = asgAll.filter(a=>asgF==="all"||(asgF==="open"?a.status==="open":asgF==="overdue"?a.status==="open"&&a.due_date<today:a.status===asgF));
+        return <>
+          <Card style={{marginBottom:14}}>
+            <div style={{fontSize:14,fontWeight:700,marginBottom:10}}>Assign a skill test</div>
+            <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-end",marginBottom:10}}>
+              <Lbl t="Skill"><select value={asgForm.skill} onChange={e=>setAsgForm(f=>({...f,skill:e.target.value}))} style={{...sS,width:190}}><option value="">Choose...</option>{skills.map(s=><option key={s}>{s}</option>)}</select></Lbl>
+              <Lbl t="Due date"><input type="date" min={today} value={asgForm.due} onChange={e=>setAsgForm(f=>({...f,due:e.target.value}))} style={{...iS,width:160}}/></Lbl>
+              <Lbl t="Note (optional)"><input value={asgForm.note} onChange={e=>setAsgForm(f=>({...f,note:e.target.value.slice(0,300)}))} placeholder="e.g. needed for the migration project" style={{...iS,width:300}}/></Lbl>
+            </div>
+            <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:6,flexWrap:"wrap"}}>
+              <input value={asgForm.q} onChange={e=>setAsgForm(f=>({...f,q:e.target.value}))} placeholder="Search people..." aria-label="Search people" style={{...iS,width:220}}/>
+              <Btn v="sec" sm onClick={()=>setAsgForm(f=>({...f,sel:{...f.sel,...Object.fromEntries(shown.map(u=>[u.id,true]))}}))}>Select shown ({shown.length})</Btn>
+              <Btn v="sec" sm onClick={()=>setAsgForm(f=>({...f,sel:{}}))}>Clear</Btn>
+              <span style={{fontSize:12.5,color:"var(--text-3)"}}>{Object.keys(asgForm.sel).filter(k=>asgForm.sel[k]).length} selected</span>
+            </div>
+            <div style={{maxHeight:200,overflowY:"auto",border:"1px solid var(--border)",borderRadius:10,padding:"6px 10px",marginBottom:12}}>
+              {shown.map(u=><label key={u.id} style={{display:"flex",gap:8,alignItems:"center",fontSize:13,padding:"3px 0",cursor:"pointer"}}><input type="checkbox" checked={!!asgForm.sel[u.id]} onChange={e=>setAsgForm(f=>({...f,sel:{...f.sel,[u.id]:e.target.checked}}))}/>{u.name}<span style={{color:"var(--text-3)",fontSize:11.5}}>{u.team||""}</span></label>)}
+              {!shown.length && <div style={{fontSize:12.5,color:"var(--text-3)"}}>No people found.</div>}
+            </div>
+            <Btn disabled={busy} onClick={doAssign}>Assign and email</Btn>
+            <span style={{fontSize:12,color:"var(--text-3)",marginLeft:10}}>Each person gets an email now, and a reminder when it is overdue or due within 2 days if scheduled reminders are set up.</span>
+          </Card>
+          <Card>
+            <div style={{display:"flex",gap:10,marginBottom:10,alignItems:"center"}}>
+              <select value={asgF} onChange={e=>setAsgF(e.target.value)} aria-label="Assignment filter" style={{...sS,width:170}}>{[["open","Open"],["overdue","Overdue"],["done","Completed"],["cancelled","Cancelled"],["all","All"]].map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>
+              <Btn v="sec" sm onClick={loadAsgAll}>Refresh</Btn>
+            </div>
+            <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr>{["Person","Team","Skill","Due","Status","Assigned by",""].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
+              <tbody>{list.map(a=><tr key={a.id}>
+                <td style={td}>{a.user_name}</td><td style={td}>{a.team||"-"}</td><td style={td}>{a.skill}</td><td style={td}>{a.due_date}</td>
+                <td style={td}><b style={{color:stOf(a)==="Overdue"?"#b91c1c":stOf(a)==="Completed"?"#059669":"var(--text-2)"}}>{stOf(a)}</b>{a.completed_at && <div style={{fontSize:11,color:"var(--text-3)"}}>{stFmt(a.completed_at)}</div>}</td>
+                <td style={td}>{a.assigned_by}</td>
+                <td style={{...td,whiteSpace:"nowrap"}}>{a.status==="open" && <><Btn sm v="sec" disabled={busy} onClick={()=>remind(a)}>Remind</Btn> <Btn sm v="dan" disabled={busy} onClick={()=>unassign(a)}>Cancel</Btn></>}</td>
+              </tr>)}
+              {!list.length && <tr><td style={td} colSpan={7}>Nothing here.</td></tr>}</tbody></table></div>
+          </Card>
+        </>; })()}
+
+      {tab==="learn" && (()=>{
+        const q = lq.trim().toLowerCase();
+        const list = training.filter(t=>!q||(t.skill+" "+t.topic+" "+t.title).toLowerCase().includes(q));
+        const bySkill = {}; list.forEach(t=>{ (bySkill[t.skill]=bySkill[t.skill]||[]).push(t); });
+        return <>
+          <Card style={{marginBottom:14}}>
+            <input value={lq} onChange={e=>setLq(e.target.value)} placeholder="Search learning resources..." aria-label="Search resources" style={{...iS,width:300,marginBottom:12}}/>
+            {!list.length && <div style={{fontSize:13,color:"var(--text-3)"}}>{training.length?"Nothing matches your search.":"No learning resources yet."+(isMgr?" Add the first one below.":"")}</div>}
+            {Object.keys(bySkill).sort().map(sk=><div key={sk} style={{marginBottom:12}}>
+              <div style={{fontWeight:800,color:"var(--text-1)",marginBottom:4}}>{sk}</div>
+              {bySkill[sk].map(t=><div key={t.url+t.topic} style={{display:"flex",gap:10,alignItems:"center",fontSize:13,padding:"3px 0"}}>
+                <span style={{fontSize:11.5,color:"var(--text-3)",minWidth:120}}>{t.topic==="*"?"All topics":t.topic}</span>
+                <a href={t.url} target="_blank" rel="noopener noreferrer" style={{color:"var(--brand)",fontWeight:600}}>{t.title}</a>
+                {isMgr && <Btn sm v="dan" onClick={()=>saveTraining(training.filter(x=>x!==t&&!(x.url===t.url&&x.topic===t.topic&&x.skill===t.skill)))}>Remove</Btn>}
+              </div>)}
+            </div>)}
+          </Card>
+          {isMgr && <Card>
+            <div style={{fontSize:14,fontWeight:700,marginBottom:6}}>Add a learning resource</div>
+            <div style={{fontSize:12,color:"var(--text-3)",marginBottom:10}}>Link it to a topic and it is shown to people whose result is weak in that topic. Leave topic empty to show it for the whole skill. Topics come from your questions' topic column.</div>
+            <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
+              <Lbl t="Skill"><select value={tForm.skill} onChange={e=>setTForm(f=>({...f,skill:e.target.value}))} style={{...sS,width:170}}><option value="">Choose...</option>{skills.map(s=><option key={s}>{s}</option>)}</select></Lbl>
+              <Lbl t="Topic (optional)"><input value={tForm.topic} onChange={e=>setTForm(f=>({...f,topic:e.target.value}))} style={{...iS,width:160}}/></Lbl>
+              <Lbl t="Title"><input value={tForm.title} onChange={e=>setTForm(f=>({...f,title:e.target.value}))} style={{...iS,width:240}}/></Lbl>
+              <Lbl t="Link (https://...)"><input value={tForm.url} onChange={e=>setTForm(f=>({...f,url:e.target.value}))} style={{...iS,width:280}}/></Lbl>
+              <Btn disabled={busy} onClick={async()=>{
+                if(!tForm.skill||!tForm.title.trim()||!/^https?:\/\/\S+$/i.test(tForm.url.trim())) { toast("Choose a skill and give a title and a full http(s) link","err"); return; }
+                setBusy(true); const ok = await saveTraining(training.concat([{skill:tForm.skill, topic:tForm.topic.trim()||"*", title:tForm.title.trim(), url:tForm.url.trim()}])); setBusy(false);
+                if(ok) { toast("Resource added"); setTForm(f=>({...f,topic:"",title:"",url:""})); }
+              }}>Add</Btn>
+            </div>
+          </Card>}
+        </>; })()}
 
       {tab==="results" && (
         <Card>
@@ -6719,9 +6855,9 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
                 <tr key={b.id} style={{opacity:b.active?1:.5}}>
                   <td style={td}>{b.skill}</td><td style={td}>{b.data.type}</td>
                   <td style={{...td,maxWidth:360}}>{b.data.text}{b.data.type==="mcq" && <div style={{fontSize:11.5,color:"var(--text-3)"}}>{(b.data.options||[]).map((o,i)=>"ABCD"[i]+") "+o).join("  ")}</div>}</td>
-                  <td style={{...td,maxWidth:200}}>{b.data.answer}</td>
+                  <td style={{...td,maxWidth:200}}>{b.data.type==="code"?<pre style={{margin:0,whiteSpace:"pre-wrap",fontSize:11}}>{b.data.answer}</pre>:b.data.answer}</td>
                   <td style={td}>{(()=>{ const t=qStats[b.id]; const pc=t?Math.round(t.s/t.n*100):null; const flag = t&&t.n>=5 ? (pc<20?"Very hard - check the answer":pc>95?"Too easy":null) : null;
-                    return <div><div style={{fontSize:11.5}}>{b.data.topic||"General"} · {b.data.source||"-"}</div>{t ? <div style={{fontSize:11.5}}>{t.n} answered · {pc}% correct</div> : <div style={{fontSize:11.5,color:"var(--text-3)"}}>not used yet</div>}{flag && <div style={{fontSize:11,color:"#b45309",fontWeight:700}}>⚠ {flag}</div>}</div>; })()}</td>
+                    return <div><div style={{fontSize:11.5}}>{b.data.topic||"General"} · {b.data.source||"-"}{b.data.type==="code"&&b.data.language?" · "+b.data.language:""}</div>{t ? <div style={{fontSize:11.5}}>{t.n} answered · {pc}% correct</div> : <div style={{fontSize:11.5,color:"var(--text-3)"}}>not used yet</div>}{flag && <div style={{fontSize:11,color:"#b45309",fontWeight:700}}>⚠ {flag}</div>}</div>; })()}</td>
                   <td style={{...td,whiteSpace:"nowrap"}}><Btn sm v="sec" onClick={()=>toggleQ(b)}>{b.active?"Disable":"Enable"}</Btn> <Btn sm v="dan" onClick={()=>delQ(b.id)}>Delete</Btn></td>
                 </tr>))}
               {!bank.length && <tr><td style={td} colSpan={6}>No questions yet. Upload a file or generate with AI.</td></tr>}
@@ -6733,7 +6869,7 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
         <Card>
           <div style={{fontSize:14,fontWeight:700,marginBottom:6}}>Upload questions with answers</div>
           <div style={{fontSize:12.5,color:"var(--text-3)",lineHeight:1.6,marginBottom:12}}>
-            CSV columns: <code>skill, type, question, optionA, optionB, optionC, optionD, answer, difficulty, topic</code> (difficulty and topic are optional; topic powers the weak-area report). For <b>mcq</b> the answer is a letter A-D. For <b>short</b> the answer is the reference answer the AI scores against (leave the options empty). A JSON array with the same fields (<code>skill,type,question,options[],answer,difficulty</code>) also works.
+            CSV columns: <code>skill, type, question, optionA, optionB, optionC, optionD, answer, difficulty, topic</code> (difficulty, topic and language are optional; topic powers the weak-area report). Types: <b>mcq</b>, <b>short</b> and <b>code</b> - for code the answer is a reference solution that AI compares the candidate's code against, and language (sql, json, java, shell...) is shown to the candidate. For <b>mcq</b> the answer is a letter A-D. For <b>short</b> the answer is the reference answer the AI scores against (leave the options empty). A JSON array with the same fields (<code>skill,type,question,options[],answer,difficulty</code>) also works.
           </div>
           <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
             <input type="file" accept=".csv,.json,text/csv,application/json" onChange={e=>{ onFile(e.target.files[0]); e.target.value=""; }}/>
@@ -6756,7 +6892,7 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
             <Lbl t="Skill"><select value={gen.skill} onChange={e=>setGen(g=>({...g,skill:e.target.value}))} style={{...sS,width:170}}>{skills.map(s=><option key={s}>{s}</option>)}</select></Lbl>
             <Lbl t="How many (max 30)"><input type="number" min={1} max={30} value={gen.count} onChange={e=>setGen(g=>({...g,count:e.target.value}))} style={{...iS,width:110}}/></Lbl>
             <Lbl t="Difficulty"><select value={gen.difficulty} onChange={e=>setGen(g=>({...g,difficulty:e.target.value}))} style={{...sS,width:120}}>{["mixed","easy","medium","hard"].map(x=><option key={x}>{x}</option>)}</select></Lbl>
-            <Lbl t="Type"><select value={gen.type} onChange={e=>setGen(g=>({...g,type:e.target.value}))} style={{...sS,width:150}}><option value="mixed">Mixed</option><option value="mcq">Multiple choice</option><option value="short">Written answer</option></select></Lbl>
+            <Lbl t="Type"><select value={gen.type} onChange={e=>setGen(g=>({...g,type:e.target.value}))} style={{...sS,width:150}}><option value="mixed">Mixed (MCQ + written)</option><option value="all">Mixed incl. coding</option><option value="mcq">Multiple choice</option><option value="code">Coding exercise</option><option value="short">Written answer</option></select></Lbl>
             <Btn disabled={gen.busy} onClick={generate}>{gen.busy?"Generating...":"Generate"}</Btn>
           </div>
           <div style={{fontSize:12,color:"var(--text-3)",marginBottom:10}}>AI can be wrong. Review each question and its answer, untick any you do not trust, then add the rest to the bank.</div>
@@ -6765,9 +6901,9 @@ function SkillTestsPage({cloud, user, isAdmin, isMgr, toast}) {
               {gen.items.map((x,i)=>(
                 <label key={i} style={{display:"flex",gap:10,padding:"10px 12px",border:"1px solid var(--border)",borderRadius:10,fontSize:12.5,cursor:"pointer",opacity:x.keep?1:.5}}>
                   <input type="checkbox" checked={x.keep} onChange={e=>setGen(g=>({...g,items:g.items.map((y,j)=>j===i?{...y,keep:e.target.checked}:y)}))}/>
-                  <div><b>{x.type==="mcq"?"MCQ":"Written"}</b> · {x.difficulty}<div style={{color:"var(--text-1)",margin:"2px 0"}}>{x.text}</div>
+                  <div><b>{x.type==="mcq"?"MCQ":x.type==="code"?"Code"+(x.language?" ("+x.language+")":""):"Written"}</b> · {x.difficulty}<div style={{color:"var(--text-1)",margin:"2px 0"}}>{x.text}</div>
                     {x.type==="mcq" && <div style={{color:"var(--text-3)"}}>{x.options.map((o,k)=>"ABCD"[k]+") "+o).join("   ")}</div>}
-                    <div style={{color:"#059669"}}>Answer: {x.answer}</div></div>
+                    {x.type==="code" ? <pre style={{color:"#059669",margin:"4px 0 0",whiteSpace:"pre-wrap",fontSize:11.5}}>Reference: {x.answer}</pre> : <div style={{color:"#059669"}}>Answer: {x.answer}</div>}</div>
                 </label>))}
             </div>
             <div style={{marginTop:12}}><Btn disabled={busy||gen.busy} onClick={addGen}>Add {gen.items.filter(x=>x.keep).length} selected to bank</Btn></div>
@@ -18970,7 +19106,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     settings: PageSettings,
     action_center: PageActionCenter,
     my_week: PageMyWeek,
-    skill_tests: ()=><SkillTestsPage cloud={cloud} user={user} isAdmin={isAdmin} isMgr={isMgrOrAdmin} toast={showToast}/>,
+    skill_tests: ()=><SkillTestsPage cloud={cloud} user={user} users={allUsers} isAdmin={isAdmin} isMgr={isMgrOrAdmin} toast={showToast}/>,
     cab: ()=><CabPage acts={acts} setActs={setActs} users={allUsers} user={user} isAdmin={isAdmin} logs={logs} mis={mis} toast={showToast}/>,
     services: ()=><ServicesPage services={services} setServices={setServices} acts={acts} logs={logs} mis={mis} users={allUsers} teamNames={teams.map(t=>t.name)} canEdit={isMgrOrAdmin} toast={showToast}/>,
     audit_log: ()=><AuditPage cloud={cloud} toast={showToast}/>,
