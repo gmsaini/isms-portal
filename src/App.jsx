@@ -6693,7 +6693,7 @@ function SkillTestsPage({cloud, user, users, isAdmin, isMgr, toast}) {
       <PageHero icon="🎯" title="Skill Tests" subtitle={ST_COUNT+" questions per test · full-screen, proctored by the browser · scored automatically with AI for written answers"}/>
       <div style={{display:"flex",alignItems:"center",flexWrap:"wrap",borderBottom:"1px solid var(--border)",marginBottom:18,rowGap:0}}>
         {personalTabs.map(tabBtn)}
-        {manageTabs.length>0 && <><span style={{width:1,height:20,background:"var(--border)",margin:"0 12px 0 10px"}}/><span style={{fontSize:10.5,fontWeight:800,letterSpacing:.8,color:"var(--text-3)",marginRight:4}}>MANAGE</span>{manageTabs.map(tabBtn)}</>}
+        {manageTabs.length>0 && <><span style={{width:1,height:20,background:"var(--border)",margin:"0 10px"}}/>{manageTabs.map(tabBtn)}</>}
       </div>
       {err && <Card style={{marginBottom:14,borderColor:"#fecaca",background:"#fef2f2"}}><div style={{fontSize:13,color:"#b91c1c"}}>{err}</div></Card>}
 
@@ -9005,18 +9005,18 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       benefits:["Eliminates duplicate data entry between ITSM and time-tracking systems","Preserves ticket references so logs remain traceable to source systems","Enables adoption without requiring a full ITSM integration on day one"],
     },
     {
+      id:"dc_integrations", icon:"🔗", label:"Integrations",
+      mgrSec:"Data Connect",
+      role:"admin", guideGroup:"🔗 Data Connect", guideColor:"#ea580c", guideBg:"#fff7ed",
+      desc:"Integration status hub for JIRA, ServiceNow, Azure DevOps, and HPSM/SMAX — with connection readiness indicators and configuration guidance.",
+      benefits:["Provides a clear roadmap for automation maturity progression","Native integrations eliminate manual export/import once connected","Reduces time-to-value for organisations with existing ITSM investments"],
+    },
+    {
       id:"skill_tests", icon:"🎯", label:"Skill Tests",
       mgrSec:"Learning & Training", mbrSec:"Learning & Training",
       role:"all", guideGroup:"🎓 Learning & Training", guideColor:"#7c3aed", guideBg:"#f5f3ff",
       desc:"Proctored 30-question skill tests (for example Control-M and Talend). Questions come from an uploaded or AI-generated bank, multiple-choice is auto-scored and written answers are scored by AI. The test runs full screen and ends if the person leaves the window.",
       benefits:["Gives an objective, repeatable view of skills to feed the skill matrix and training plans","Managers can upload their own questions or generate a bank with AI and review every result","Answers never reach the browser before submission and every attempt is recorded"]
-    },
-    {
-      id:"dc_integrations", icon:"🔗", label:"Integrations",
-      mgrSec:"System",
-      role:"admin", guideGroup:"🔗 Data Connect", guideColor:"#ea580c", guideBg:"#fff7ed",
-      desc:"Integration status hub for JIRA, ServiceNow, Azure DevOps, and HPSM/SMAX — with connection readiness indicators and configuration guidance.",
-      benefits:["Provides a clear roadmap for automation maturity progression","Native integrations eliminate manual export/import once connected","Reduces time-to-value for organisations with existing ITSM investments"],
     },
 
     // == System ================================================
