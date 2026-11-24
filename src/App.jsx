@@ -6405,7 +6405,7 @@ function SkillTestsPage({cloud, user, users, isAdmin, isMgr, toast}) {
   const [tForm, setTForm] = React.useState({skill:"", topic:"", title:"", url:""});   // null | "camera" | {skill,stream,lm}
   const [busy, setBusy] = React.useState(false);
   const [up, setUp] = React.useState(null);           // {ok,bad}
-  const [gen, setGen] = React.useState({skill:"", count:30, difficulty:"mixed", type:"mixed", items:[], busy:false});
+  const [gen, setGen] = React.useState({skill:"", count:30, difficulty:"mixed", type:"mcq", items:[], busy:false});
   const [cfgForm, setCfgForm] = React.useState(null);
 
   const load = React.useCallback(async () => {
