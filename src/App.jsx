@@ -394,12 +394,12 @@ const SEED_USERS = [
 // live inside the portal so it reflects actual logged time.
 const MINS_PER_ENGINEER_MONTH = 160 * 60; // 9600 mins = 160h
 
-function buildCapacity(users, leaveData) {
+function buildCapacity(users, leaveData, ym) {
   const teamNames = [...new Set(users.filter(u=>u.team).map(u=>u.team))];
   return teamNames.map(team => {
     const hc       = users.filter(u=>u.team===team&&u.status!=="Inactive").length;
     const availMins= hc * MINS_PER_ENGINEER_MONTH;
-    const vacMins  = leaveData.filter(l=>l.team===team).reduce((s,l)=>s+l.mins, 0);
+    const vacMins  = ym ? leaveData.filter(l=>l.team===team).reduce((s,l)=>s+leaveMinsFor(l, ym, hc), 0) : leaveData.filter(l=>l.team===team).reduce((s,l)=>s+(l.mins||0), 0);
     return { team, hc, availMins, vacMins, utilMins:0 }; // utilMins filled live
   });
 }
@@ -5040,8 +5040,30 @@ const HIST_PERIODS = [
   { period:"Mar 25", avgMinsPerAct:338, avgMinsPerIncident:422, avgMinsPerChange:364, avgMinsPerBAU:172, totalActs:28, totalHrs:198, costPerTicket:258 },
 ];
 
-// Leave records: empty for a fresh start. Entries look like { member, team, from:"YYYY-MM-DD", to:"YYYY-MM-DD", days, mins, type }.
+// Leave records (live): PortalApp copies its "leaves" state into this array on every render, so every page sees the same data.
+// Entry: { id, userId, member, team, from:"YYYY-MM-DD", to:"YYYY-MM-DD", half, days, mins, type, note, teamWide }
 const LEAVE = [];
+const LEAVE_TYPES = ["Annual Leave","Sick Leave","Casual Leave","Comp-off","Training","Other"];
+const LEAVE_DAY_MINS = 480;
+const lvDate = s => { const [y,m,d] = String(s||"").split("-").map(Number); return new Date(Date.UTC(y, (m||1)-1, d||1)); };
+const lvStr = dt => dt.toISOString().slice(0,10);
+const lvMonthRange = ym => [ym+"-01", lvStr(new Date(Date.UTC(+ym.slice(0,4), +ym.slice(5,7), 0)))];
+const monthLabel = ym => new Date(ym+"-01T00:00:00").toLocaleDateString("en-GB",{month:"long",year:"numeric"});
+// Monday to Friday days between two dates, inclusive
+function leaveWorkdays(from, to) {
+  if(!from || !to || to < from) return 0;
+  let n = 0; const b = lvDate(to);
+  for(let d = lvDate(from); d <= b; d.setUTCDate(d.getUTCDate()+1)) { const w = d.getUTCDay(); if(w !== 0 && w !== 6) n++; }
+  return n;
+}
+function leaveDaysIn(l, a, b) { const f = l.from > a ? l.from : a, t = l.to < b ? l.to : b; const n = leaveWorkdays(f, t); return l.half ? (n > 0 ? 0.5 : 0) : n; }
+// Minutes of capacity a leave entry removes in a month (all time when ym is empty). Public holidays remove headcount x 8h per day.
+function leaveMinsFor(l, ym, hc) {
+  const r = ym ? lvMonthRange(ym) : ["0000-01-01","9999-12-31"];
+  return Math.round(leaveDaysIn(l, r[0], r[1]) * LEAVE_DAY_MINS * (l.teamWide ? Math.max(1, hc||1) : 1));
+}
+const leaveTeamMins = (team, ym, hc) => LEAVE.filter(l=>l.team===team).reduce((s,l)=>s+leaveMinsFor(l, ym, hc), 0);
+const leaveInMonth = (l, ym) => { const r = lvMonthRange(ym); return l.from <= r[1] && l.to >= r[0]; };
 
 // CAPACITY is built after LEAVE so both are in scope
 // availMins = hc × 160h × 60  (40h/week × 4 weeks, per engineer)
@@ -5569,10 +5591,10 @@ const ImprovementMatrix = ({items}) => {
 };
 
 // ===== Audit log: who changed what =====
-const AUDIT_ENT = {users:"member", teams:"team", acts:"activity", mis:"incident", logs:"time log", settings:"setting"};
+const AUDIT_ENT = {users:"member", teams:"team", acts:"activity", mis:"incident", logs:"time log", leaves:"leave", settings:"setting"};
 const AUDIT_MASK = new Set(["password"]);
 const AUDIT_SKIP = new Set(["lastLogin"]);
-const auditLabel = (name, it) => name==="acts" ? (it.name||it.id) : name==="mis" ? ((it.incidentNo||it.id)+" "+(it.name||"")).trim() : name==="logs" ? ((it.member||"")+" · "+(it.activity||it.actId||"")+" · "+(it.mins||0)+"m") : name==="settings" ? it.key : (it.name||it.id||"");
+const auditLabel = (name, it) => name==="acts" ? (it.name||it.id) : name==="mis" ? ((it.incidentNo||it.id)+" "+(it.name||"")).trim() : name==="logs" ? ((it.member||"")+" · "+(it.activity||it.actId||"")+" · "+(it.mins||0)+"m") : name==="leaves" ? ((it.member||"")+" · "+(it.type||"")+" · "+(it.from||"")+(it.to&&it.to!==it.from?" to "+it.to:"")) : name==="settings" ? it.key : (it.name||it.id||"");
 const auditShort = v => { if(v===undefined||v===null||v==="") return "(empty)"; if(typeof v==="object") return Array.isArray(v) ? "["+v.length+" items]" : "{…}"; const t=String(v); return t.length>70?t.slice(0,70)+"…":t; };
 function auditDiff(name, prev, items, now, actor) {
   const c = CLOUD_COLL[name]; const byKey = {}; items.forEach(it=>{ byKey[c.key(it)] = it; });
@@ -6875,6 +6897,166 @@ function SkillTestsPage({cloud, user, users, isAdmin, isMgr, toast}) {
   );
 }
 
+// ===== Leave management: members record leave; net capacity = headcount x 160h - leave (working days x 8h) =====
+const LEAVE_TONE = {"Annual Leave":"blue","Sick Leave":"amber","Casual Leave":"blue","Comp-off":"green","Training":"grey","Other":"grey","Public Holiday":"grey"};
+const lvMkId = () => "LV-" + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+const lvIso = (d) => d.toISOString().slice(0,10);
+function LeavePage({leaves, setLeaves, users, user, isAdmin, isMgr, capMonth, logs, toast}) {
+  const todayS = lvIso(new Date());
+  const [tab, setTab] = React.useState("mine");
+  const [month, setMonth] = React.useState(capMonth);
+  const [teamF, setTeamF] = React.useState(isAdmin ? "All" : (user.team || ""));
+  const blank = {type:"Annual Leave", from:todayS, to:todayS, half:false, note:"", userId:user.id};
+  const [form, setForm] = React.useState(blank);
+  const [hol, setHol] = React.useState({name:"", from:todayS, to:todayS, team:isAdmin ? "All teams" : (user.team || "")});
+  const fi = {...iS, height:38, boxSizing:"border-box"};
+  const fs = {...sS, height:38, boxSizing:"border-box"};
+  const active = users.filter(u=>u.status!=="Inactive" && u.team);
+  const people = (isAdmin ? active : active.filter(u=>u.team===user.team)).slice().sort((a,b)=>a.name.localeCompare(b.name));
+  const teamNames = [...new Set(users.filter(u=>u.team).map(u=>u.team))].sort();
+  const hcOf = t => active.filter(u=>u.team===t).length;
+  const canDel = l => isAdmin || l.userId===user.id || (isMgr && l.team===user.team);
+  const visible = leaves.filter(l => isAdmin || l.team===user.team);
+  const [ms, me] = lvMonthRange(month);
+  const year = todayS.slice(0,4);
+
+  // ---- my numbers
+  const mine = leaves.filter(l=>l.userId===user.id).slice().sort((a,b)=>b.from.localeCompare(a.from));
+  const takenYear = mine.reduce((s,l)=>s+leaveDaysIn(l, year+"-01-01", lvIso(new Date(Date.now()-86400000))), 0);
+  const upcoming = mine.reduce((s,l)=>s+leaveDaysIn(l, todayS, "9999-12-31"), 0);
+  const nextL = mine.filter(l=>l.to>=todayS).sort((a,b)=>a.from.localeCompare(b.from))[0];
+  const outToday = visible.filter(l=>l.type!=="Public Holiday" && l.from<=todayS && l.to>=todayS && leaveWorkdays(todayS,todayS)>0);
+  const holidayToday = visible.find(l=>l.type==="Public Holiday" && l.from<=todayS && l.to>=todayS);
+
+  // ---- add leave
+  const tgt = (isMgr || isAdmin) ? (users.find(u=>u.id===form.userId) || user) : user;
+  const days = form.half ? (form.from===form.to && leaveWorkdays(form.from,form.to)>0 ? 0.5 : 0) : leaveWorkdays(form.from, form.to);
+  const problem = (() => {
+    if(!form.from || !form.to) return "Choose the dates";
+    if(form.to < form.from) return "The end date is before the start date";
+    if((lvDate(form.to)-lvDate(form.from))/86400000 > 366) return "A single entry can cover at most one year";
+    if(form.half && form.from!==form.to) return "A half day needs the same start and end date";
+    if(days===0) return "That range has only weekend days, so there is no leave to record";
+    const clash = leaves.find(l=>l.userId===tgt.id && l.type!=="Public Holiday" && l.from<=form.to && l.to>=form.from);
+    if(clash) return (tgt.id===user.id ? "You already have" : tgt.name+" already has")+" leave on "+stFmtDate(clash.from)+(clash.to!==clash.from?" to "+stFmtDate(clash.to):"");
+    return "";
+  })();
+  const addLeave = () => {
+    if(problem) { toast(problem, "err"); return; }
+    const rec = {id:lvMkId(), userId:tgt.id, member:tgt.name, team:tgt.team, from:form.from, to:form.to, half:!!form.half, days, mins:Math.round(days*LEAVE_DAY_MINS), type:form.type, note:(form.note||"").trim(), createdBy:user.name, createdAt:new Date().toISOString()};
+    setLeaves(a=>[...a, rec]);
+    setForm({...blank, userId:form.userId});
+    toast("Leave added: "+days+" day"+(days===1?"":"s"));
+  };
+  const delLeave = (l) => { if(!canDel(l)) return; if(!window.confirm("Remove this leave"+(l.userId===user.id?"":" for "+l.member)+"?")) return; setLeaves(a=>a.filter(x=>x.id!==l.id)); toast("Leave removed"); };
+
+  // ---- public holiday (manager / admin)
+  const holDays = leaveWorkdays(hol.from, hol.to);
+  const addHoliday = () => {
+    if(!hol.name.trim()) { toast("Give the holiday a name", "err"); return; }
+    if(hol.to < hol.from) { toast("The end date is before the start date", "err"); return; }
+    if(holDays===0) { toast("That range has only weekend days", "err"); return; }
+    const tl = hol.team==="All teams" ? teamNames : [hol.team];
+    const recs = tl.filter(Boolean).map(t=>({id:lvMkId(), userId:null, member:hol.name.trim(), team:t, from:hol.from, to:hol.to, half:false, days:holDays, mins:holDays*LEAVE_DAY_MINS*hcOf(t), type:"Public Holiday", teamWide:true, note:"", createdBy:user.name, createdAt:new Date().toISOString()}));
+    setLeaves(a=>[...a, ...recs]); setHol({...hol, name:""}); toast("Holiday added for "+recs.length+" team"+(recs.length===1?"":"s"));
+  };
+
+  // ---- team calendar for the chosen month
+  const inMonth = visible.filter(l=>l.from<=me && l.to>=ms && (isAdmin ? (teamF==="All"||l.team===teamF) : true)).sort((a,b)=>a.from.localeCompare(b.from));
+  // ---- capacity impact for the chosen month
+  const capTeams = (isAdmin ? teamNames : [user.team]).filter(Boolean);
+  const capRows = capTeams.map(t => {
+    const hc = hcOf(t), avail = hc*MINS_PER_ENGINEER_MONTH, leave = LEAVE.filter(l=>l.team===t).reduce((s,l)=>s+leaveMinsFor(l, month, hc), 0);
+    const net = Math.max(0, avail-leave), used = logs.filter(l=>l.team===t && (l.date||"").startsWith(month)).reduce((s,l)=>s+(l.mins||0),0);
+    return {t, hc, avail, leave, net, used, util: net>0 ? used/net*100 : 0};
+  });
+  const th = {textAlign:"left",padding:"9px 14px",fontSize:11,letterSpacing:.5,textTransform:"uppercase",color:"var(--text-3)",fontWeight:700,background:"var(--surface-2)",borderBottom:"1px solid var(--border)",whiteSpace:"nowrap"};
+  const td = {padding:"10px 14px",fontSize:13,borderBottom:"1px solid var(--surface-3)",verticalAlign:"middle"};
+  const tabs = [["mine","My leave"],["team","Team calendar"]].concat((isMgr||isAdmin) ? [["cap","Capacity impact"]] : []);
+  const tabBtn = ([k,l]) => <button key={k} onClick={()=>setTab(k)} style={{background:"none",border:"none",borderBottom:"2px solid "+(tab===k?"var(--brand)":"transparent"),padding:"10px 14px",fontSize:13.5,fontWeight:tab===k?700:500,color:tab===k?"var(--brand)":"var(--text-2)",cursor:"pointer",marginBottom:-1,fontFamily:"inherit"}}>{l}</button>;
+  const rangeTxt = l => l.from===l.to ? stFmtDate(l.from)+(l.half?" (half day)":"") : stFmtDate(l.from)+" to "+stFmtDate(l.to);
+  const LeaveTable = ({rows, showWho, clip}) => rows.length===0 ? <StEmpty icon="🏖" title="No leave to show" text="Nothing recorded for this view yet."/> : (
+    <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}}>
+      <thead><tr>{(showWho?["Person"]:[]).concat(["Type","Dates","Days","Hours","Note",""]).map((h,i)=><th key={i} style={th}>{h}</th>)}</tr></thead>
+      <tbody>{rows.map(l=>{ const hc=hcOf(l.team); const dd = clip ? leaveDaysIn(l, ms, me) : (l.half?0.5:l.days); const mm = clip ? leaveMinsFor(l, month, hc) : (l.teamWide ? l.days*LEAVE_DAY_MINS*hc : l.mins);
+        return <tr key={l.id}>
+          {showWho && <td style={td}><div style={{fontWeight:700}}>{l.member}</div><div style={{fontSize:11.5,color:"var(--text-3)"}}>{l.teamWide ? l.team+" · whole team" : l.team}</div></td>}
+          <td style={td}><StPill tone={LEAVE_TONE[l.type]||"grey"}>{l.type}</StPill></td>
+          <td style={td}>{rangeTxt(l)}</td>
+          <td style={td}>{dd}{clip && dd!==(l.half?0.5:l.days) ? <span style={{fontSize:11,color:"var(--text-4)"}}> of {l.half?0.5:l.days}</span> : null}</td>
+          <td style={{...td,color:"#b91c1c",fontWeight:600}}>{fmtM(mm)}</td>
+          <td style={{...td,fontSize:12,color:"var(--text-3)",maxWidth:220}}>{l.note||""}</td>
+          <td style={{...td,textAlign:"right"}}>{canDel(l) && <Btn sm v="sec" onClick={()=>delLeave(l)}>Remove</Btn>}</td>
+        </tr>; })}</tbody></table></div>);
+
+  return (
+    <div style={{maxWidth:1080,margin:"0 auto"}} data-testid="leave-page">
+      <PageHero icon="🏖" title="Leave" subtitle="Record your leave so team capacity is calculated on what is really available. Net available hours = headcount x 160h minus leave."/>
+      <div style={{display:"flex",flexWrap:"wrap",borderBottom:"1px solid var(--border)",marginBottom:18}}>{tabs.map(tabBtn)}</div>
+
+      {tab==="mine" && <>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:12,marginBottom:16}}>
+          <StStat icon="🗓" label="Days taken this year" value={takenYear} sub={"working days up to yesterday"} tone="blue"/>
+          <StStat icon="🧳" label="Upcoming days" value={upcoming} sub={nextL ? "next: "+stFmtDate(nextL.from) : "nothing planned"} tone="green"/>
+          <StStat icon="👥" label="Out today in your team" value={outToday.length} sub={outToday.length ? outToday.slice(0,3).map(l=>l.member.split(" ")[0]).join(", ")+(outToday.length>3?" +"+(outToday.length-3):"") : (holidayToday ? "public holiday: "+holidayToday.member : "everyone is in")} tone={outToday.length?"amber":"grey"}/>
+        </div>
+        <Card style={{marginBottom:16}}>
+          <div style={{fontWeight:700,fontSize:14,marginBottom:12}}>{(isMgr||isAdmin) ? "Add leave" : "Add my leave"}</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:12,alignItems:"flex-end"}}>
+            {(isMgr||isAdmin) && <Lbl t="Person"><select value={form.userId} onChange={e=>setForm(f=>({...f,userId:e.target.value}))} style={{...fs,width:200}}>{people.map(u=><option key={u.id} value={u.id}>{u.name}{isAdmin?" ("+u.team+")":""}</option>)}</select></Lbl>}
+            <Lbl t="Type"><select value={form.type} onChange={e=>setForm(f=>({...f,type:e.target.value}))} style={{...fs,width:150}}>{LEAVE_TYPES.map(t=><option key={t}>{t}</option>)}</select></Lbl>
+            <Lbl t="From"><input type="date" value={form.from} onChange={e=>setForm(f=>({...f,from:e.target.value,to:(f.to<e.target.value||f.half)?e.target.value:f.to}))} style={{...fi,width:150}}/></Lbl>
+            <Lbl t="To"><input type="date" value={form.to} min={form.from} disabled={form.half} onChange={e=>setForm(f=>({...f,to:e.target.value}))} style={{...fi,width:150}}/></Lbl>
+            <label style={{display:"flex",alignItems:"center",gap:6,fontSize:13,height:38}}><input type="checkbox" checked={form.half} onChange={e=>setForm(f=>({...f,half:e.target.checked,to:e.target.checked?f.from:f.to}))}/> Half day</label>
+            <div style={{flex:"1 1 200px"}}><Lbl t="Note (optional)"><input value={form.note} onChange={e=>setForm(f=>({...f,note:e.target.value}))} placeholder="e.g. family event" style={{...fi,width:"100%"}}/></Lbl></div>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:12,marginTop:14,flexWrap:"wrap"}}>
+            <Btn onClick={addLeave} disabled={!!problem}>Add leave</Btn>
+            <span data-testid="leave-preview" style={{fontSize:12.5,color:problem?"#b91c1c":"var(--text-3)"}}>{problem || (days+" working day"+(days===1?"":"s")+" · "+fmtM(days*LEAVE_DAY_MINS)+" taken off "+(tgt.id===user.id?"your":tgt.name.split(" ")[0]+"'s")+" capacity (weekends are not counted)")}</span>
+          </div>
+        </Card>
+        <Card style={{padding:0,overflow:"hidden"}}><div style={{padding:"14px 16px",fontWeight:700,fontSize:14}}>My leave</div><LeaveTable rows={mine} showWho={false} clip={false}/></Card>
+      </>}
+
+      {tab==="team" && <>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",marginBottom:14}}>
+          <input type="month" value={month} onChange={e=>e.target.value && setMonth(e.target.value)} style={{...fi,width:170}}/>
+          {isAdmin && <select value={teamF} onChange={e=>setTeamF(e.target.value)} style={{...fs,width:170}}><option value="All">All teams</option>{teamNames.map(t=><option key={t}>{t}</option>)}</select>}
+          <span style={{fontSize:12.5,color:"var(--text-3)"}}>{inMonth.length} entr{inMonth.length===1?"y":"ies"} in {monthLabel(month)}</span>
+        </div>
+        <Card style={{padding:0,overflow:"hidden",marginBottom:16}}><LeaveTable rows={inMonth} showWho={true} clip={true}/></Card>
+        {(isMgr||isAdmin) && <Card>
+          <div style={{fontWeight:700,fontSize:14,marginBottom:4}}>Add a public holiday</div>
+          <div style={{fontSize:12.5,color:"var(--text-3)",marginBottom:12}}>Takes the day off every active member of the team (headcount x 8h per working day).</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:12,alignItems:"flex-end"}}>
+            <Lbl t="Name"><input value={hol.name} onChange={e=>setHol(h=>({...h,name:e.target.value}))} placeholder="e.g. Diwali" style={{...fi,width:200}}/></Lbl>
+            <Lbl t="From"><input type="date" value={hol.from} onChange={e=>setHol(h=>({...h,from:e.target.value,to:h.to<e.target.value?e.target.value:h.to}))} style={{...fi,width:150}}/></Lbl>
+            <Lbl t="To"><input type="date" value={hol.to} min={hol.from} onChange={e=>setHol(h=>({...h,to:e.target.value}))} style={{...fi,width:150}}/></Lbl>
+            {isAdmin && <Lbl t="Applies to"><select value={hol.team} onChange={e=>setHol(h=>({...h,team:e.target.value}))} style={{...fs,width:160}}><option>All teams</option>{teamNames.map(t=><option key={t}>{t}</option>)}</select></Lbl>}
+            <Btn onClick={addHoliday}>Add holiday</Btn>
+          </div>
+        </Card>}
+      </>}
+
+      {tab==="cap" && (isMgr||isAdmin) && <>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",marginBottom:14}}>
+          <input type="month" value={month} onChange={e=>e.target.value && setMonth(e.target.value)} style={{...fi,width:170}}/>
+          <span style={{fontSize:12.5,color:"var(--text-3)"}}>Utilisation is measured against net available hours, so leave never counts against the team.</span>
+        </div>
+        <Card style={{padding:0,overflow:"hidden"}} >
+          <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}} data-testid="leave-cap">
+            <thead><tr>{["Team","People","Available","Leave","Net available","Logged","Utilisation (of net)"].map((h,i)=><th key={i} style={th}>{h}</th>)}</tr></thead>
+            <tbody>{capRows.map(r=>{ const tone = r.util>100?"red":r.util>=85?"amber":r.util>=50?"green":"grey"; return <tr key={r.t}>
+              <td style={{...td,fontWeight:700}}>{r.t}</td><td style={td}>{r.hc}</td><td style={td}>{fmtM(r.avail)}</td>
+              <td style={{...td,color:r.leave?"#b91c1c":"var(--text-3)",fontWeight:600}}>{r.leave?"-"+fmtM(r.leave):"none"}</td>
+              <td style={{...td,fontWeight:700}}>{fmtM(r.net)}</td><td style={td}>{fmtM(r.used)}</td>
+              <td style={td}><StPill tone={tone}>{Math.round(r.util)}%</StPill></td></tr>; })}</tbody></table></div>
+        </Card>
+      </>}
+    </div>
+  );
+}
+
 const DEFAULT_CATEGORIES = ["Infrastructure Build","Maintenance","Security & Compliance","Automation & Scripting","Monitoring & Alerting","Documentation"].map(n=>({name:n, active:true}));
 // Values pre-filled in the Log Time form from an activity's own settings
 const logDefaultsFrom = (a, f) => ({
@@ -7988,6 +8170,7 @@ const CLOUD_COLL = {
   acts: {table:"activities", pk:"id", sel:"data", key:a=>a.id, out:r=>r.data, row:a=>({id:a.id, team:a.team||null, data:a})},
   logs: {table:"time_logs", pk:"id", sel:"data", key:l=>l.id, out:r=>r.data, row:l=>({id:l.id, user_id:l.userId||null, team:l.team||null, log_date:l.date||null, data:l})},
   mis:  {table:"major_incidents", pk:"id", sel:"data", key:m=>m.id, out:r=>r.data, row:m=>({id:m.id, data:m})},
+  leaves:{table:"leaves", pk:"id", sel:"data", optional:true, key:l=>l.id, out:r=>r.data, row:l=>({id:l.id, user_id:l.userId||null, team:l.team||null, from_date:l.from||null, to_date:l.to||null, data:l})},
   settings:{table:"app_settings", pk:"key", sel:"data", optional:true, key:s=>s.key, out:r=>r.data, row:s=>({key:s.key, data:s})}
 };
 async function cloudLoadAll(sb) {
@@ -8154,6 +8337,12 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       return missingSeed.length > 0 ? [...missingSeed, ...saved] : saved;
     } catch(e) { return SEED_LOGS; }
   });
+  const [leaves,     setLeaves]     = useState(()=>{
+    if(cloud) return cloud.data.leaves || [];
+    try { const s = localStorage.getItem('isms_leaves'); return s ? JSON.parse(s) : []; } catch(e) { return []; }
+  });
+  React.useEffect(()=>{ if(cloud) return; try{ localStorage.setItem('isms_leaves', JSON.stringify(leaves)); }catch(e){} }, [leaves]);
+  LEAVE.length = 0; leaves.forEach(l=>LEAVE.push(l));   // keep the module-level list in step with state
   const [miModal,    setMiModal]    = useState(false); // create/edit Major Incident
 
   // Persist acts and logs whenever they change
@@ -8217,7 +8406,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
   React.useEffect(()=>{
     if(!cloud) return;
     let stop = false, busy = false;
-    const setters = {users:setAllUsers, teams:setTeams, acts:setActs, mis:setMis, logs:setLogs,
+    const setters = {users:setAllUsers, teams:setTeams, acts:setActs, mis:setMis, logs:setLogs, leaves:setLeaves,
       settings:(arr)=>{ const r = arr.find(x=>x.key==="categories"); if(r && Array.isArray(r.items) && r.items.length) setCategories(r.items); const q = arr.find(x=>x.key==="sla"); if(q && q.targets) setSlaTargets({...DEFAULT_SLA, ...q.targets}); const sv = arr.find(x=>x.key==="services"); if(sv && Array.isArray(sv.items)) setServicesRaw(sv.items); }};
     const pull = async () => {
       if(stop || busy || document.hidden) return;
@@ -8250,6 +8439,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
   React.useEffect(()=>{ auditTrack("acts", acts); cloudSave("acts",  acts);     }, [acts]);
   React.useEffect(()=>{ auditTrack("mis", mis); cloudSave("mis",   mis);      }, [mis]);
   React.useEffect(()=>{ auditTrack("logs", logs); cloudSave("logs",  logs);     }, [logs]);
+  React.useEffect(()=>{ auditTrack("leaves", leaves); cloudSave("leaves", leaves); }, [leaves]);
   React.useEffect(()=>{ const st=[{key:"categories", items:categories},{key:"sla", targets:slaTargets},{key:"services", items:services}]; if(catsDirty.current) auditTrack("settings", st); else auditPrev.current.settings = cloudSnap("settings", st); }, [categories, slaTargets, services]);
   React.useEffect(()=>{ if(catsDirty.current) cloudSave("settings", [{key:"categories", items:categories},{key:"sla", targets:slaTargets},{key:"services", items:services}]); }, [categories, slaTargets, services]);
   const [modal,      setModal]      = useState(null);
@@ -8595,19 +8785,26 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
   // vacMins   = sum of LEAVE mins for that team (from LEAVE constant)
   // netMins   = availMins − vacMins  (available bandwidth after leave)
   // utilMins  = actual minutes logged by that team this period
+  // The month capacity is measured for: the latest month with logs, or the current month if that is later
+  const capMonth = useMemo(()=>{
+    const cur = new Date().toISOString().slice(0,7);
+    const ms = [...new Set(logs.map(l=>(l.date||"").slice(0,7)).filter(Boolean))].sort();
+    const last = ms[ms.length-1] || cur;
+    return last > cur ? last : cur;
+  }, [logs]);
   const LIVE_CAPACITY = useMemo(()=>{
-    const base = buildCapacity(allUsers, LEAVE);
+    const base = buildCapacity(allUsers, LEAVE, capMonth);
     // utilMins = only current month's logs (same period as availMins = 1 month)
     const monthPfx = new Date().toISOString().slice(0,7); // "YYYY-MM"
     // Find the most recent month that has log data (demo-safe: works even if logs are from 2025)
     const allMonths = [...new Set(logs.map(l=>(l.date||"").slice(0,7)).filter(Boolean))].sort();
-    const latestMonth = allMonths[allMonths.length-1] || monthPfx;
+    const latestMonth = capMonth;
     return base.map(c=>({
       ...c,
       utilMins: logs.filter(l=>l.team===c.team && (l.date||"").startsWith(latestMonth))
                     .reduce((s,l)=>s+l.mins, 0),
     }));
-  }, [allUsers, logs, acts]);
+  }, [allUsers, logs, acts, leaves, capMonth]);
   // == Effort estimate from history (statistics on your own data, no AI needed) ==
   const estimateFromHistory = (f) => {
     if(!f || !f.type) return null;
@@ -8865,6 +9062,13 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       benefits:["Gives managers a complete picture of each member's workload and activity","Supports capacity conversations with objective hours and task data","Enables rapid identification of members who need rebalancing or support"],
     },
     {
+      id:"leave", icon:"🏖", label:"Leave",
+      mgrSec:"Operations", mbrSec:"Operations",
+      role:"all", guideGroup:"📋 Activity & Time Management", guideColor:"#059669", guideBg:"#f0fdf4",
+      desc:"Members record their own leave (full or half days, weekends skipped) and managers add leave for the team and public holidays. Net available hours per team are headcount x 160h minus leave, and utilisation is measured against that net figure.",
+      benefits:["Capacity and utilisation reflect who is really available instead of assuming a full team","Everyone sees who is out today and who is out in a given month","Managers see the capacity impact of leave per team and month before committing work"],
+    },
+    {
       id:"bandwidth", icon:"📊", label:"Bandwidth & Capacity",
       mgrSec:"Operations",
       role:"mgr", guideGroup:"📈 Reports & Analytics", guideColor:"#d97706", guideBg:"#fffbeb",
@@ -9120,7 +9324,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     const dashActs  = isAdmin ? acts : teamActs;
     const dashLogs  = isAdmin ? logs : teamLogs;
     const dashCap   = isAdmin ? LIVE_CAPACITY : LIVE_CAPACITY.filter(c=>c.team===user.team);
-    const dashLeave = isAdmin ? LEAVE : LEAVE.filter(l=>l.team===user.team);
+    const dashLeave = (isAdmin ? LEAVE : LEAVE.filter(l=>l.team===user.team)).filter(l=>l.type!=="Public Holiday" && leaveInMonth(l, capMonth));
     const members   = isAdmin ? allUsers.filter(u=>u.team) : allUsers.filter(u=>u.team===(user.team||''));
     const totalMins = dashLogs.reduce((s,l)=>s+l.mins,0);
     const avgUtil   = Math.round(dashCap.reduce((s,c)=>{const n=c.availMins-c.vacMins;return s+(c.utilMins/n*100)},0)/Math.max(dashCap.length,1));
@@ -11144,7 +11348,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     const bwCap  = isAdmin ? LIVE_CAPACITY : LIVE_CAPACITY.filter(c=>c.team===user.team);
     const bwActs = isAdmin ? acts     : acts.filter(a=>a.team===user.team);
     const bwLogs = isAdmin ? logs     : logs.filter(l=>l.team===user.team);
-    const bwLeave= isAdmin ? LEAVE    : LEAVE.filter(l=>l.team===user.team);
+    const bwLeave= (isAdmin ? LEAVE    : LEAVE.filter(l=>l.team===user.team)).filter(l=>leaveInMonth(l, capMonth));
 
     // Per-activity: total logged + per-member breakdown
     const actDetail = bwActs.map(a=>{
@@ -11333,7 +11537,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
 
         {/* == Row 3: Leave Calendar == */}
         <Card>
-          <div style={{fontWeight:700,fontSize:13,marginBottom:14}}>{`Leave Calendar — ${currentMonthLabel()}`}</div>
+          <div style={{fontWeight:700,fontSize:13,marginBottom:14}}>{`Leave Calendar — ${monthLabel(capMonth)}`}</div>
           {bwLeave.length===0
             ? <div style={{textAlign:"center",padding:24,color:"var(--text-4)",fontSize:13}}>No leave planned this month.</div>
             : (
@@ -11347,8 +11551,8 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
                       <TD><TPill t={l.team}/></TD>
                       <TD s={{fontSize:12}}>{l.from}</TD>
                       <TD s={{fontSize:12}}>{l.to}</TD>
-                      <TD>{l.days}</TD>
-                      <TD s={{color:"#dc2626",fontWeight:700}}>{fmtM(l.mins)}</TD>
+                      <TD>{leaveDaysIn(l, ...lvMonthRange(capMonth))}</TD>
+                      <TD s={{color:"#dc2626",fontWeight:700}}>{fmtM(leaveMinsFor(l, capMonth, allUsers.filter(u=>u.team===l.team&&u.status!=="Inactive").length))}</TD>
                       <TD s={{fontSize:12}}>{l.type}</TD>
                     </tr>
                   ))}
@@ -16417,7 +16621,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       });
       teamNames.forEach(t=>{
         const hc = sUsers.filter(u=>u.team===t).length, cap = hc*MINS_PER_ENGINEER_MONTH;
-        const vac = (LEAVE||[]).filter(l=>l.team===t).reduce((s,l)=>s+l.mins,0);
+        const vac = leaveTeamMins(t, monthKey, hc);
         const used = monthLogs.filter(l=>l.team===t).reduce((s,l)=>s+l.mins,0);
         const pct = used/Math.max(1,cap-vac)*100;
         if(pct>95) add({id:"t-over-"+t, domain:"Capacity", sev:pct>110?"high":"medium", score:52+Math.min(pct-95,40)/2,
@@ -16476,7 +16680,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       // -- Team scorecard ---------------------------------------------------
       const scorecard = teamNames.map(t=>{
         const tl=monthLogs.filter(l=>l.team===t), tot=tl.reduce((s,l)=>s+l.mins,0);
-        const hc=sUsers.filter(u=>u.team===t).length, cap=Math.max(1,hc*MINS_PER_ENGINEER_MONTH-(LEAVE||[]).filter(l=>l.team===t).reduce((s,l)=>s+l.mins,0));
+        const hc=sUsers.filter(u=>u.team===t).length, cap=Math.max(1,hc*MINS_PER_ENGINEER_MONTH-leaveTeamMins(t, monthKey, hc));
         const util=tot/cap*100, re=tot?tl.filter(l=>l.nature==="Reactive").reduce((s,l)=>s+l.mins,0)/tot*100:0;
         const ta=sAct.filter(a=>a.team===t), sp=ta.filter(a=>a.status==="Suspended").length;
         const over=ta.filter(a=>a.status==="Active"&&a.estMins>0&&(a.type==="Project"||a.type==="Change")&&(loggedByAct[a.id]||0)>a.estMins&&(loggedByAct[a.id]||0)<=a.estMins*4).length;
@@ -19018,6 +19222,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     settings: PageSettings,
     action_center: PageActionCenter,
     my_week: PageMyWeek,
+    leave: ()=><LeavePage leaves={leaves} setLeaves={setLeaves} users={allUsers} user={user} isAdmin={isAdmin} isMgr={isMgrOrAdmin} capMonth={capMonth} logs={isAdmin?logs:teamLogs} toast={showToast}/>,
     skill_tests: ()=><SkillTestsPage cloud={cloud} user={user} users={allUsers} isAdmin={isAdmin} isMgr={isMgrOrAdmin} toast={showToast}/>,
     services: ()=><ServicesPage services={services} setServices={setServices} acts={acts} logs={logs} mis={mis} users={allUsers} teamNames={teams.map(t=>t.name)} canEdit={isMgrOrAdmin} toast={showToast}/>,
     audit_log: ()=><AuditPage cloud={cloud} toast={showToast}/>,
