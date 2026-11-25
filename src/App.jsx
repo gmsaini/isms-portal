@@ -5040,26 +5040,8 @@ const HIST_PERIODS = [
   { period:"Mar 25", avgMinsPerAct:338, avgMinsPerIncident:422, avgMinsPerChange:364, avgMinsPerBAU:172, totalActs:28, totalHrs:198, costPerTicket:258 },
 ];
 
-const LEAVE = [
-  { member:"Tom Wilson",       team:"Network",  from:"2025-03-17", to:"2025-03-21", days:5, mins:2400, type:"Annual Leave"    },
-  { member:"Alex Chen",        team:"Network",  from:"2025-02-10", to:"2025-02-11", days:2, mins:960,  type:"Annual Leave"    },
-  { member:"Sophie Clarke",    team:"Network",  from:"2025-03-06", to:"2025-03-06", days:1, mins:480,  type:"Sick Leave"      },
-  { member:"Emma Davis",       team:"Security", from:"2025-03-24", to:"2025-03-26", days:3, mins:1440, type:"Annual Leave"    },
-  { member:"Maria Santos",     team:"Security", from:"2025-02-17", to:"2025-02-17", days:1, mins:480,  type:"Sick Leave"      },
-  { member:"Carlos Mendez",    team:"Security", from:"2025-03-13", to:"2025-03-14", days:2, mins:960,  type:"Annual Leave"    },
-  { member:"Mike Brown",       team:"Compute",  from:"2025-03-10", to:"2025-03-10", days:1, mins:480,  type:"Sick Leave"      },
-  { member:"James Park",       team:"Compute",  from:"2025-03-03", to:"2025-03-07", days:5, mins:2400, type:"Annual Leave"    },
-  { member:"Nathan Brooks",    team:"Compute",  from:"2025-02-20", to:"2025-02-20", days:1, mins:480,  type:"Public Holiday"  },
-  { member:"Aisha Malik",      team:"Cloud",    from:"2025-03-20", to:"2025-03-20", days:1, mins:480,  type:"Public Holiday"  },
-  { member:"Priya Nair",       team:"Cloud",    from:"2025-02-24", to:"2025-02-25", days:2, mins:960,  type:"Annual Leave"    },
-  { member:"Diego Herrera",    team:"Cloud",    from:"2025-03-17", to:"2025-03-18", days:2, mins:960,  type:"Annual Leave"    },
-  { member:"Ravi Sharma",      team:"Storage",  from:"2025-03-13", to:"2025-03-14", days:2, mins:960,  type:"Annual Leave"    },
-  { member:"David Kim",        team:"Storage",  from:"2025-02-06", to:"2025-02-06", days:1, mins:480,  type:"Sick Leave"      },
-  { member:"Keiko Yamamoto",   team:"Storage",  from:"2025-03-20", to:"2025-03-20", days:1, mins:480,  type:"Public Holiday"  },
-  { member:"Jin Park",         team:"Database", from:"2025-03-06", to:"2025-03-07", days:2, mins:960,  type:"Sick Leave"      },
-  { member:"Lisa Johnson",     team:"Database", from:"2025-02-20", to:"2025-02-21", days:2, mins:960,  type:"Annual Leave"    },
-  { member:"Ben Thompson",     team:"Database", from:"2025-03-24", to:"2025-03-24", days:1, mins:480,  type:"Annual Leave"    },
-];
+// Leave records: empty for a fresh start. Entries look like { member, team, from:"YYYY-MM-DD", to:"YYYY-MM-DD", days, mins, type }.
+const LEAVE = [];
 
 // CAPACITY is built after LEAVE so both are in scope
 // availMins = hc × 160h × 60  (40h/week × 4 weeks, per engineer)
