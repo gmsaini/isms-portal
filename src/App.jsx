@@ -6928,7 +6928,7 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
   const [fStatus, setFStatus] = React.useState("");
   const [open, setOpen] = React.useState(null);        // interview id being viewed
   const [shown, setShown] = React.useState(null);      // {id, token, expiresAt, row} link just created
-  const blank = {candidate_name:"", candidate_email:"", role_title:"", years:"3", skills:[], skillText:"", jd:"", difficulty:"", duration:"", expiresDays:"7"};
+  const blank = {candidate_name:"", candidate_email:"", role_title:"", years:"3", skills:[], skillText:"", jd:"", resume:"", difficulty:"", duration:"", expiresDays:"7"};
   const [f, setF] = React.useState(blank);
   const [plan, setPlan] = React.useState(null);
   const [qs, setQs] = React.useState([]);
@@ -6936,6 +6936,20 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
   const [genMsg, setGenMsg] = React.useState("");
   const [notes, setNotes] = React.useState({});
   const [mail, setMail] = React.useState(null);
+  const [rs, setRs] = React.useState(null);            // resume suggestion {years, skills, summary, claims}
+  const onResumeFile = async e => {
+    const file = e.target.files && e.target.files[0]; e.target.value = ""; if(!file) return;
+    setBusy("file");
+    try { const t = (await ivReadResume(file)).replace(/\r/g,"").replace(/[ \t]+/g," ").replace(/\n{3,}/g,"\n\n").trim(); edit("resume", t.slice(0,8000)); setRs(null); toast(t.length>8000?"Resume read. Only the first 8000 characters are used.":"Resume read"); }
+    catch(err) { toast(err.message,"err"); }
+    setBusy("");
+  };
+  const readResume = async () => {
+    setBusy("rs");
+    try { setRs(await callAiFn(cloud, {mode:"iv_resume", resume:f.resume, jd:f.jd})); } catch(e) { toast(e.message,"err"); }
+    setBusy("");
+  };
+  const applyRs = () => { setF(p=>({...p, years:String(rs.years), skills:[...new Set([...p.skills, ...rs.skills])].slice(0,8)})); setPlan(null); setQs([]); setRs(null); };
 
   const load = React.useCallback(async () => {
     if(!sb) { setRows([]); return; }
@@ -6946,7 +6960,7 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
 
   const addSkill = txt => { const parts = String(txt).split(",").map(x=>x.trim()).filter(Boolean); if(!parts.length) return; setF(p=>({...p, skills:[...new Set([...p.skills, ...parts])].slice(0,8), skillText:""})); setPlan(null); setQs([]); };
   const edit = (k,v) => { setF(p=>({...p,[k]:v})); if(k!=="candidate_name"&&k!=="candidate_email"&&k!=="expiresDays"){ setPlan(null); setQs([]); } };
-  const body = () => ({years:Number(f.years)||0, skills:f.skills, jd:f.jd, role_title:f.role_title, difficulty:f.difficulty||undefined, duration:Number(f.duration)||undefined});
+  const body = () => ({years:Number(f.years)||0, skills:f.skills, jd:f.jd, resume:f.resume, role_title:f.role_title, difficulty:f.difficulty||undefined, duration:Number(f.duration)||undefined});
   const doPlan = async () => {
     if(!f.role_title.trim()) { toast("Enter the role title","err"); return; }
     if(!f.skills.length) { toast("Add at least one skill","err"); return; }
@@ -7056,6 +7070,21 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
               <input aria-label="Add skill" value={f.skillText} onChange={e=>{ const v=e.target.value; if(v.includes(",")) addSkill(v); else setF(p=>({...p,skillText:v})); }} onKeyDown={e=>{ if(e.key==="Enter"){ e.preventDefault(); addSkill(f.skillText); } }} onBlur={()=>addSkill(f.skillText)} placeholder={f.skills.length?"":"Control-M, Talend, Linux"} style={{border:"none",outline:"none",flex:1,minWidth:120,background:"transparent",fontSize:13}}/>
             </div></Lbl></div>
           <div style={{marginTop:12}}><Lbl t="Job description"><textarea aria-label="Job description" value={f.jd} onChange={e=>edit("jd",e.target.value.slice(0,6000))} rows={8} placeholder="Paste the job description. Questions are drawn from the responsibilities and tools it mentions." style={{...iS,width:"100%",boxSizing:"border-box",resize:"vertical"}}/></Lbl></div>
+          <div style={{marginTop:12}}><Lbl t="Candidate resume (optional: questions are tailored to it as well as to the JD and skills)">
+            <textarea aria-label="Resume" value={f.resume} onChange={e=>{ edit("resume",e.target.value.slice(0,8000)); setRs(null); }} rows={6} placeholder="Paste the resume text, or upload a PDF, Word or text file below. It is used only to write the questions and is kept on the interview record for you; candidates never see it." style={{...iS,width:"100%",boxSizing:"border-box",resize:"vertical"}}/></Lbl>
+            <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginTop:8}}>
+              <label style={{display:"inline-flex",alignItems:"center",gap:5,padding:"5px 13px",borderRadius:"var(--radius-md)",border:"1px solid var(--border-2)",background:"var(--surface)",fontSize:12,fontWeight:600,cursor:"pointer",color:"var(--text-2)"}}>{busy==="file"?"Reading...":"📎 Upload resume"}<input type="file" aria-label="Upload resume" accept=".pdf,.docx,.txt,.md" onChange={onResumeFile} style={{display:"none"}}/></label>
+              <Btn v="sec" sm onClick={readResume} disabled={busy==="rs"||f.resume.trim().length<80}>{busy==="rs"?"Reading...":"🤖 Suggest years and skills from resume"}</Btn>
+              {f.resume && <Btn v="sec" sm onClick={()=>{ edit("resume",""); setRs(null); }}>Clear</Btn>}
+              {f.resume && <span style={{fontSize:11.5,color:"var(--text-3)"}}>{f.resume.length} characters</span>}
+            </div>
+            {rs && <div data-testid="rs-box" style={{marginTop:10,background:"var(--surface-2,#f6f7fb)",borderRadius:10,padding:"10px 14px",fontSize:12.5,lineHeight:1.55}}>
+              <div><b>AI read of the resume (check it):</b> {rs.summary}</div>
+              <div><b>Experience:</b> about {rs.years} years · <b>Skills:</b> {rs.skills.join(", ")||"none found"}</div>
+              {rs.claims.length>0 && <div><b>Worth probing:</b> {rs.claims.join("; ")}</div>}
+              <div style={{marginTop:6}}><Btn sm onClick={applyRs}>Use these years and skills</Btn></div>
+            </div>}
+          </div>
           <details style={{marginTop:12}}><summary style={{cursor:"pointer",fontSize:12.5,fontWeight:700,color:"var(--text-2)"}}>Optional overrides</summary>
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:12,marginTop:10}}>
               <Lbl t="Difficulty"><select aria-label="Difficulty" value={f.difficulty} onChange={e=>edit("difficulty",e.target.value)} style={sS}><option value="">Automatic from experience</option><option value="easy">Easy</option><option value="medium">Medium</option><option value="hard">Hard</option></select></Lbl>
@@ -7113,6 +7142,7 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
         <div style={{padding:"16px 28px 24px"}}>
           <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:12}}>{stat(cur.status,cur)}<StPill tone="blue">{cur.level} · {cur.years} yrs</StPill><StPill tone="grey">{cur.difficulty}</StPill><StPill tone="grey">{cur.duration_min} min</StPill>{cur.score!=null && <StPill tone={cur.score>=70?"green":cur.score>=50?"amber":"red"}>Score {cur.score}%</StPill>}{ivProctorPill(cur.data.proctor)}</div>
           {cur.data.reason && <div style={{fontSize:13,color:"#b91c1c",marginBottom:10}}>Reason: {cur.data.reason}</div>}
+          {cur.data.resume && <details style={{marginBottom:10}}><summary style={{cursor:"pointer",fontSize:12.5,fontWeight:700,color:"var(--text-2)"}}>Resume used for this interview</summary><div style={{fontSize:12,whiteSpace:"pre-wrap",color:"var(--text-2)",maxHeight:220,overflowY:"auto",marginTop:6,padding:"8px 10px",background:"var(--surface-2,#f6f7fb)",borderRadius:8}}>{cur.data.resume}</div></details>}
           {cur.data.confirmedName && <div style={{fontSize:12,color:"var(--text-3)",marginBottom:10}}>Name confirmed by the candidate: {cur.data.confirmedName}</div>}
           {cur.data.bySkill && <div style={{marginBottom:14}}><div style={{fontSize:12,fontWeight:700,color:"var(--text-3)",marginBottom:6}}>SCORE BY SKILL</div>
             {Object.keys(cur.data.bySkill).map(k=>{ const pc=cur.data.bySkill[k].pct; return <div key={k} style={{display:"flex",alignItems:"center",gap:8,fontSize:12.5,marginBottom:4}}><span style={{width:150}}>{k}</span><div style={{flex:1,height:8,background:"var(--surface-2,#eef1f6)",borderRadius:4}}><div style={{width:pc+"%",height:8,borderRadius:4,background:pc>=70?"#059669":pc>=50?"#d97706":"#dc2626"}}/></div><b style={{width:40,textAlign:"right"}}>{pc}%</b></div>; })}</div>}
@@ -7147,6 +7177,28 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
   );
 }
 const IV_MIN_CLIENT = {mcq:1, short:2.5, code:5};
+const ivLoadScript = src => new Promise((res,rej)=>{ const t=document.createElement("script"); t.src=src; t.onload=res; t.onerror=()=>rej(new Error("Could not load the file reader. Paste the resume text instead.")); document.head.appendChild(t); });
+// Reads a resume (.txt, .md, .pdf, .docx) into plain text in the browser; the file itself is never uploaded.
+async function ivReadResume(file) {
+  if(file.size>5*1024*1024) throw new Error("The file is larger than 5 MB. Paste the resume text instead.");
+  const n = file.name.toLowerCase();
+  if(/\.(txt|md)$/.test(n) || file.type.startsWith("text/")) return await file.text();
+  if(/\.docx$/.test(n)) {
+    if(!window.mammoth) await ivLoadScript("https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js");
+    return (await window.mammoth.extractRawText({arrayBuffer: await file.arrayBuffer()})).value;
+  }
+  if(/\.pdf$/.test(n)) {
+    const V = "4.4.168", base = "https://cdn.jsdelivr.net/npm/pdfjs-dist@"+V+"/build/";
+    const pdfjs = await import(/* @vite-ignore */ base+"pdf.min.mjs");
+    const w = await (await fetch(base+"pdf.worker.min.mjs")).text();
+    pdfjs.GlobalWorkerOptions.workerSrc = URL.createObjectURL(new Blob([w], {type:"text/javascript"}));
+    const doc = await pdfjs.getDocument({data: new Uint8Array(await file.arrayBuffer())}).promise; let out = "";
+    for(let i=1;i<=Math.min(doc.numPages,8);i++){ const pg = await doc.getPage(i); const tc = await pg.getTextContent(); out += tc.items.map(x=>x.str).join(" ")+"\n"; }
+    if(out.trim().length<80) throw new Error("No text found in this PDF (it may be a scan). Paste the resume text instead.");
+    return out;
+  }
+  throw new Error("Use a .pdf, .docx or .txt file, or paste the text.");
+}
 
 const IvShell = ({children}) => <div style={{minHeight:"100vh",background:"var(--bg, #f6f7fb)",display:"flex",alignItems:"center",justifyContent:"center",padding:20,boxSizing:"border-box"}}><div style={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:16,padding:"28px 32px",maxWidth:620,width:"100%",boxShadow:"var(--shadow-xl)"}}>{children}</div></div>;
 // ---- Public page: opened from the candidate's one-time link (?interview=TOKEN). No portal sign-in. ----
