@@ -6131,6 +6131,7 @@ function StTerms({cfg, skill, onCancel, onAccept}) {
 
 function StRunner({cloud, run, cfg, onClose}) {
   const {attemptId, deadline, questions, skill} = run;
+  const iv = run.kind==="interview"; const nm = iv ? "interview" : "test";
   const [idx, setIdx] = React.useState(0);
   const [answers, setAnswers] = React.useState({});
   const [left, setLeft] = React.useState(Math.max(0, Math.round((new Date(deadline).getTime()-Date.now())/1000)));
@@ -6173,15 +6174,15 @@ function StRunner({cloud, run, cfg, onClose}) {
   const stopCam = () => { try { if(run.stream) run.stream.getTracks().forEach(t=>t.stop()); if(run.lm && run.lm.close && !window.__stLandmarker) run.lm.close(); } catch(e) {} };
   const terminate = React.useCallback(reason => {
     if(ended.current) return; ended.current = true; stopVoice();
-    callAiFn(cloud, {mode:"st_terminate", attemptId, reason, proctor:proctor()}).catch(()=>{});
+    (iv ? run.api.terminate(reason, proctor(), ans.current) : callAiFn(cloud, {mode:"st_terminate", attemptId, reason, proctor:proctor()})).catch(()=>{});
     stopCam(); exitFs(); setEnd({type:"terminated", reason});
   }, [cloud, attemptId]);
 
   const submit = React.useCallback(async () => {
     if(ended.current) return; ended.current = true; stopVoice(); setBusy(true); setConfirm(false);
     try {
-      const res = await callAiFn(cloud, {mode:"st_submit", attemptId, answers:ans.current, proctor:proctor()});
-      stopCam(); exitFs(); setEnd(res.status==="submitted" ? {type:"result",res} : {type:"failed",msg:res.message});
+      const res = await (iv ? run.api.submit(ans.current, proctor()) : callAiFn(cloud, {mode:"st_submit", attemptId, answers:ans.current, proctor:proctor()}));
+      stopCam(); exitFs(); setEnd(iv ? {type:"done"} : res.status==="submitted" ? {type:"result",res} : {type:"failed",msg:res.message});
     } catch(e) {
       stopCam(); exitFs(); setEnd({type:"failed", msg:e.message});
     }
@@ -6192,7 +6193,7 @@ function StRunner({cloud, run, cfg, onClose}) {
     const t0 = setTimeout(()=>{ armed.current = true; }, 1500);
     const viol = r => { if(armed.current && !ended.current) terminate(r); };
     const onVis = () => { if(document.hidden) viol("Switched tab or minimised the window"); };
-    const onBlur = () => viol("The test window lost focus");
+    const onBlur = () => viol("The "+nm+" window lost focus");
     const onFs = () => { if(!document.fullscreenElement) viol("Exited full screen"); };
     const stop = e => e.preventDefault();
     const onKey = e => {
@@ -6250,7 +6251,17 @@ function StRunner({cloud, run, cfg, onClose}) {
   if(end) return (
     <div style={{...shell,alignItems:"center",justifyContent:"center",padding:20}}>
       <div style={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:16,padding:"28px 32px",maxWidth:560,width:"100%",maxHeight:"90vh",overflowY:"auto"}}>
-        {end.type==="terminated" && <>
+        {end.type==="done" && <>
+          <div style={{fontSize:40}}>✅</div>
+          <div style={{fontSize:20,fontWeight:800,color:"#059669",margin:"6px 0"}}>Thank you, your interview is complete</div>
+          <div style={{fontSize:13.5,color:"var(--text-2)",lineHeight:1.6}}>Your answers have been submitted. The hiring team will review them and be in touch. This link can no longer be used, and you can close this window.</div>
+        </>}
+        {end.type==="terminated" && iv && <>
+          <div style={{fontSize:40}}>⛔</div>
+          <div style={{fontSize:20,fontWeight:800,color:"#b91c1c",margin:"6px 0"}}>Interview ended</div>
+          <div style={{fontSize:13.5,color:"var(--text-2)",lineHeight:1.6}}>Reason: <b>{end.reason}</b>.<br/>As stated in the terms, the interview cannot be resumed and this link can no longer be used. Please contact the person who invited you.</div>
+        </>}
+        {end.type==="terminated" && !iv && <>
           <div style={{fontSize:40}}>⛔</div>
           <div style={{fontSize:20,fontWeight:800,color:"#b91c1c",margin:"6px 0"}}>Test terminated</div>
           <div style={{fontSize:13.5,color:"var(--text-2)",lineHeight:1.6}}>Reason: <b>{end.reason}</b>.<br/>As stated in the terms, the test is not scored and cannot be resumed. This attempt counts toward your retake waiting period and your manager can see it.</div>
@@ -6282,7 +6293,7 @@ function StRunner({cloud, run, cfg, onClose}) {
             ))}
           </div>
         </>}
-        <div style={{marginTop:18,textAlign:"right"}}><Btn onClick={onClose}>Back to portal</Btn></div>
+        <div style={{marginTop:18,textAlign:"right"}}><Btn onClick={onClose}>{iv?"Close":"Back to portal"}</Btn></div>
       </div>
     </div>
   );
@@ -6290,7 +6301,7 @@ function StRunner({cloud, run, cfg, onClose}) {
   return (
     <div style={shell}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 22px",background:"var(--surface)",borderBottom:"1px solid var(--border)",gap:12,flexWrap:"wrap"}}>
-        <div style={{fontWeight:800,color:"var(--text-1)"}}>{skill} skill test <span style={{fontWeight:500,color:"var(--text-3)",fontSize:12.5}}>· {done}/{questions.length} answered</span></div>
+        <div style={{fontWeight:800,color:"var(--text-1)"}}>{iv ? (run.title||"Interview") : skill+" skill test"} <span style={{fontWeight:500,color:"var(--text-3)",fontSize:12.5}}>· {done}/{questions.length} answered</span></div>
         <div style={{fontWeight:800,fontSize:18,color:left<300?"#b91c1c":"var(--text-1)",fontVariantNumeric:"tabular-nums"}}>⏱ {mm}:{ss}</div>
       </div>
       <div style={{display:"flex",gap:18,padding:20,flex:1,flexWrap:"wrap",maxWidth:1100,width:"100%",margin:"0 auto",boxSizing:"border-box"}}>
@@ -6330,7 +6341,7 @@ function StRunner({cloud, run, cfg, onClose}) {
           <div style={{display:"flex",justifyContent:"space-between",marginTop:14,gap:10}}>
             <Btn v="sec" disabled={idx===0} onClick={()=>setIdx(i=>i-1)}>← Previous</Btn>
             <Btn v="sec" onClick={()=>setFlags(f=>({...f,[q.id]:!f[q.id]}))}>{flags[q.id]?"🚩 Marked for review":"⚑ Mark for review"}</Btn>
-            {idx<questions.length-1 ? <Btn onClick={()=>setIdx(i=>i+1)}>Next →</Btn> : <Btn v="suc" onClick={()=>setConfirm(true)}>Submit test</Btn>}
+            {idx<questions.length-1 ? <Btn onClick={()=>setIdx(i=>i+1)}>Next →</Btn> : <Btn v="suc" onClick={()=>setConfirm(true)}>Submit {nm}</Btn>}
           </div>
         </div>
         <div style={{flex:"0 0 220px"}}>
@@ -6348,21 +6359,21 @@ function StRunner({cloud, run, cfg, onClose}) {
                 {live==="ok"?"● Camera OK":live==="on"?"● Camera on":live==="gaze"?"● Please look at the screen":live==="head"?"● Please face the screen":live==="noface"?"● Face not visible":live==="multi"?"● More than one face detected":""}
               </div>
             </div>}
-            <div style={{marginTop:14}}><Btn v="suc" style={{width:"100%",justifyContent:"center"}} onClick={()=>setConfirm(true)}>Submit test</Btn></div>
-            <div style={{fontSize:11,color:"var(--text-3)",marginTop:10,lineHeight:1.5}}>Leaving this window or exiting full screen terminates the test.</div>
+            <div style={{marginTop:14}}><Btn v="suc" style={{width:"100%",justifyContent:"center"}} onClick={()=>setConfirm(true)}>Submit {nm}</Btn></div>
+            <div style={{fontSize:11,color:"var(--text-3)",marginTop:10,lineHeight:1.5}}>Leaving this window or exiting full screen terminates the {nm}.</div>
           </div>
         </div>
       </div>
       {confirm && (
         <div style={{position:"fixed",inset:0,background:"rgba(14,22,38,.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100000}}>
           <div style={{background:"var(--surface)",borderRadius:14,padding:"22px 26px",maxWidth:420}}>
-            <div style={{fontWeight:800,fontSize:16,marginBottom:8}}>Submit the test?</div>
+            <div style={{fontWeight:800,fontSize:16,marginBottom:8}}>Submit the {nm}?</div>
             <div style={{fontSize:13,color:"var(--text-2)",marginBottom:16}}>You answered {done} of {questions.length} questions{questions.some(x=>flags[x.id])?", and "+questions.filter(x=>flags[x.id]).length+" are marked for review (questions "+questions.map((x,i)=>flags[x.id]?i+1:0).filter(Boolean).join(", ")+")":""}. Unanswered questions score 0. You cannot change answers after submitting.</div>
             <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}><Btn v="sec" onClick={()=>setConfirm(false)}>Keep working</Btn><Btn v="suc" onClick={submit}>Submit now</Btn></div>
           </div>
         </div>
       )}
-      {busy && <div style={{position:"fixed",inset:0,background:"rgba(255,255,255,.75)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100001,fontWeight:700}}>Scoring your answers...</div>}
+      {busy && <div style={{position:"fixed",inset:0,background:"rgba(255,255,255,.75)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100001,fontWeight:700}}>{iv?"Submitting your answers...":"Scoring your answers..."}</div>}
     </div>
   );
 }
@@ -6902,6 +6913,308 @@ function SkillTestsPage({cloud, user, users, isAdmin, isMgr, toast}) {
       {run && <StRunner cloud={cloud} run={run} cfg={cfg} onClose={closeRun}/>}
     </div>
   );
+}
+
+// ===== Candidate interviews: manager page (create, review) and the public one-time-link page for candidates =====
+const IV_TYPE_LABEL = {mcq:"Multiple choice", short:"Written", code:"Coding"};
+const IV_STATUS = {invited:["Invited","blue"], in_progress:["In progress","amber"], submitted:["Completed","green"], scoring_failed:["Scoring failed","red"], terminated:["Terminated","red"], expired:["Expired","grey"], cancelled:["Cancelled","grey"]};
+const ivLink = token => location.origin + location.pathname + "?interview=" + token;
+const ivProctorPill = pr => { if(!pr) return <span style={{color:"var(--text-3)"}}>-</span>; const [bl]=stProctorBand(pr.score); const tone=pr.score==null?"grey":pr.score>=85?"green":pr.score>=65?"amber":"red"; return <StPill tone={tone}>{pr.score==null?"":pr.score+" · "}{bl}</StPill>; };
+
+function InterviewsPage({cloud, user, users, isAdmin, toast}) {
+  const sb = cloud && cloud.sb;
+  const [tab, setTab] = React.useState("list");
+  const [rows, setRows] = React.useState(null);
+  const [fStatus, setFStatus] = React.useState("");
+  const [open, setOpen] = React.useState(null);        // interview id being viewed
+  const [shown, setShown] = React.useState(null);      // {id, token, expiresAt, row} link just created
+  const blank = {candidate_name:"", candidate_email:"", role_title:"", years:"3", skills:[], skillText:"", jd:"", difficulty:"", duration:"", expiresDays:"7"};
+  const [f, setF] = React.useState(blank);
+  const [plan, setPlan] = React.useState(null);
+  const [qs, setQs] = React.useState([]);
+  const [busy, setBusy] = React.useState("");
+  const [genMsg, setGenMsg] = React.useState("");
+  const [notes, setNotes] = React.useState({});
+
+  const load = React.useCallback(async () => {
+    if(!sb) { setRows([]); return; }
+    try { const r = await sb.from("interviews").select("id,created_by_name,candidate_name,candidate_email,role_title,years,level,difficulty,duration_min,status,score,expires_at,started_at,ended_at,created_at,data").order("created_at",{ascending:false}).limit(200); setRows((r&&r.data)||[]); }
+    catch(e) { setRows([]); }
+  }, [sb]);
+  React.useEffect(()=>{ load(); }, [load]);
+
+  const addSkill = txt => { const parts = String(txt).split(",").map(x=>x.trim()).filter(Boolean); if(!parts.length) return; setF(p=>({...p, skills:[...new Set([...p.skills, ...parts])].slice(0,8), skillText:""})); setPlan(null); setQs([]); };
+  const edit = (k,v) => { setF(p=>({...p,[k]:v})); if(k!=="candidate_name"&&k!=="candidate_email"&&k!=="expiresDays"){ setPlan(null); setQs([]); } };
+  const body = () => ({years:Number(f.years)||0, skills:f.skills, jd:f.jd, role_title:f.role_title, difficulty:f.difficulty||undefined, duration:Number(f.duration)||undefined});
+  const doPlan = async () => {
+    if(!f.role_title.trim()) { toast("Enter the role title","err"); return; }
+    if(!f.skills.length) { toast("Add at least one skill","err"); return; }
+    setBusy("plan");
+    try { setPlan(await callAiFn(cloud, {mode:"iv_plan", ...body()})); setQs([]); } catch(e) { toast(e.message,"err"); }
+    setBusy("");
+  };
+  const generate = async () => {
+    if(!plan) return; setBusy("gen"); let all = []; let n = 0; const total = plan.total;
+    try {
+      for(const bl of plan.blocks) {
+        let left = bl.count;
+        while(left>0) {
+          const take = Math.min(6,left); setGenMsg("Generating questions "+Math.min(total,n+take)+" of "+total+"...");
+          const d = await callAiFn(cloud, {mode:"iv_generate", ...body(), type:bl.type, count:take, difficulty:plan.difficulty, avoid:all.map(q=>q.text)});
+          const got = d.questions||[]; all = all.concat(got); n += take; left -= take; if(!got.length) break;
+          setQs(all.slice());
+        }
+      }
+      if(all.length<5) toast("Only "+all.length+" usable questions came back. Try generating again.","err");
+    } catch(e) { toast(e.message,"err"); if(all.length) setQs(all); }
+    setGenMsg(""); setBusy("");
+  };
+  const mins = qs.reduce((s,q)=>s+(IV_MIN_CLIENT[q.type]||2),0);
+  const dur = plan ? plan.durationMin : 30;
+  const create = async () => {
+    if(!f.candidate_name.trim()) { toast("Enter the candidate name","err"); return; }
+    setBusy("create");
+    try {
+      const d = await callAiFn(cloud, {mode:"iv_create", ...body(), candidate_name:f.candidate_name, candidate_email:f.candidate_email, duration:dur, difficulty:plan.difficulty, questions:qs, expiresDays:Number(f.expiresDays)||7});
+      setShown({...d, name:f.candidate_name, email:f.candidate_email, role:f.role_title, dur}); setF(blank); setPlan(null); setQs([]); setTab("list"); load();
+    } catch(e) { toast(e.message,"err"); }
+    setBusy("");
+  };
+  const emailLink = async s => {
+    try {
+      await callAiFn(cloud, {title:"Interview invitation: "+s.role, intro:"Hello "+s.name+", you are invited to an online, proctored interview for the "+s.role+" role. It takes "+s.dur+" minutes. Use a desktop or laptop with Chrome, a working camera and microphone, and a quiet room. The interview runs in full screen and ends if you leave the window. The link works only once and expires on "+new Date(s.expiresAt).toLocaleDateString()+".", findings:[], channels:["email"], to:[s.email], link:{url:ivLink(s.token), label:"Start your interview"}}, "notify");
+      toast("Invitation emailed to "+s.email);
+    } catch(e) { toast(e.message,"err"); }
+  };
+  const copy = async t => { try { await navigator.clipboard.writeText(t); toast("Link copied"); } catch(e) { toast("Copy failed, select the link and copy it manually","err"); } };
+  const act = async (mode, id, extra, okMsg) => {
+    try { const d = await callAiFn(cloud, {mode, id, ...(extra||{})}); if(okMsg) toast(okMsg); load(); return d; } catch(e) { toast(e.message,"err"); }
+  };
+  const relink = async r => { const d = await act("iv_relink", r.id); if(d) setShown({...d, name:r.candidate_name, email:r.candidate_email, role:r.role_title, dur:r.duration_min}); };
+  const remove = async r => { if(!window.confirm("Delete the interview for "+r.candidate_name+"? This cannot be undone.")) return; try { await sb.from("interviews").delete().eq("id", r.id); setOpen(null); load(); toast("Deleted"); } catch(e) { toast(e.message,"err"); } };
+
+  const list = (rows||[]).filter(r=>!fStatus||r.status===fStatus);
+  const cur = open && (rows||[]).find(r=>r.id===open);
+  const td = {padding:"9px 10px",fontSize:12.5,borderBottom:"1px solid var(--border)",verticalAlign:"top"};
+  const th = {...td, fontSize:11,fontWeight:700,color:"var(--text-3)",textAlign:"left",textTransform:"uppercase",letterSpacing:.4};
+  const stat = s => { const [l,t]=IV_STATUS[s]||[s,"grey"]; return <StPill tone={t}>{l}</StPill>; };
+  const counts = {total:(rows||[]).length, open:(rows||[]).filter(r=>["invited","in_progress"].includes(r.status)).length, done:(rows||[]).filter(r=>r.status==="submitted").length};
+
+  return (
+    <div>
+      <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
+        {[["list","📋 Interviews"],["new","➕ New interview"]].map(([k,l])=><button key={k} onClick={()=>setTab(k)} style={{padding:"8px 16px",borderRadius:999,border:"1.5px solid "+(tab===k?"var(--brand)":"var(--border)"),background:tab===k?"var(--brand-light, #eff6ff)":"var(--surface)",fontWeight:700,fontSize:13,cursor:"pointer",color:"var(--text-1)"}}>{l}</button>)}
+      </div>
+
+      {tab==="list" && <>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:14}}>
+          <StStat icon="🧑‍💼" label="Interviews" value={counts.total}/>
+          <StStat icon="⏳" label="Waiting or running" value={counts.open}/>
+          <StStat icon="✅" label="Completed" value={counts.done}/>
+        </div>
+        <Card>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,gap:10,flexWrap:"wrap"}}>
+            <select value={fStatus} onChange={e=>setFStatus(e.target.value)} aria-label="Filter by status" style={{...sS,width:"auto"}}><option value="">All statuses</option>{Object.keys(IV_STATUS).map(k=><option key={k} value={k}>{IV_STATUS[k][0]}</option>)}</select>
+            <Btn onClick={()=>setTab("new")}>➕ New interview</Btn>
+          </div>
+          {rows===null ? <div style={{color:"var(--text-3)",fontSize:13}}>Loading...</div> : !list.length ? <StEmpty icon="🧑‍💼" title="No interviews yet" text="Create one from a job description and skills. You get a one-time link to send to the candidate."/> : (
+            <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr>{["Candidate","Role","Level","Min","Status","Score","Proctoring","Created",""].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
+              <tbody>{list.map(r=>(
+                <tr key={r.id}>
+                  <td style={td}><b>{r.candidate_name}</b>{r.candidate_email && <div style={{fontSize:11,color:"var(--text-3)"}}>{r.candidate_email}</div>}</td>
+                  <td style={td}>{r.role_title}</td>
+                  <td style={td}>{r.level} · {r.difficulty}</td>
+                  <td style={td}>{r.duration_min}</td>
+                  <td style={td}>{stat(r.status)}{r.status==="invited" && <div style={{fontSize:11,color:"var(--text-3)"}}>expires {new Date(r.expires_at).toLocaleDateString()}</div>}</td>
+                  <td style={td}>{r.score==null?"-":<b>{r.score}%</b>}</td>
+                  <td style={td}>{ivProctorPill(r.data&&r.data.proctor)}</td>
+                  <td style={td}>{new Date(r.created_at).toLocaleDateString()}{isAdmin && <div style={{fontSize:11,color:"var(--text-3)"}}>{r.created_by_name}</div>}</td>
+                  <td style={{...td,whiteSpace:"nowrap"}}><Btn v="sec" sm onClick={()=>setOpen(r.id)}>Open</Btn>{r.status==="invited" && <> <Btn v="sec" sm onClick={()=>relink(r)}>New link</Btn> <Btn v="dan" sm onClick={()=>act("iv_cancel", r.id, null, "Interview cancelled")}>Cancel</Btn></>}</td>
+                </tr>))}</tbody>
+            </table></div>)}
+        </Card>
+      </>}
+
+      {tab==="new" && <div style={{display:"grid",gap:14}}>
+        <Card>
+          <div style={{fontSize:14,fontWeight:700,marginBottom:12}}>1. Candidate and role</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:12}}>
+            <Lbl t="Candidate name"><input aria-label="Candidate name" value={f.candidate_name} onChange={e=>edit("candidate_name",e.target.value)} style={iS}/></Lbl>
+            <Lbl t="Candidate email (to send the link)"><input aria-label="Candidate email" value={f.candidate_email} onChange={e=>edit("candidate_email",e.target.value)} style={iS}/></Lbl>
+            <Lbl t="Role title"><input aria-label="Role title" value={f.role_title} onChange={e=>edit("role_title",e.target.value)} placeholder="e.g. Control-M Scheduling Engineer" style={iS}/></Lbl>
+            <Lbl t="Years of experience"><input aria-label="Years of experience" type="number" min="0" max="40" value={f.years} onChange={e=>edit("years",e.target.value)} style={iS}/></Lbl>
+          </div>
+          <div style={{marginTop:12}}><Lbl t="Skills to assess (up to 8, press Enter or comma after each)">
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",padding:"6px 8px",border:"1px solid var(--border-2)",borderRadius:"var(--radius-md)",background:"var(--surface)"}}>
+              {f.skills.map(s=><span key={s} style={{display:"inline-flex",gap:5,alignItems:"center",padding:"3px 10px",borderRadius:999,background:"var(--brand-light, #eff6ff)",fontSize:12.5,fontWeight:600}}>{s}<button aria-label={"Remove "+s} onClick={()=>{ setF(p=>({...p,skills:p.skills.filter(x=>x!==s)})); setPlan(null); setQs([]); }} style={{border:"none",background:"none",cursor:"pointer",color:"var(--text-3)",padding:0}}>×</button></span>)}
+              <input aria-label="Add skill" value={f.skillText} onChange={e=>{ const v=e.target.value; if(v.includes(",")) addSkill(v); else setF(p=>({...p,skillText:v})); }} onKeyDown={e=>{ if(e.key==="Enter"){ e.preventDefault(); addSkill(f.skillText); } }} onBlur={()=>addSkill(f.skillText)} placeholder={f.skills.length?"":"Control-M, Talend, Linux"} style={{border:"none",outline:"none",flex:1,minWidth:120,background:"transparent",fontSize:13}}/>
+            </div></Lbl></div>
+          <div style={{marginTop:12}}><Lbl t="Job description"><textarea aria-label="Job description" value={f.jd} onChange={e=>edit("jd",e.target.value.slice(0,6000))} rows={8} placeholder="Paste the job description. Questions are drawn from the responsibilities and tools it mentions." style={{...iS,width:"100%",boxSizing:"border-box",resize:"vertical"}}/></Lbl></div>
+          <details style={{marginTop:12}}><summary style={{cursor:"pointer",fontSize:12.5,fontWeight:700,color:"var(--text-2)"}}>Optional overrides</summary>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:12,marginTop:10}}>
+              <Lbl t="Difficulty"><select aria-label="Difficulty" value={f.difficulty} onChange={e=>edit("difficulty",e.target.value)} style={sS}><option value="">Automatic from experience</option><option value="easy">Easy</option><option value="medium">Medium</option><option value="hard">Hard</option></select></Lbl>
+              <Lbl t="Duration"><select aria-label="Duration" value={f.duration} onChange={e=>edit("duration",e.target.value)} style={sS}><option value="">Automatic (30-45 min)</option>{[30,35,40,45].map(m=><option key={m} value={m}>{m} minutes</option>)}</select></Lbl>
+              <Lbl t="Link valid for"><select aria-label="Link valid for" value={f.expiresDays} onChange={e=>edit("expiresDays",e.target.value)} style={sS}>{[1,3,7,14,30].map(d=><option key={d} value={d}>{d} day{d>1?"s":""}</option>)}</select></Lbl>
+            </div></details>
+          <div style={{marginTop:14}}><Btn onClick={doPlan} disabled={busy==="plan"}>{busy==="plan"?"Planning...":"Plan the interview"}</Btn></div>
+        </Card>
+
+        {plan && <Card>
+          <div style={{fontSize:14,fontWeight:700,marginBottom:10}}>2. Plan</div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
+            <StPill tone="blue">{plan.level} · {plan.years} yrs</StPill><StPill tone={plan.difficulty==="hard"?"red":plan.difficulty==="medium"?"amber":"green"}>{plan.difficulty} questions</StPill><StPill tone="grey">{plan.durationMin} minutes</StPill>
+            {plan.blocks.map(b=><StPill key={b.type} tone="grey">{b.count} {IV_TYPE_LABEL[b.type].toLowerCase()}</StPill>)}
+          </div>
+          <ul style={{margin:"0 0 12px",paddingLeft:18,fontSize:12.5,color:"var(--text-2)",lineHeight:1.6}}>{plan.why.map((w,i)=><li key={i}>{w}</li>)}</ul>
+          <Btn onClick={generate} disabled={busy==="gen"}>{busy==="gen"?genMsg||"Generating...":(qs.length?"Regenerate all questions":"Generate "+plan.total+" questions")}</Btn>
+        </Card>}
+
+        {qs.length>0 && <Card>
+          <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",marginBottom:10}}>
+            <div style={{fontSize:14,fontWeight:700}}>3. Review questions <span style={{fontWeight:500,color:"var(--text-3)",fontSize:12.5}}>· {qs.length} questions · about {Math.round(mins)} of {dur} minutes</span></div>
+          </div>
+          <div style={{display:"grid",gap:8}}>{qs.map((q,i)=>(
+            <div key={i} style={{border:"1px solid var(--border)",borderRadius:10,padding:"10px 12px"}}>
+              <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center"}}>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}><StPill tone="blue">{q.skill}</StPill><StPill tone="grey">{IV_TYPE_LABEL[q.type]}</StPill><StPill tone="grey">{q.difficulty}</StPill></div>
+                <Btn v="dan" sm onClick={()=>setQs(a=>a.filter((_,j)=>j!==i))}>Remove</Btn>
+              </div>
+              <div style={{fontSize:13.5,fontWeight:600,margin:"8px 0 4px",whiteSpace:"pre-wrap"}}>{i+1}. {q.text}</div>
+              {q.type==="mcq" && <div style={{fontSize:12.5,color:"var(--text-2)"}}>{q.options.map((o,j)=><div key={j} style={{fontWeight:"ABCD"[j]===q.answer?700:400,color:"ABCD"[j]===q.answer?"#166534":undefined}}>{"ABCD"[j]}. {o}</div>)}</div>}
+              {q.type!=="mcq" && <div style={{fontSize:12,color:"var(--text-3)",whiteSpace:"pre-wrap"}}><b>Reference:</b> {q.answer}</div>}
+            </div>))}</div>
+          <div style={{marginTop:14,display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+            <Btn v="suc" onClick={create} disabled={busy==="create"||qs.length<5||mins>dur+5}>{busy==="create"?"Creating...":"Create one-time link"}</Btn>
+            {qs.length<5 && <span style={{fontSize:12.5,color:"#b45309"}}>At least 5 questions are needed.</span>}
+            {mins>dur+5 && <span style={{fontSize:12.5,color:"#b45309"}}>Too long for {dur} minutes. Remove a few questions.</span>}
+          </div>
+        </Card>}
+      </div>}
+
+      {shown && <ModalWrap title="One-time interview link" onClose={()=>setShown(null)}>
+        <div style={{padding:"18px 28px 24px"}}>
+          <div style={{fontSize:13,color:"var(--text-2)",lineHeight:1.6,marginBottom:10}}>For <b>{shown.name}</b> · {shown.role}. <b>Copy it now: for security the link is shown only once.</b> It works for one interview and expires on {new Date(shown.expiresAt).toLocaleDateString()}. If it is lost before the interview starts, make a new link from the list.</div>
+          <input readOnly aria-label="Interview link" value={ivLink(shown.token)} onFocus={e=>e.target.select()} style={{...iS,width:"100%",boxSizing:"border-box",fontFamily:"ui-monospace,Menlo,monospace",fontSize:12}}/>
+          <div style={{display:"flex",gap:10,marginTop:14,justifyContent:"flex-end",flexWrap:"wrap"}}>
+            {shown.email && <Btn v="sec" onClick={()=>emailLink(shown)}>✉️ Email to {shown.email}</Btn>}
+            <Btn onClick={()=>copy(ivLink(shown.token))}>📋 Copy link</Btn>
+            <Btn v="sec" onClick={()=>setShown(null)}>Done</Btn>
+          </div>
+        </div></ModalWrap>}
+
+      {cur && <ModalWrap wide title={cur.candidate_name+" · "+cur.role_title} onClose={()=>setOpen(null)}>
+        <div style={{padding:"16px 28px 24px"}}>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:12}}>{stat(cur.status)}<StPill tone="blue">{cur.level} · {cur.years} yrs</StPill><StPill tone="grey">{cur.difficulty}</StPill><StPill tone="grey">{cur.duration_min} min</StPill>{cur.score!=null && <StPill tone={cur.score>=70?"green":cur.score>=50?"amber":"red"}>Score {cur.score}%</StPill>}{ivProctorPill(cur.data.proctor)}</div>
+          {cur.data.reason && <div style={{fontSize:13,color:"#b91c1c",marginBottom:10}}>Reason: {cur.data.reason}</div>}
+          {cur.data.confirmedName && <div style={{fontSize:12,color:"var(--text-3)",marginBottom:10}}>Name confirmed by the candidate: {cur.data.confirmedName}</div>}
+          {cur.data.bySkill && <div style={{marginBottom:14}}><div style={{fontSize:12,fontWeight:700,color:"var(--text-3)",marginBottom:6}}>SCORE BY SKILL</div>
+            {Object.keys(cur.data.bySkill).map(k=>{ const pc=cur.data.bySkill[k].pct; return <div key={k} style={{display:"flex",alignItems:"center",gap:8,fontSize:12.5,marginBottom:4}}><span style={{width:150}}>{k}</span><div style={{flex:1,height:8,background:"var(--surface-2,#eef1f6)",borderRadius:4}}><div style={{width:pc+"%",height:8,borderRadius:4,background:pc>=70?"#059669":pc>=50?"#d97706":"#dc2626"}}/></div><b style={{width:40,textAlign:"right"}}>{pc}%</b></div>; })}</div>}
+          {cur.data.report && <div style={{background:"var(--surface-2,#f6f7fb)",borderRadius:10,padding:"12px 14px",marginBottom:14,fontSize:13,lineHeight:1.55}}>
+            <div style={{fontSize:12,fontWeight:700,color:"var(--text-3)",marginBottom:4}}>🤖 INTERVIEWER BRIEF (AI, check before relying on it)</div>
+            <div>{cur.data.report.summary}</div>
+            {cur.data.report.strengths.length>0 && <div style={{marginTop:6}}><b>Strengths:</b> {cur.data.report.strengths.join("; ")}</div>}
+            {cur.data.report.gaps.length>0 && <div style={{marginTop:4}}><b>Gaps:</b> {cur.data.report.gaps.join("; ")}</div>}
+            {cur.data.report.followUps.length>0 && <div style={{marginTop:4}}><b>Ask live:</b><ul style={{margin:"2px 0 0",paddingLeft:18}}>{cur.data.report.followUps.map((x,i)=><li key={i}>{x}</li>)}</ul></div>}
+          </div>}
+          {(cur.data.proctor&&cur.data.proctor.events&&cur.data.proctor.events.length>0) && <div style={{fontSize:12.5,color:"var(--text-2)",marginBottom:14}}><b>Proctoring events:</b> {cur.data.proctor.events.map(e=>ST_EVENT_LABEL[e.type]+" ("+e.secs+"s at "+stFmt(e.at)+")").join(", ")}</div>}
+          {cur.data.perQuestion && <div style={{marginBottom:14}}><div style={{fontSize:12,fontWeight:700,color:"var(--text-3)",marginBottom:6}}>ANSWERS</div>
+            <div style={{display:"grid",gap:8}}>{(cur.data.questions||[]).map((q,i)=>{ const p=cur.data.perQuestion[i]||{}; const a=cur.data.answers&&cur.data.answers[q.id]; const perm=cur.data.optOrder&&cur.data.optOrder[q.id]; const picked=q.type==="mcq"&&a?(q.options[perm?perm[("ABCD").indexOf(a)]:("ABCD").indexOf(a)]):a;
+              return <div key={q.id} style={{border:"1px solid var(--border)",borderRadius:10,padding:"9px 12px",background:p.score>=1?"#f0fdf4":p.score>0?"#fffbeb":"#fef2f2"}}>
+                <div style={{fontSize:12,color:"var(--text-3)",marginBottom:3}}>{q.skill} · {IV_TYPE_LABEL[q.type]} · {p.score>=1?"Correct":p.score>0?"Partly correct":"Incorrect"}</div>
+                <div style={{fontSize:13,fontWeight:600,whiteSpace:"pre-wrap"}}>{i+1}. {q.text}</div>
+                <div style={{fontSize:12.5,marginTop:4,whiteSpace:"pre-wrap"}}><b>Answer:</b> {picked||<i style={{color:"var(--text-3)"}}>not answered</i>}</div>
+                <div style={{fontSize:12,color:"var(--text-3)",whiteSpace:"pre-wrap"}}><b>Reference:</b> {q.type==="mcq"?q.options["ABCD".indexOf(q.answer)]:q.answer}</div>
+                {p.comment && <div style={{fontSize:12,color:"var(--text-2)",marginTop:2}}>AI: {p.comment}</div>}
+              </div>; })}</div></div>}
+          {["submitted","scoring_failed"].includes(cur.status) && <div style={{borderTop:"1px solid var(--border)",paddingTop:12}}>
+            <div style={{fontSize:12,fontWeight:700,color:"var(--text-3)",marginBottom:6}}>YOUR DECISION</div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:8}}>{[["advance","Advance"],["hold","Hold"],["reject","Reject"],["","Clear"]].map(([k,l])=><Btn key={k||"c"} v={(cur.data.decision||"")===k?"pri":"sec"} sm onClick={()=>act("iv_decide", cur.id, {decision:k, notes:notes[cur.id]!=null?notes[cur.id]:(cur.data.notes||"")}, "Saved")}>{l}</Btn>)}</div>
+            <textarea aria-label="Decision notes" rows={2} value={notes[cur.id]!=null?notes[cur.id]:(cur.data.notes||"")} onChange={e=>setNotes(n=>({...n,[cur.id]:e.target.value}))} onBlur={()=>{ if(notes[cur.id]!=null) act("iv_decide", cur.id, {decision:cur.data.decision||"", notes:notes[cur.id]}); }} placeholder="Notes for the hiring team" style={{...iS,width:"100%",boxSizing:"border-box"}}/>
+            <div style={{fontSize:11.5,color:"var(--text-3)",marginTop:4}}>Scores and the AI brief support your judgement. The hiring decision is yours.</div>
+            <div style={{marginTop:10}}><Btn v="sec" sm onClick={()=>act("iv_rescore", cur.id, null, "Re-scored")}>Re-score</Btn></div>
+          </div>}
+          {cur.status==="in_progress" && <div style={{marginTop:8}}><Btn v="dan" sm onClick={()=>act("iv_cancel", cur.id, null, "Interview ended")}>End this interview</Btn></div>}
+          <div style={{marginTop:14,textAlign:"right"}}><Btn v="dan" sm onClick={()=>remove(cur)}>Delete record</Btn></div>
+        </div></ModalWrap>}
+    </div>
+  );
+}
+const IV_MIN_CLIENT = {mcq:1, short:2.5, code:5};
+
+// ---- Public page: opened from the candidate's one-time link (?interview=TOKEN). No portal sign-in. ----
+function CandidateInterview({token}) {
+  const [cloud, setCloud] = React.useState(null);
+  const [info, setInfo] = React.useState(null);
+  const [step, setStep] = React.useState("info");     // info | terms | prep | ready
+  const [name, setName] = React.useState(""); const [ok, setOk] = React.useState(false);
+  const [msg, setMsg] = React.useState(""); const [prep, setPrep] = React.useState(null);
+  const [run, setRun] = React.useState(null); const [closed, setClosed] = React.useState(false);
+  const toast = (m) => setMsg(m);
+  React.useEffect(()=>{ let off=false; (async()=>{
+    try { const sb = await getSb(); const c = {sb}; if(off) return; setCloud(c); setInfo(await callAiFn(c, {mode:"iv_pub_info", token})); }
+    catch(e) { if(!off) setInfo({valid:false, reason:"error", message:e.message}); }
+  })(); return ()=>{ off=true; }; }, [token]);
+
+  const Shell = ({children}) => <div style={{minHeight:"100vh",background:"var(--bg, #f6f7fb)",display:"flex",alignItems:"center",justifyContent:"center",padding:20,boxSizing:"border-box"}}><div style={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:16,padding:"28px 32px",maxWidth:620,width:"100%",boxShadow:"var(--shadow-xl)"}}>{children}</div></div>;
+  const stopStream = r => { try { if(r && r.stream) r.stream.getTracks().forEach(t=>t.stop()); } catch(e) {} };
+  const begin = async () => {
+    setMsg("");
+    if(!document.documentElement.requestFullscreen || !(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) { setMsg("This browser or device does not support full screen and camera access. Please use Chrome on a desktop or laptop."); return; }
+    setStep("prep"); let stream=null, lm=null, voice=false;
+    if(stSpeechCtor()) { try { const ms = await navigator.mediaDevices.getUserMedia({audio:true}); ms.getTracks().forEach(t=>t.stop()); voice = true; } catch(e) { voice = false; } }
+    try { stream = await navigator.mediaDevices.getUserMedia({video:{width:640,height:480,facingMode:"user"}, audio:false}); }
+    catch(e) { setStep("terms"); setMsg("Camera access is required for this interview. Allow the camera in your browser and try again."); return; }
+    try { lm = await stLoadLandmarker(); } catch(e) { lm = null; }
+    setPrep({stream, lm, voice}); setStep("ready");
+  };
+  const cancelPrep = () => { stopStream(prep); setPrep(null); setStep("terms"); };
+  const goFull = async () => {
+    try { await document.documentElement.requestFullscreen(); } catch(e) { setMsg("Full screen was blocked by the browser. Click the button again and allow full screen."); return; }
+    try {
+      const d = await callAiFn(cloud, {mode:"iv_pub_start", token, name:name.trim(), consent:true, ua:navigator.userAgent});
+      const sess = d.sess;
+      setRun({kind:"interview", title:d.roleTitle+" interview", attemptId:"iv", deadline:d.deadline, questions:d.questions, stream:prep.stream, lm:prep.lm, voice:prep.voice,
+        api:{ terminate:(reason, proctor, answers)=>callAiFn(cloud, {mode:"iv_pub_terminate", token, sess, reason, proctor, answers}), submit:(answers, proctor)=>callAiFn(cloud, {mode:"iv_pub_submit", token, sess, answers, proctor}) }});
+    } catch(e) { stopStream(prep); setPrep(null); try{ if(document.fullscreenElement) document.exitFullscreen(); }catch(x){} setStep("info"); setInfo({valid:false, reason:/already been used|ended/i.test(e.message)?"used":"error", message:e.message}); }
+  };
+
+  if(run) return closed ? <Shell><div style={{textAlign:"center",fontWeight:700}}>You can close this window.</div></Shell> : <StRunner cloud={cloud} run={run} cfg={{}} onClose={()=>setClosed(true)}/>;
+  if(!info) return <Shell><div style={{textAlign:"center",color:"var(--text-3)"}}>Checking your link...</div></Shell>;
+  if(!info.valid) {
+    const t = {used:["This link has already been used","An interview link can be used only once. If you think this is a mistake, please contact the person who invited you."], expired:["This link has expired","Please ask the person who invited you for a new link."], invalid:["This link is not valid","Check that you copied the whole link, or ask for a new one."], error:["Something went wrong", info.message||"Please try again in a moment."]}[info.reason] || ["This link cannot be used",""];
+    return <Shell><div style={{textAlign:"center"}}><div style={{fontSize:40}}>🔒</div><div style={{fontSize:20,fontWeight:800,margin:"6px 0"}}>{t[0]}</div><div style={{fontSize:13.5,color:"var(--text-2)",lineHeight:1.6}}>{t[1]}</div></div></Shell>;
+  }
+  if(step==="prep") return <Shell><div style={{textAlign:"center",fontWeight:700}}>Preparing... allow the camera and microphone if your browser asks.</div></Shell>;
+  if(step==="ready") return <Shell><div style={{textAlign:"center"}}><div style={{fontSize:36}}>✅</div><div style={{fontSize:18,fontWeight:800,margin:"6px 0"}}>Ready to start</div>
+    <div style={{fontSize:13,color:"var(--text-2)",lineHeight:1.6,marginBottom:16}}>{prep.voice?"Voice answers are available for written questions. ":""}{prep.lm?"Camera is on and proctoring is ready.":"Camera is on, but face analysis could not load on this device, so the camera will be on but not analysed."}<br/>Click below to go full screen. <b>The {info.durationMin}-minute timer starts as soon as the interview opens</b>, and leaving full screen ends the interview.</div>
+    {msg && <div style={{color:"#b91c1c",fontSize:13,marginBottom:10}}>{msg}</div>}
+    <div style={{display:"flex",gap:10,justifyContent:"center"}}><Btn v="sec" onClick={cancelPrep}>Back</Btn><Btn onClick={goFull}>Enter full screen and start</Btn></div></div></Shell>;
+  const li = {marginBottom:7,lineHeight:1.5};
+  return <Shell>
+    <div style={{fontSize:12,fontWeight:700,color:"var(--brand)",letterSpacing:.5}}>ONLINE INTERVIEW</div>
+    <div style={{fontSize:22,fontWeight:800,margin:"2px 0 4px"}}>{info.roleTitle}</div>
+    <div style={{fontSize:13,color:"var(--text-3)",marginBottom:14}}>Hello {info.candidateName}. {info.questionCount} questions · {info.durationMin} minutes · single attempt.</div>
+    {step==="info" && <>
+      <div style={{fontSize:13.5,color:"var(--text-2)",lineHeight:1.6,marginBottom:14}}>This interview is proctored. You need a desktop or laptop with <b>Chrome</b>, a working <b>camera</b> and microphone, and a quiet room where you will not be disturbed. It uses your <b>one-time link</b>, so you cannot restart it.</div>
+      <Btn onClick={()=>setStep("terms")}>Read the terms and continue</Btn>
+    </>}
+    {step==="terms" && <>
+      <ol style={{fontSize:13,color:"var(--text-2)",paddingLeft:20,margin:0}}>
+        <li style={li}>The interview has <b>{info.questionCount} questions</b> ({info.hasWritten?"including written"+(info.hasCode?" and coding":"")+" answers":"multiple choice"}) and a time limit of <b>{info.durationMin} minutes</b>. The timer starts when you enter full screen.</li>
+        <li style={li}>It runs in <b>full screen</b>. <b>Leaving the interview ends it</b>: switching tab or window, minimising, exiting full screen (including Esc), reloading or closing the page ends it immediately and it cannot be resumed.</li>
+        <li style={li}>This link works <b>only once</b>. After it starts, it cannot be used again, even if the interview ends early.</li>
+        <li style={li}>No outside help: no other people, notes, websites, AI tools or second devices. Copy, paste, right-click and shortcuts are disabled.</li>
+        <li style={li}><b>Camera proctoring.</b> Your face, head position and eye direction are analysed <b>on your device</b>. <b>No video or images are recorded or uploaded</b>; only counts of events (for example "looked away", "more than one face") and a score are saved. Turning the camera off ends the interview. The analysis is approximate and is only an indicator for the interviewer.</li>
+        {stSpeechCtor() && <li style={li}><b>Voice answers (optional).</b> Your browser converts speech to text (in Chrome the audio is sent to Google). The audio is not recorded or stored here; only the text you submit is saved.</li>}
+        <li style={li}>Written answers are scored by AI against a reference, and the hiring team reviews the results, your answers and the proctoring summary.</li>
+      </ol>
+      <div style={{margin:"14px 0 8px"}}><Lbl t="Your full name (to confirm it is you)"><input aria-label="Your full name" value={name} onChange={e=>setName(e.target.value)} style={iS}/></Lbl></div>
+      <label style={{display:"flex",gap:9,alignItems:"flex-start",margin:"10px 0 14px",fontSize:13,cursor:"pointer"}}><input type="checkbox" checked={ok} onChange={e=>setOk(e.target.checked)} style={{marginTop:3}}/><span>I have read and accept these terms and I understand that leaving the interview will end it.</span></label>
+      {msg && <div style={{color:"#b91c1c",fontSize:13,marginBottom:10}}>{msg}</div>}
+      <Btn disabled={!ok||!name.trim()} onClick={begin}>Continue to camera check</Btn>
+    </>}
+  </Shell>;
 }
 
 // ===== Leave management: members record leave; net capacity = headcount x 160h - leave (working days x 8h) =====
@@ -9375,6 +9688,13 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       role:"all", guideGroup:"🎓 Learning & Training", guideColor:"#7c3aed", guideBg:"#f5f3ff",
       desc:"Proctored 30-question skill tests (for example Control-M and Talend). Questions come from an uploaded or AI-generated bank, multiple-choice is auto-scored and written answers are scored by AI. The test runs full screen and ends if the person leaves the window.",
       benefits:["Gives an objective, repeatable view of skills to feed the skill matrix and training plans","Managers can upload their own questions or generate a bank with AI and review every result","Answers never reach the browser before submission and every attempt is recorded"]
+    },
+    {
+      id:"interviews", icon:"🧑‍💼", label:"Interviews",
+      mgrSec:"Learning & Training",
+      role:"mgr", guideGroup:"🎓 Learning & Training", guideColor:"#7c3aed", guideBg:"#f5f3ff",
+      desc:"Interview candidates online. Enter a job description, the skills and the candidate's years of experience: the portal picks the level, difficulty, duration (30-45 minutes) and question mix, and AI writes the questions. You get a one-time link; the interview is proctored like a skill test (full screen, camera analysis on the device, no video stored).",
+      benefits:["Interviews match the job description and the candidate's experience instead of a generic test","The link works once, so it cannot be shared or retaken, and answers never reach the browser before submission","Managers get a score by skill, an AI brief with follow-up questions and the proctoring summary, and make the decision themselves"]
     },
 
     // == System ================================================
@@ -19509,6 +19829,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     action_center: PageActionCenter,
     my_week: PageMyWeek,
     leave: ()=><LeavePage leaves={leaves} setLeaves={setLeaves} users={allUsers} user={user} isAdmin={isAdmin} isMgr={isMgrOrAdmin} capMonth={capMonth} logs={isAdmin?logs:teamLogs} toast={showToast}/>,
+    interviews: ()=><InterviewsPage cloud={cloud} user={user} users={allUsers} isAdmin={isAdmin} toast={showToast}/>,
     skill_tests: ()=><SkillTestsPage cloud={cloud} user={user} users={allUsers} isAdmin={isAdmin} isMgr={isMgrOrAdmin} toast={showToast}/>,
     services: ()=><ServicesPage services={services} setServices={setServices} acts={acts} logs={logs} mis={mis} users={allUsers} teamNames={teams.map(t=>t.name)} canEdit={isMgrOrAdmin} toast={showToast}/>,
     audit_log: ()=><AuditPage cloud={cloud} toast={showToast}/>,
@@ -20395,5 +20716,7 @@ function LocalApp() {
 }
 
 export default function App() {
+  let ivTok = null; try { ivTok = new URLSearchParams(location.search).get("interview"); } catch(e) {}
+  if(ivTok && CLOUD_ON) return <CandidateInterview token={ivTok}/>;
   return CLOUD_ON ? <CloudApp/> : <LocalApp/>;
 }
