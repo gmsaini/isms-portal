@@ -5313,13 +5313,14 @@ const DataAssistant = ({cloud, tables, names, scopeLabel}) => {
       {res && (<Card>
         <div style={{fontWeight:700,fontSize:14}}>{res.spec.title||res.question}</div>
         <div style={{fontSize:11,color:"var(--text-4)",marginBottom:10}}>{res.spec.explain} · {res.out.matched} records matched{res.out.total>res.out.rows.length?" · showing top "+res.out.rows.length+" of "+res.out.total:""}</div>
+        {res.out.matched<5 && <div data-testid="low-data" style={{margin:"0 0 10px",fontSize:12,color:"#92400e",background:"#fffbeb",border:"1px solid #fde68a",borderRadius:6,padding:"6px 10px"}}>Only {res.out.matched} record{res.out.matched===1?"":"s"} matched, so treat this as indicative, not as a trend.</div>}
         <div data-testid="query-result">{res.out.rows.map(r=>(
           <div key={r.label} style={{display:"flex",alignItems:"center",gap:8,fontSize:12,marginBottom:5}}>
             <span style={{minWidth:150,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.label}</span>
             <div style={{flex:1,height:12,background:"var(--surface-3)",borderRadius:6,overflow:"hidden"}}><div style={{height:"100%",width:Math.max(2,r.value/mx*100)+"%",background:"var(--brand)",borderRadius:6}}/></div>
             <span style={{minWidth:70,textAlign:"right",fontWeight:700}}>{Math.round(r.value*10)/10}</span>
           </div>))}</div>
-        {res.explain && <div style={{marginTop:10,padding:"10px 12px",background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:8,fontSize:12,color:"#0c4a6e",whiteSpace:"pre-wrap"}}>{res.explain}<AiRate kind="data"/></div>}
+        {res.explain && <div style={{marginTop:10,padding:"10px 12px",background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:8,fontSize:12,color:"#0c4a6e",whiteSpace:"pre-wrap"}}>{res.explain}<AiRate kind="query" cloud={cloud} ctx={{question:res.question, matched:res.out.matched}}/></div>}
         <details style={{marginTop:8}}><summary style={{fontSize:11,color:"var(--text-4)",cursor:"pointer"}}>Show the query that was run</summary><pre style={{fontSize:11,background:"var(--surface-2)",padding:8,borderRadius:6,overflow:"auto"}}>{JSON.stringify(res.spec,null,2)}</pre></details>
       </Card>)}
     </div>);
@@ -5479,16 +5480,19 @@ function skillMatrix(logs, users, team) {
 }
 
 // Thumbs rating for AI answers, kept in this browser only
-const AiRate = ({kind}) => {
+const AiRate = ({kind, cloud, ctx}) => {
   const key = "isms_ai_ratings";
   const read = () => { try { return JSON.parse(localStorage.getItem(key)||"{}"); } catch(e) { return {}; } };
-  const [done, setDone] = useState(false); const [tot, setTot] = useState(read());
-  const vote = up => { const r = read(); const k=kind||"all"; r[k]=r[k]||{up:0,down:0}; r[k][up?"up":"down"]++; try { localStorage.setItem(key, JSON.stringify(r)); } catch(e) {} setTot(r); setDone(true); };
+  const [done, setDone] = useState(false); const [tot, setTot] = useState(read()); const [ask, setAsk] = useState(false); const [cm, setCm] = useState("");
+  const tally = up => { const r = read(); const k=kind||"all"; r[k]=r[k]||{up:0,down:0}; r[k][up?"up":"down"]++; try { localStorage.setItem(key, JSON.stringify(r)); } catch(e) {} setTot(r); };
+  const vote = up => { tally(up); if(up) { aiSendFeedback(cloud, {feature:kind||"all", rating:1, context:ctx}); setDone(true); } else setAsk(true); };
+  const sendDown = () => { aiSendFeedback(cloud, {feature:kind||"all", rating:-1, comment:cm, context:ctx}); setAsk(false); setDone(true); };
   const all = Object.values(tot).reduce((a,b)=>({up:a.up+b.up,down:a.down+b.down}),{up:0,down:0});
   const n = all.up+all.down;
-  return (<div data-testid="ai-rate" style={{display:"flex",alignItems:"center",gap:8,marginTop:8,fontSize:11,color:"var(--text-4)"}}>
-    {done ? <span>Thanks, noted.</span> : <><span>Was this useful?</span><button onClick={()=>vote(true)} style={{border:"1px solid var(--border-2)",background:"var(--surface)",borderRadius:12,padding:"1px 9px",cursor:"pointer"}}>👍</button><button onClick={()=>vote(false)} style={{border:"1px solid var(--border-2)",background:"var(--surface)",borderRadius:12,padding:"1px 9px",cursor:"pointer"}}>👎</button></>}
-    {n>=5 && <span>· rated useful {Math.round(all.up/n*100)}% of {n}</span>}
+  return (<div data-testid="ai-rate" style={{display:"flex",alignItems:"center",gap:8,marginTop:8,fontSize:11,color:"var(--text-4)",flexWrap:"wrap"}}>
+    {ask ? <><span>What was wrong? (optional)</span><input data-testid="ai-rate-comment" value={cm} onChange={e=>setCm(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") sendDown(); }} placeholder="e.g. wrong team, numbers off" style={{fontSize:11.5,padding:"3px 8px",border:"1px solid var(--border-2)",borderRadius:8,minWidth:200,background:"var(--surface)"}}/><button onClick={sendDown} style={{border:"1px solid var(--border-2)",background:"var(--surface)",borderRadius:12,padding:"1px 10px",cursor:"pointer"}}>Send</button></>
+    : done ? <span>Thanks, noted.</span> : <><span>Was this useful?</span><button onClick={()=>vote(true)} style={{border:"1px solid var(--border-2)",background:"var(--surface)",borderRadius:12,padding:"1px 9px",cursor:"pointer"}}>👍</button><button onClick={()=>vote(false)} style={{border:"1px solid var(--border-2)",background:"var(--surface)",borderRadius:12,padding:"1px 9px",cursor:"pointer"}}>👎</button></>}
+    {n>=5 && !ask && <span>· rated useful {Math.round(all.up/n*100)}% of {n}</span>}
   </div>);
 };
 
@@ -7060,6 +7064,215 @@ function LeavePage({leaves, setLeaves, users, user, isAdmin, isMgr, capMonth, lo
   );
 }
 
+// ===== AI Ops: incident triage assistant, cached weekly digest, AI quality review =====
+const AI_FEATURE = {query:"Ask your data", insights:"Action Center AI", incident:"Incident RCA / review", triage:"Incident triage", digest:"Weekly digest"};
+async function aiSendFeedback(cloud, row) {
+  if(!cloud || !cloud.sb || !cloud.me) return;
+  try { await cloud.sb.from("ai_feedback").insert([{user_id:cloud.me.id, user_name:cloud.me.name, role:cloud.me.role, team:cloud.me.team||null, feature:row.feature, rating:row.rating, comment:(row.comment||"").slice(0,500)||null, context:row.context||{}}]); } catch(e) { /* table missing or offline: the local tally still works */ }
+}
+function MiniMd({text}) {
+  const bold = s => s.split(/(\*\*[^*]+\*\*)/g).map((p,i)=>/^\*\*.+\*\*$/.test(p)?<strong key={i}>{p.slice(2,-2)}</strong>:p);
+  return <div>{String(text||"").split("\n").map((l,i)=>{ const t=l.trim();
+    if(!t) return <div key={i} style={{height:6}}/>;
+    if(/^#{1,3}\s/.test(t)) return <div key={i} style={{fontWeight:800,fontSize:13.5,margin:"12px 0 4px"}}>{t.replace(/^#+\s*/,"")}</div>;
+    if(/^[-*]\s/.test(t)) return <div key={i} style={{display:"flex",gap:8,fontSize:13,lineHeight:1.55,margin:"2px 0"}}><span>•</span><span>{bold(t.replace(/^[-*]\s+/,""))}</span></div>;
+    return <div key={i} style={{fontSize:13,lineHeight:1.6}}>{bold(t)}</div>; })}</div>;
+}
+const parseAiJson = t => JSON.parse(String(t||"").replace(/^\s*```(?:json)?/i,"").replace(/```\s*$/,"").trim());
+
+// ---- 1. Triage assistant, shown inside "Raise Major Incident"
+function TriageAssist({cloud, form, setForm, mis, services, teams}) {
+  const [st, setSt] = useState({busy:false, err:"", res:null, applied:false});
+  const cur = useMemo(()=>({id:"__new", name:form.name, impactedServices:(form.impactedServices||"")+" "+(form.desc||"").slice(0,240), teamsInvolved:form.teamsInvolved||[]}), [form.name, form.impactedServices, form.desc, form.teamsInvolved]);
+  const sims = useMemo(()=> (form.name||"").trim().length>=4 ? similarIncidents(cur, mis, 3) : [], [cur, mis]);
+  const svcName = id => (services.find(x=>x.id===id)||{}).name;
+  const mostCommon = arr => { const c={}; arr.forEach(x=>{ c[x]=(c[x]||0)+1; }); return Object.keys(c).sort((a,b)=>c[b]-c[a])[0]; };
+  const ruleHint = sims.length ? {
+    severity: mostCommon(sims.map(x=>x.m.severity).filter(v=>v==="Sev1"||v==="Sev2")),
+    teams: [...new Set(sims.flatMap(x=>[...incTeams(x.m)]))].filter(t=>teams.includes(t)),
+    serviceIds: [...new Set(sims.flatMap(x=>x.m.serviceIds||[]))].filter(id=>svcName(id)),
+  } : null;
+  const apply = (r) => { setForm(f=>({...f, severity:r.severity||f.severity, serviceIds:[...new Set([...(f.serviceIds||[]), ...(r.serviceIds||[])])], teamsInvolved:[...new Set([...(f.teamsInvolved||[]), ...(r.teams||[])])]})); setSt(s=>({...s, applied:true})); };
+  const run = async () => {
+    setSt({busy:true, err:"", res:null, applied:false});
+    try {
+      const snap = {incident:{name:form.name, description:(form.desc||"").slice(0,800), impactedServices:form.impactedServices||""},
+        services:services.filter(x=>x.active!==false).map(x=>({id:x.id, name:x.name, tier:x.tier, ownerTeam:x.ownerTeam||""})), teams,
+        similarPastIncidents:sims.map(({m,s})=>({incidentNo:m.incidentNo, name:m.name, severity:m.severity, matchPct:Math.round(Math.min(1,s)*100), teams:[...incTeams(m)], services:(m.serviceIds||[]).map(svcName).filter(Boolean), knownCause:String(m.rootCause||"").slice(0,200), knownFix:String(m.resolutionSummary||"").slice(0,200)}))};
+      const d = await callAiFn(cloud, {mode:"triage", snapshot:snap});
+      let j; try { j = parseAiJson(d.text); } catch(e) { throw new Error("The AI reply could not be read. Try again."); }
+      const ids = new Set(snap.services.map(x=>x.id));
+      setSt({busy:false, err:"", applied:false, res:{
+        severity:(j.severity==="Sev1"||j.severity==="Sev2")?j.severity:null, severityWhy:String(j.severityWhy||"").slice(0,240),
+        serviceIds:(Array.isArray(j.serviceIds)?j.serviceIds:[]).filter(x=>ids.has(x)), teams:(Array.isArray(j.teams)?j.teams:[]).filter(x=>teams.includes(x)),
+        likelyCause:String(j.likelyCause||"").slice(0,400), firstSteps:(Array.isArray(j.firstSteps)?j.firstSteps:[]).slice(0,3).map(x=>String(x).slice(0,160)),
+        confidence:["low","medium","high"].includes(j.confidence)?j.confidence:"low", nSim:sims.length, model:d.model||""}});
+    } catch(e) { setSt({busy:false, err:e.message||String(e), res:null, applied:false}); }
+  };
+  const r = st.res; const canAsk = (form.name||"").trim().length>=4;
+  return (
+    <div data-testid="triage-assist" style={{margin:"14px 0",padding:"12px 14px",borderRadius:10,background:"#f5f3ff",border:"1px solid #ddd6fe"}}>
+      <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",alignItems:"center"}}>
+        <div><div style={{fontSize:13,fontWeight:700,color:"#5b21b6"}}>✨ Triage assistant</div>
+          <div style={{fontSize:11.5,color:"var(--text-3)",marginTop:2}}>Compares this with past incidents and suggests severity, services and teams. You stay in control: nothing is filled in until you press Apply.</div></div>
+        <Btn sm v="sec" disabled={!canAsk||st.busy} onClick={run}>{st.busy?"Thinking…":"Suggest triage"}</Btn>
+      </div>
+      {!canAsk && <div style={{fontSize:11.5,color:"var(--text-4)",marginTop:8}}>Type the incident name first.</div>}
+      {canAsk && sims.length>0 && <div style={{marginTop:10,fontSize:12}} data-testid="triage-similar">
+        <div style={{fontWeight:700,color:"#92400e"}}>🔁 {sims.length} similar past incident{sims.length>1?"s":""}</div>
+        {sims.map(({m,s})=><div key={m.id} style={{padding:"3px 0",borderTop:"1px dashed #ddd6fe"}}><strong>{m.incidentNo||m.id}</strong> {m.name} <span style={{color:"var(--text-4)"}}>· {m.severity} · {Math.round(Math.min(1,s)*100)}% match</span>{(m.rootCause||m.resolutionSummary)&&<div style={{color:"var(--text-3)"}}>{m.rootCause?"Cause: "+String(m.rootCause).slice(0,120)+". ":""}{m.resolutionSummary?"Fix: "+String(m.resolutionSummary).slice(0,120):""}</div>}</div>)}
+        {ruleHint && (ruleHint.severity||ruleHint.teams.length>0) && <div style={{marginTop:6,color:"var(--text-2)"}}>History says: {ruleHint.severity?<strong>{ruleHint.severity}</strong>:null}{ruleHint.teams.length?" · teams "+ruleHint.teams.join(", "):""} <button type="button" onClick={()=>apply(ruleHint)} style={{marginLeft:6,fontSize:11,border:"1px solid #c4b5fd",background:"#fff",borderRadius:12,padding:"1px 9px",cursor:"pointer"}}>Use history</button></div>}
+      </div>}
+      {canAsk && sims.length===0 && <div style={{marginTop:8,fontSize:11.5,color:"var(--text-4)"}}>No similar past incidents found yet.</div>}
+      {st.err && <div style={{marginTop:10,fontSize:12,color:"#b91c1c",background:"#fef2f2",border:"1px solid #fecaca",padding:"8px 10px",borderRadius:8}}>{st.err}</div>}
+      {r && <div data-testid="triage-result" style={{marginTop:10,padding:"10px 12px",background:"#fff",border:"1px solid #ddd6fe",borderRadius:8,fontSize:12.5}}>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:6}}>
+          {r.severity && <StPill tone={r.severity==="Sev1"?"red":"amber"}>{r.severity}</StPill>}
+          <StPill tone={r.confidence==="high"?"green":r.confidence==="medium"?"amber":"grey"}>{r.confidence} confidence</StPill>
+          {r.serviceIds.map(id=><StPill key={id} tone="blue">{svcName(id)}</StPill>)}
+          {r.teams.map(t=><StPill key={t} tone="grey">{t}</StPill>)}
+        </div>
+        {r.severityWhy && <div style={{color:"var(--text-2)"}}><strong>Why this severity:</strong> {r.severityWhy}</div>}
+        {r.likelyCause && <div style={{color:"var(--text-2)",marginTop:4}}><strong>Likely cause (hypothesis):</strong> {r.likelyCause}</div>}
+        {r.firstSteps.length>0 && <div style={{marginTop:4}}><strong>First steps:</strong><ol style={{margin:"2px 0 0 18px",padding:0}}>{r.firstSteps.map((x,i)=><li key={i}>{x}</li>)}</ol></div>}
+        {(r.nSim===0 || r.confidence==="low") && <div style={{marginTop:6,fontSize:11.5,color:"#92400e",background:"#fffbeb",border:"1px solid #fde68a",borderRadius:6,padding:"4px 8px"}}>{r.nSim===0?"No similar past incidents were found, so this rests on the wording alone. Check it carefully.":"Low confidence. Treat this as a starting point."}</div>}
+        <div style={{display:"flex",gap:10,alignItems:"center",marginTop:8,flexWrap:"wrap"}}>
+          <Btn sm onClick={()=>apply(r)} disabled={st.applied}>{st.applied?"Applied":"Apply to form"}</Btn>
+          <span style={{fontSize:11,color:"var(--text-4)"}}>Based on {r.nSim} similar incident{r.nSim===1?"":"s"} · {r.model} · AI can be wrong: review before raising</span>
+        </div>
+        <AiRate kind="triage" cloud={cloud} ctx={{nSim:r.nSim, confidence:r.confidence, severity:r.severity}}/>
+      </div>}
+    </div>);
+}
+
+// ---- 4. Weekly digest (cached). Numbers are computed here; the AI only writes the narrative.
+function weekInfo(ds) {
+  const d = lvDate(ds); const mon = new Date(d); mon.setUTCDate(mon.getUTCDate() - ((d.getUTCDay()+6)%7));
+  const sun = new Date(mon); sun.setUTCDate(sun.getUTCDate()+6);
+  const th = new Date(mon); th.setUTCDate(th.getUTCDate()+3); const y = th.getUTCFullYear();
+  const wk = Math.floor((th - new Date(Date.UTC(y,0,1)))/86400000/7)+1;
+  const pm = new Date(mon); pm.setUTCDate(pm.getUTCDate()-7); const ps = new Date(pm); ps.setUTCDate(ps.getUTCDate()+6);
+  const f = x => x.toLocaleDateString("en-GB",{day:"numeric",month:"short",timeZone:"UTC"});
+  return {key:y+"-W"+String(wk).padStart(2,"0"), from:lvStr(mon), to:lvStr(sun), pFrom:lvStr(pm), pTo:lvStr(ps), label:"Week "+wk+" · "+f(mon)+" to "+f(sun)+" "+sun.getUTCFullYear()};
+}
+function digestStats(wi, logs, mis, users, teamList) {
+  const inR = (ds, a, b) => { const x = String(ds||"").slice(0,10); return x>=a && x<=b; };
+  const rows = teamList.map(t => {
+    const hc = users.filter(u=>u.team===t && u.status!=="Inactive").length;
+    const tl = logs.filter(l=>l.team===t); const now = tl.filter(l=>inR(l.date, wi.from, wi.to)); const prev = tl.filter(l=>inR(l.date, wi.pFrom, wi.pTo));
+    const mins = a => a.reduce((s,l)=>s+(l.mins||0),0); const h = Math.round(mins(now)/6)/10, ph = Math.round(mins(prev)/6)/10;
+    const react = mins(now.filter(l=>l.nature==="Reactive")), rp = mins(now) ? Math.round(react/mins(now)*100) : null;
+    const leaveH = Math.round(LEAVE.filter(l=>l.team===t).reduce((s,l)=>s+leaveDaysIn(l, wi.from, wi.to)*LEAVE_DAY_MINS*(l.teamWide?Math.max(1,hc):1),0)/6)/10;
+    const netH = Math.max(0, hc*40 - leaveH);
+    const tm = mis.filter(m=>incTeams(m).has(t));
+    return {team:t, people:hc, hours:h, prevHours:ph, reactivePct:rp, leaveHours:leaveH, netHours:netH, utilPct:netH>0?Math.round(h/netH*100):null,
+      incidentsOpened:tm.filter(m=>inR(m.startedAt, wi.from, wi.to)).length, incidentsResolved:tm.filter(m=>m.resolvedAt && inR(m.resolvedAt, wi.from, wi.to)).length};
+  });
+  const opened = mis.filter(m=>inR(m.startedAt, wi.from, wi.to)), resolved = mis.filter(m=>m.resolvedAt && inR(m.resolvedAt, wi.from, wi.to));
+  const rh = resolved.filter(m=>m.startedAt).map(m=>(new Date(m.resolvedAt)-new Date(m.startedAt))/3600000);
+  return {teams:rows, totals:{hours:Math.round(rows.reduce((s,r)=>s+r.hours,0)*10)/10, prevHours:Math.round(rows.reduce((s,r)=>s+r.prevHours,0)*10)/10, incidentsOpened:opened.length,
+    incidentsPrevOpened:mis.filter(m=>inR(m.startedAt, wi.pFrom, wi.pTo)).length, incidentsResolved:resolved.length, sev1Opened:opened.filter(m=>m.severity==="Sev1").length,
+    avgResolveHours:rh.length?Math.round(rh.reduce((a,b)=>a+b,0)/rh.length*10)/10:null, openNow:mis.filter(m=>m.status==="Open").length},
+    incidents:opened.slice(0,10).map(m=>({no:m.incidentNo||m.id, name:m.name, severity:m.severity, status:m.status}))};
+}
+function WeeklyDigest({cloud, isAdmin, user, anchorStr, logs, mis, users, findings, toast}) {
+  const wi = useMemo(()=>weekInfo(anchorStr), [anchorStr]);
+  const key = isAdmin ? "aidigest" : "aidigest:"+(user.team||"");
+  const teamList = useMemo(()=>[...new Set(users.filter(u=>u.team && u.status!=="Inactive").map(u=>u.team))].filter(t=>isAdmin || t===user.team).sort(), [users, isAdmin, user.team]);
+  const live = useMemo(()=>digestStats(wi, logs, mis, users, teamList), [wi, logs, mis, users, teamList, LEAVE.length]);
+  const [items, setItems] = useState(null); const [sel, setSel] = useState(wi.key); const [busy, setBusy] = useState(false); const [err, setErr] = useState("");
+  const load = async () => {
+    if(!cloud || !cloud.sb) { setItems([]); return; }
+    try { const r = await cloud.sb.from("app_settings").select("data").eq("key", key).maybeSingle(); setItems((r.data && r.data.data && r.data.data.items) || []); }
+    catch(e) { setItems([]); }
+  };
+  React.useEffect(()=>{ load(); }, [key]);
+  const entry = (items||[]).find(x=>x.week===sel);
+  const generate = async () => {
+    setBusy(true); setErr("");
+    try {
+      const people = users.filter(u=>u.team).map(u=>u.name).filter(Boolean).sort((a,b)=>b.length-a.length);
+      const alias = {}; people.forEach((n,i)=>{ alias[n]="Engineer "+(i<26?String.fromCharCode(65+i):(i+1)); });
+      let txt = JSON.stringify({week:wi.key, weekLabel:wi.label, scope:isAdmin?"all teams":user.team+" team", stats:live,
+        findings:(findings||[]).slice(0,8).map(f=>({severity:f.sev, area:f.domain, title:f.title, detail:f.detail}))});
+      people.forEach(n=>{ txt = txt.split(n).join(alias[n]); });
+      const d = await callAiFn(cloud, {mode:"digest", week:wi.key, snapshot:JSON.parse(txt)});
+      let out = String(d.text||""); Object.keys(alias).forEach(n=>{ out = out.split(alias[n]).join(n); });
+      if(!d.saved) toast("Digest generated but could not be cached (check the ai function has the service role key)","err");
+      const e = {week:wi.key, label:wi.label, text:out, stats:live, generatedAt:new Date().toISOString(), generatedBy:user.name, provider:d.provider, model:d.model};
+      setItems(a=>[e, ...(a||[]).filter(x=>x.week!==wi.key)].sort((p,q)=>String(q.week).localeCompare(String(p.week)))); setSel(wi.key);
+    } catch(e) { setErr(e.message||String(e)); }
+    setBusy(false);
+  };
+  const st = entry && entry.stats; const moved = entry && entry.week===wi.key && st && st.totals && Math.abs((live.totals.hours||0)-(st.totals.hours||0)) >= Math.max(2, (st.totals.hours||0)*0.05);
+  const pct = (a,b) => !b ? (a?"new":"–") : (a>=b?"+":"")+Math.round((a-b)/b*100)+"%";
+  const th = {textAlign:"left",padding:"7px 10px",fontSize:10.5,letterSpacing:.5,textTransform:"uppercase",color:"var(--text-3)",background:"var(--surface-2)",fontWeight:700,whiteSpace:"nowrap"};
+  const td = {padding:"7px 10px",fontSize:12.5,borderTop:"1px solid var(--surface-3)"};
+  return (
+    <div data-testid="weekly-digest" style={{display:"grid",gap:12}}>
+      <Card>
+        <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",alignItems:"center"}}>
+          <div><div style={{fontWeight:700,fontSize:14}}>🗞 Weekly digest</div>
+            <div style={{fontSize:12,color:"var(--text-3)",marginTop:2}}>{wi.label} · {isAdmin?"all teams":user.team+" team"}. Numbers come from your data; the AI only writes the summary. One AI call per week, then everyone reads the saved copy.</div></div>
+          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            {(items||[]).length>0 && <select value={sel} onChange={e=>setSel(e.target.value)} style={{...sS,height:34,width:190}}>{[...new Set([wi.key, ...(items||[]).map(x=>x.week)])].map(k=><option key={k} value={k}>{(items.find(x=>x.week===k)||{}).label||k}{k===wi.key?" (this week)":""}</option>)}</select>}
+            <Btn sm disabled={busy || !cloud} onClick={generate}>{busy?"Writing…":(entry && entry.week===wi.key ? "Regenerate" : "Generate for this week")}</Btn>
+          </div>
+        </div>
+        {!cloud && <div style={{marginTop:10,fontSize:12,color:"#92400e"}}>The weekly digest needs cloud mode and the updated <code>ai</code> function.</div>}
+        {err && <div style={{marginTop:10,fontSize:12,color:"#b91c1c",background:"#fef2f2",border:"1px solid #fecaca",padding:"8px 10px",borderRadius:8,wordBreak:"break-word"}}>{err}</div>}
+      </Card>
+      {items===null && <Card><div style={{fontSize:13,color:"var(--text-3)"}}>Loading…</div></Card>}
+      {items!==null && !entry && <Card><StEmpty icon="🗞" title={sel===wi.key?"No digest for this week yet":"Nothing saved for that week"} text={sel===wi.key?"Press Generate to write it. It is saved, so nobody else triggers another AI call this week.":"Pick another week."}/></Card>}
+      {entry && <Card>
+        <div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap",marginBottom:6}}>
+          <div style={{fontWeight:700,fontSize:13.5}}>{entry.label}</div>
+          <div style={{fontSize:11,color:"var(--text-3)"}}>Saved {new Date(entry.generatedAt).toLocaleString("en-GB",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})} by {entry.generatedBy} · {entry.model} · read from saved copy</div></div>
+        {moved && <div style={{margin:"6px 0 10px",fontSize:12,color:"#92400e",background:"#fffbeb",border:"1px solid #fde68a",borderRadius:6,padding:"6px 10px"}}>Hours logged this week have changed since this was written ({st.totals.hours}h then, {live.totals.hours}h now). Press Regenerate to refresh it.</div>}
+        <MiniMd text={entry.text}/>
+        <div style={{display:"flex",gap:10,alignItems:"center",marginTop:12,flexWrap:"wrap"}}>
+          <Btn sm v="sec" onClick={()=>{ try{navigator.clipboard.writeText(entry.text);}catch(e){} toast("Copied"); }}>📋 Copy</Btn>
+          <AiRate kind="digest" cloud={cloud} ctx={{week:entry.week}}/>
+        </div>
+        <div style={{fontSize:11,color:"var(--text-4)",marginTop:4}}>AI can make mistakes. Check the figures against the table below, which comes straight from your data.</div>
+      </Card>}
+      {entry && st && st.teams && <Card style={{padding:0,overflow:"hidden"}}>
+        <div style={{padding:"12px 14px",fontWeight:700,fontSize:13}}>Numbers behind this summary</div>
+        <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}} data-testid="digest-numbers">
+          <thead><tr>{["Team","Hours","vs last week","Reactive","Leave","Net hours","Utilisation","Incidents opened / resolved"].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
+          <tbody>{st.teams.map(r=><tr key={r.team}><td style={{...td,fontWeight:700}}>{r.team}</td><td style={td}>{r.hours}h</td><td style={td}>{pct(r.hours,r.prevHours)}</td><td style={td}>{r.reactivePct==null?"–":r.reactivePct+"%"}</td><td style={td}>{r.leaveHours?r.leaveHours+"h":"–"}</td><td style={td}>{r.netHours}h</td><td style={td}>{r.utilPct==null?"–":r.utilPct+"%"}</td><td style={td}>{r.incidentsOpened} / {r.incidentsResolved}</td></tr>)}</tbody></table></div>
+        <div style={{padding:"8px 14px",fontSize:11.5,color:"var(--text-3)"}}>Org-wide: {st.totals.incidentsOpened} incident{st.totals.incidentsOpened===1?"":"s"} opened (last week {st.totals.incidentsPrevOpened}), {st.totals.incidentsResolved} resolved{st.totals.avgResolveHours!=null?", average "+st.totals.avgResolveHours+"h to resolve":""}, {st.totals.openNow} open now.</div>
+      </Card>}
+    </div>);
+}
+
+// ---- 6. Admin: how useful is the AI really?
+function AiQualityPanel({cloud}) {
+  const [rows, setRows] = useState(null); const [err, setErr] = useState("");
+  React.useEffect(()=>{ (async()=>{
+    if(!cloud || !cloud.sb) { setRows([]); return; }
+    try { const r = await cloud.sb.from("ai_feedback").select("*").order("created_at",{ascending:false}).limit(500);
+      if(r.error) throw r.error; setRows(r.data||[]); }
+    catch(e) { setErr(e.message||String(e)); setRows([]); }
+  })(); }, []);
+  const by = {}; (rows||[]).forEach(r=>{ const o=by[r.feature]||(by[r.feature]={up:0,down:0}); if(r.rating>0) o.up++; else o.down++; });
+  const down = (rows||[]).filter(r=>r.rating<0);
+  const th = {textAlign:"left",padding:"8px 12px",fontSize:11,letterSpacing:.5,textTransform:"uppercase",color:"var(--text-3)",background:"var(--surface-2)",fontWeight:700};
+  const td = {padding:"8px 12px",fontSize:12.5,borderTop:"1px solid var(--surface-3)",verticalAlign:"top"};
+  return (<div data-testid="ai-quality" style={{display:"grid",gap:12}}>
+    <Card><div style={{fontWeight:700,fontSize:14}}>🤖 AI quality</div>
+      <div style={{fontSize:12,color:"var(--text-3)",marginTop:2}}>Every 👍 / 👎 people give on an AI result is collected here, with the comment they leave on a 👎. Use it to see which AI features earn trust and which need work.</div>
+      {err && <div style={{marginTop:8,fontSize:12,color:"#92400e"}}>Could not read feedback: {err}. Run <code>ai_ops.sql</code> in the Supabase SQL Editor if you have not.</div>}</Card>
+    {rows===null && <Card>Loading…</Card>}
+    {rows!==null && Object.keys(by).length===0 && !err && <Card><StEmpty icon="🗳" title="No feedback yet" text="Ratings appear here after people use the 👍 / 👎 buttons under AI results."/></Card>}
+    {Object.keys(by).length>0 && <Card style={{padding:0,overflow:"hidden"}}><table style={{width:"100%",borderCollapse:"collapse"}}>
+      <thead><tr>{["Feature","Ratings","Useful","Not useful"].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
+      <tbody>{Object.keys(by).sort().map(f=>{ const o=by[f], n=o.up+o.down, p=Math.round(o.up/n*100); return <tr key={f}><td style={{...td,fontWeight:700}}>{AI_FEATURE[f]||f}</td><td style={td}>{n}</td><td style={td}><StPill tone={n<5?"grey":p>=80?"green":p>=60?"amber":"red"}>{p}%</StPill>{n<5 && <span style={{fontSize:11,color:"var(--text-4)"}}> too few to judge</span>}</td><td style={td}>{o.down}</td></tr>; })}</tbody></table></Card>}
+    {down.length>0 && <Card style={{padding:0,overflow:"hidden"}}><div style={{padding:"12px 14px",fontWeight:700,fontSize:13}}>Recent 👎 with comments</div>
+      <table style={{width:"100%",borderCollapse:"collapse"}}><tbody>{down.slice(0,30).map((r,i)=><tr key={i}><td style={{...td,whiteSpace:"nowrap"}}>{new Date(r.created_at).toLocaleDateString("en-GB",{day:"numeric",month:"short"})}</td><td style={td}><strong>{AI_FEATURE[r.feature]||r.feature}</strong><div style={{color:"var(--text-3)"}}>{r.comment||"(no comment)"}</div></td><td style={{...td,fontSize:11.5,color:"var(--text-4)"}}>{r.user_name||""}</td></tr>)}</tbody></table></Card>}
+  </div>);
+}
+
 const DEFAULT_CATEGORIES = ["Infrastructure Build","Maintenance","Security & Compliance","Automation & Scripting","Monitoring & Alerting","Documentation"].map(n=>({name:n, active:true}));
 // Values pre-filled in the Log Time form from an activity's own settings
 const logDefaultsFrom = (a, f) => ({
@@ -8174,7 +8387,7 @@ const CLOUD_COLL = {
   logs: {table:"time_logs", pk:"id", sel:"data", key:l=>l.id, out:r=>r.data, row:l=>({id:l.id, user_id:l.userId||null, team:l.team||null, log_date:l.date||null, data:l})},
   mis:  {table:"major_incidents", pk:"id", sel:"data", key:m=>m.id, out:r=>r.data, row:m=>({id:m.id, data:m})},
   leaves:{table:"leaves", pk:"id", sel:"data", optional:true, key:l=>l.id, out:r=>r.data, row:l=>({id:l.id, user_id:l.userId||null, team:l.team||null, from_date:l.from||null, to_date:l.to||null, data:l})},
-  settings:{table:"app_settings", pk:"key", sel:"data", optional:true, key:s=>s.key, out:r=>r.data, row:s=>({key:s.key, data:s})}
+  settings:{table:"app_settings", pk:"key", sel:"key,data", optional:true, key:s=>s.key, out:r=>r.data, row:s=>({key:s.key, data:s})}
 };
 async function cloudLoadAll(sb) {
   const out = {};
@@ -8188,7 +8401,8 @@ async function cloudLoadAll(sb) {
         if(c.optional) { console.warn("Optional table " + c.table + " not available:", res.error.message); rows.length = 0; break; }
         throw res.error;
       }
-      res.data.forEach(r=>rows.push(c.out(r)));
+      // app_settings also holds rows other features own (skillcfg, skilltraining, aidigest...). Only the managed ones are synced, otherwise a save here would delete them.
+      res.data.forEach(r=>{ if(name==="settings" && !["categories","sla","services"].includes(r.key)) return; rows.push(c.out(r)); });
       if(res.data.length < 1000) break;
       from += 1000;
     }
@@ -12254,6 +12468,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
         {id:"smtp", label:"📧 SMTP"},
         {id:"sp",   label:"SharePoint"},
         {id:"pbi",  label:"Power BI"},
+        {id:"aiq",  label:"🤖 AI quality"},
       ] : []),
       {id:"data",   label:"Data Management"},
     ];
@@ -12742,6 +12957,8 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
             <Btn v="suc" onClick={()=>showToast("Power BI config saved!")}>Save & Test Connection</Btn>
           </Card>
         )}
+
+        {settingsTab==="aiq" && isAdmin && <AiQualityPanel cloud={cloud}/>}
 
         {/* == DATA MANAGEMENT == */}
         {settingsTab==="data" && (
@@ -16822,9 +17039,10 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
         </div>
 
         <div style={{display:"flex",borderBottom:"2px solid var(--border)",marginBottom:16,overflowX:"auto",scrollbarWidth:"thin"}}>
-          <TabBtn id="actions" label={"Actions ("+active.length+")"}/><TabBtn id="score" label="Scorecard"/><TabBtn id="forecast" label="Forecast"/><TabBtn id="risk" label="Change risk"/><TabBtn id="skills" label="Skills"/><TabBtn id="calendar" label="Calendar"/><TabBtn id="backlog" label="Backlog"/><TabBtn id="roi" label="Automation ROI"/><TabBtn id="summary" label="Summary"/><TabBtn id="ai" label="✨ AI insights"/><TabBtn id="data" label="💬 Ask data"/>
+          <TabBtn id="actions" label={"Actions ("+active.length+")"}/><TabBtn id="weekly" label="🗞 Weekly digest"/><TabBtn id="score" label="Scorecard"/><TabBtn id="forecast" label="Forecast"/><TabBtn id="risk" label="Change risk"/><TabBtn id="skills" label="Skills"/><TabBtn id="calendar" label="Calendar"/><TabBtn id="backlog" label="Backlog"/><TabBtn id="roi" label="Automation ROI"/><TabBtn id="summary" label="Summary"/><TabBtn id="ai" label="✨ AI insights"/><TabBtn id="data" label="💬 Ask data"/>
         </div>
 
+        {tab==="weekly" && <WeeklyDigest cloud={cloud} isAdmin={isAdmin} user={user} anchorStr={model.anchorStr} logs={isAdmin?logs:logs.filter(l=>l.team===user.team)} mis={isAdmin?mis:mis.filter(m=>incTeams(m).has(user.team))} users={isAdmin?allUsers:allUsers.filter(u=>u.team===user.team)} findings={active} toast={showToast}/>}
         {tab==="actions" && (<div>
           <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12,alignItems:"center"}}>
             {domains.map(d=>(<button key={d} onClick={()=>setDomain(d)} style={{padding:"5px 12px",borderRadius:20,fontSize:12,fontWeight:600,cursor:"pointer",border:"1px solid "+(domain===d?"var(--brand)":"var(--border)"),background:domain===d?"var(--brand-light)":"var(--surface)",color:domain===d?"var(--brand)":"var(--text-2)"}}>{d}{d!=="All"?" ("+active.filter(f=>f.domain===d).length+")":""}</button>))}
@@ -17031,7 +17249,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
             <pre style={{whiteSpace:"pre-wrap",fontFamily:"inherit",fontSize:13,lineHeight:1.65,margin:0,color:"var(--text-1)"}}>{aiOut.text}</pre>
             <div style={{display:"flex",gap:8,marginTop:12,alignItems:"center"}}>
               <button onClick={()=>{ try{navigator.clipboard.writeText(aiOut.text);}catch(e){} showToast("Copied"); }} style={{padding:"5px 12px",fontSize:12,borderRadius:"var(--radius-md)",border:"1px solid var(--border)",background:"var(--surface)",cursor:"pointer"}}>📋 Copy</button>
-              <AiRate kind="insights"/>
+              <AiRate kind="insights" cloud={cloud} ctx={{q:aiOut.q}}/>
               <span style={{fontSize:11,color:"var(--text-3)"}}>AI can make mistakes - check important figures against the tabs above.</span></div>
           </Card>}
         </div>)}
@@ -18586,6 +18804,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
                 onChange={e=>setMiForm(f=>({...f,desc:e.target.value}))}/>
             </Lbl>
 
+            <TriageAssist cloud={cloud} form={miForm} setForm={setMiForm} mis={mis} services={services} teams={TEAMS_ALL}/>
             <MFoot onClose={()=>setCreateOpen(false)} onSave={saveMI} label="🚨 Raise Incident"/>
           </ModalWrap>
         )}
@@ -18630,7 +18849,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
                           <span style={{fontSize:11,color:"var(--text-3)"}}>AI suggestion · {aiBox.meta} · always verify</span>
                         </div>
                       </div>
-                    ) : <div><pre style={{whiteSpace:"pre-wrap",fontFamily:"inherit",fontSize:12.5,margin:"10px 0 0"}}>{aiBox.text}</pre><AiRate kind="incident"/></div>)}
+                    ) : <div><pre style={{whiteSpace:"pre-wrap",fontFamily:"inherit",fontSize:12.5,margin:"10px 0 0"}}>{aiBox.text}</pre><AiRate kind="incident" cloud={cloud} ctx={{mode:aiBox.kind}}/></div>)}
                   </div>
                 </div>
               )}
