@@ -6935,6 +6935,7 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
   const [busy, setBusy] = React.useState("");
   const [genMsg, setGenMsg] = React.useState("");
   const [notes, setNotes] = React.useState({});
+  const [mail, setMail] = React.useState(null);
 
   const load = React.useCallback(async () => {
     if(!sb) { setRows([]); return; }
@@ -6976,28 +6977,32 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
     setBusy("create");
     try {
       const d = await callAiFn(cloud, {mode:"iv_create", ...body(), candidate_name:f.candidate_name, candidate_email:f.candidate_email, duration:dur, difficulty:plan.difficulty, questions:qs, expiresDays:Number(f.expiresDays)||7});
-      setShown({...d, name:f.candidate_name, email:f.candidate_email, role:f.role_title, dur}); setF(blank); setPlan(null); setQs([]); setTab("list"); load();
+      const sh = {...d, name:f.candidate_name, email:f.candidate_email.trim(), role:f.role_title, dur};
+      setShown(sh); setF(blank); setPlan(null); setQs([]); setTab("list"); load();
+      if(sh.email) emailLink(sh);
     } catch(e) { toast(e.message,"err"); }
     setBusy("");
   };
   const emailLink = async s => {
+    setMail({state:"sending"});
     try {
-      await callAiFn(cloud, {title:"Interview invitation: "+s.role, intro:"Hello "+s.name+", you are invited to an online, proctored interview for the "+s.role+" role. It takes "+s.dur+" minutes. Use a desktop or laptop with Chrome, a working camera and microphone, and a quiet room. The interview runs in full screen and ends if you leave the window. The link works only once and expires on "+new Date(s.expiresAt).toLocaleDateString()+".", findings:[], channels:["email"], to:[s.email], link:{url:ivLink(s.token), label:"Start your interview"}}, "notify");
-      toast("Invitation emailed to "+s.email);
-    } catch(e) { toast(e.message,"err"); }
+      const r = await callAiFn(cloud, {title:"Interview invitation: "+s.role, intro:"Hello "+s.name+", you are invited to an online, proctored interview for the "+s.role+" role. It takes "+s.dur+" minutes. Use a desktop or laptop with Chrome, a working camera and microphone, and a quiet room. The interview runs in full screen and ends if you leave the window. The link works only once and expires on "+new Date(s.expiresAt).toLocaleDateString()+".", findings:[], channels:["email"], to:[s.email], link:{url:ivLink(s.token), label:"Start your interview"}}, "notify");
+      const sent = (r.sent||[]).some(x=>/email/i.test(x));
+      setMail(sent ? {state:"sent", to:s.email} : {state:"fail", msg:(r.skipped||[]).join("; ")||"The email was not sent. Check the email settings of the notify function."});
+    } catch(e) { setMail({state:"fail", msg:e.message}); }
   };
   const copy = async t => { try { await navigator.clipboard.writeText(t); toast("Link copied"); } catch(e) { toast("Copy failed, select the link and copy it manually","err"); } };
   const act = async (mode, id, extra, okMsg) => {
     try { const d = await callAiFn(cloud, {mode, id, ...(extra||{})}); if(okMsg) toast(okMsg); load(); return d; } catch(e) { toast(e.message,"err"); }
   };
-  const relink = async r => { const d = await act("iv_relink", r.id); if(d) setShown({...d, name:r.candidate_name, email:r.candidate_email, role:r.role_title, dur:r.duration_min}); };
+  const relink = async r => { const d = await act("iv_relink", r.id); if(d) { setMail(null); const sh={...d, name:r.candidate_name, email:(r.candidate_email||"").trim(), role:r.role_title, dur:r.duration_min}; setShown(sh); if(sh.email) emailLink(sh); } };
   const remove = async r => { if(!window.confirm("Delete the interview for "+r.candidate_name+"? This cannot be undone.")) return; try { await sb.from("interviews").delete().eq("id", r.id); setOpen(null); load(); toast("Deleted"); } catch(e) { toast(e.message,"err"); } };
 
   const list = (rows||[]).filter(r=>!fStatus||r.status===fStatus);
   const cur = open && (rows||[]).find(r=>r.id===open);
   const td = {padding:"9px 10px",fontSize:12.5,borderBottom:"1px solid var(--border)",verticalAlign:"top"};
   const th = {...td, fontSize:11,fontWeight:700,color:"var(--text-3)",textAlign:"left",textTransform:"uppercase",letterSpacing:.4};
-  const stat = s => { const [l,t]=IV_STATUS[s]||[s,"grey"]; return <StPill tone={t}>{l}</StPill>; };
+  const stat = (s, r) => { if(s==="submitted" && r && r.score==null && !(r.data&&r.data.perQuestion)) return <StPill tone="amber">Scoring...</StPill>; const [l,t]=IV_STATUS[s]||[s,"grey"]; return <StPill tone={t}>{l}</StPill>; };
   const counts = {total:(rows||[]).length, open:(rows||[]).filter(r=>["invited","in_progress"].includes(r.status)).length, done:(rows||[]).filter(r=>r.status==="submitted").length};
 
   return (
@@ -7026,7 +7031,7 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
                   <td style={td}>{r.role_title}</td>
                   <td style={td}>{r.level} · {r.difficulty}</td>
                   <td style={td}>{r.duration_min}</td>
-                  <td style={td}>{stat(r.status)}{r.status==="invited" && <div style={{fontSize:11,color:"var(--text-3)"}}>expires {new Date(r.expires_at).toLocaleDateString()}</div>}</td>
+                  <td style={td}>{stat(r.status,r)}{r.status==="invited" && <div style={{fontSize:11,color:"var(--text-3)"}}>expires {new Date(r.expires_at).toLocaleDateString()}</div>}</td>
                   <td style={td}>{r.score==null?"-":<b>{r.score}%</b>}</td>
                   <td style={td}>{ivProctorPill(r.data&&r.data.proctor)}</td>
                   <td style={td}>{new Date(r.created_at).toLocaleDateString()}{isAdmin && <div style={{fontSize:11,color:"var(--text-3)"}}>{r.created_by_name}</div>}</td>
@@ -7092,20 +7097,21 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
         </Card>}
       </div>}
 
-      {shown && <ModalWrap title="One-time interview link" onClose={()=>setShown(null)}>
+      {shown && <ModalWrap title="One-time interview link" onClose={()=>{ setShown(null); setMail(null); }}>
         <div style={{padding:"18px 28px 24px"}}>
           <div style={{fontSize:13,color:"var(--text-2)",lineHeight:1.6,marginBottom:10}}>For <b>{shown.name}</b> · {shown.role}. <b>Copy it now: for security the link is shown only once.</b> It works for one interview and expires on {new Date(shown.expiresAt).toLocaleDateString()}. If it is lost before the interview starts, make a new link from the list.</div>
+          {mail && <div data-testid="mailstate" style={{fontSize:13,fontWeight:600,marginBottom:10,color:mail.state==="sent"?"#059669":mail.state==="fail"?"#b91c1c":"var(--text-3)"}}>{mail.state==="sending"?"Emailing the invitation...":mail.state==="sent"?"✉️ Invitation emailed to "+mail.to:"⚠️ Invitation email not sent: "+mail.msg+" Copy the link and send it yourself."}</div>}
           <input readOnly aria-label="Interview link" value={ivLink(shown.token)} onFocus={e=>e.target.select()} style={{...iS,width:"100%",boxSizing:"border-box",fontFamily:"ui-monospace,Menlo,monospace",fontSize:12}}/>
           <div style={{display:"flex",gap:10,marginTop:14,justifyContent:"flex-end",flexWrap:"wrap"}}>
-            {shown.email && <Btn v="sec" onClick={()=>emailLink(shown)}>✉️ Email to {shown.email}</Btn>}
+            {shown.email && <Btn v="sec" onClick={()=>emailLink(shown)}>✉️ {mail&&mail.state==="sent"?"Send again":"Email"} to {shown.email}</Btn>}
             <Btn onClick={()=>copy(ivLink(shown.token))}>📋 Copy link</Btn>
-            <Btn v="sec" onClick={()=>setShown(null)}>Done</Btn>
+            <Btn v="sec" onClick={()=>{ setShown(null); setMail(null); }}>Done</Btn>
           </div>
         </div></ModalWrap>}
 
       {cur && <ModalWrap wide title={cur.candidate_name+" · "+cur.role_title} onClose={()=>setOpen(null)}>
         <div style={{padding:"16px 28px 24px"}}>
-          <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:12}}>{stat(cur.status)}<StPill tone="blue">{cur.level} · {cur.years} yrs</StPill><StPill tone="grey">{cur.difficulty}</StPill><StPill tone="grey">{cur.duration_min} min</StPill>{cur.score!=null && <StPill tone={cur.score>=70?"green":cur.score>=50?"amber":"red"}>Score {cur.score}%</StPill>}{ivProctorPill(cur.data.proctor)}</div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:12}}>{stat(cur.status,cur)}<StPill tone="blue">{cur.level} · {cur.years} yrs</StPill><StPill tone="grey">{cur.difficulty}</StPill><StPill tone="grey">{cur.duration_min} min</StPill>{cur.score!=null && <StPill tone={cur.score>=70?"green":cur.score>=50?"amber":"red"}>Score {cur.score}%</StPill>}{ivProctorPill(cur.data.proctor)}</div>
           {cur.data.reason && <div style={{fontSize:13,color:"#b91c1c",marginBottom:10}}>Reason: {cur.data.reason}</div>}
           {cur.data.confirmedName && <div style={{fontSize:12,color:"var(--text-3)",marginBottom:10}}>Name confirmed by the candidate: {cur.data.confirmedName}</div>}
           {cur.data.bySkill && <div style={{marginBottom:14}}><div style={{fontSize:12,fontWeight:700,color:"var(--text-3)",marginBottom:6}}>SCORE BY SKILL</div>
@@ -7142,6 +7148,7 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
 }
 const IV_MIN_CLIENT = {mcq:1, short:2.5, code:5};
 
+const IvShell = ({children}) => <div style={{minHeight:"100vh",background:"var(--bg, #f6f7fb)",display:"flex",alignItems:"center",justifyContent:"center",padding:20,boxSizing:"border-box"}}><div style={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:16,padding:"28px 32px",maxWidth:620,width:"100%",boxShadow:"var(--shadow-xl)"}}>{children}</div></div>;
 // ---- Public page: opened from the candidate's one-time link (?interview=TOKEN). No portal sign-in. ----
 function CandidateInterview({token}) {
   const [cloud, setCloud] = React.useState(null);
@@ -7156,7 +7163,6 @@ function CandidateInterview({token}) {
     catch(e) { if(!off) setInfo({valid:false, reason:"error", message:e.message}); }
   })(); return ()=>{ off=true; }; }, [token]);
 
-  const Shell = ({children}) => <div style={{minHeight:"100vh",background:"var(--bg, #f6f7fb)",display:"flex",alignItems:"center",justifyContent:"center",padding:20,boxSizing:"border-box"}}><div style={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:16,padding:"28px 32px",maxWidth:620,width:"100%",boxShadow:"var(--shadow-xl)"}}>{children}</div></div>;
   const stopStream = r => { try { if(r && r.stream) r.stream.getTracks().forEach(t=>t.stop()); } catch(e) {} };
   const begin = async () => {
     setMsg("");
@@ -7179,19 +7185,19 @@ function CandidateInterview({token}) {
     } catch(e) { stopStream(prep); setPrep(null); try{ if(document.fullscreenElement) document.exitFullscreen(); }catch(x){} setStep("info"); setInfo({valid:false, reason:/already been used|ended/i.test(e.message)?"used":"error", message:e.message}); }
   };
 
-  if(run) return closed ? <Shell><div style={{textAlign:"center",fontWeight:700}}>You can close this window.</div></Shell> : <StRunner cloud={cloud} run={run} cfg={{}} onClose={()=>setClosed(true)}/>;
-  if(!info) return <Shell><div style={{textAlign:"center",color:"var(--text-3)"}}>Checking your link...</div></Shell>;
+  if(run) return closed ? <IvShell><div style={{textAlign:"center",fontWeight:700}}>You can close this window.</div></IvShell> : <StRunner cloud={cloud} run={run} cfg={{}} onClose={()=>setClosed(true)}/>;
+  if(!info) return <IvShell><div style={{textAlign:"center",color:"var(--text-3)"}}>Checking your link...</div></IvShell>;
   if(!info.valid) {
     const t = {used:["This link has already been used","An interview link can be used only once. If you think this is a mistake, please contact the person who invited you."], expired:["This link has expired","Please ask the person who invited you for a new link."], invalid:["This link is not valid","Check that you copied the whole link, or ask for a new one."], error:["Something went wrong", info.message||"Please try again in a moment."]}[info.reason] || ["This link cannot be used",""];
-    return <Shell><div style={{textAlign:"center"}}><div style={{fontSize:40}}>🔒</div><div style={{fontSize:20,fontWeight:800,margin:"6px 0"}}>{t[0]}</div><div style={{fontSize:13.5,color:"var(--text-2)",lineHeight:1.6}}>{t[1]}</div></div></Shell>;
+    return <IvShell><div style={{textAlign:"center"}}><div style={{fontSize:40}}>🔒</div><div style={{fontSize:20,fontWeight:800,margin:"6px 0"}}>{t[0]}</div><div style={{fontSize:13.5,color:"var(--text-2)",lineHeight:1.6}}>{t[1]}</div></div></IvShell>;
   }
-  if(step==="prep") return <Shell><div style={{textAlign:"center",fontWeight:700}}>Preparing... allow the camera and microphone if your browser asks.</div></Shell>;
-  if(step==="ready") return <Shell><div style={{textAlign:"center"}}><div style={{fontSize:36}}>✅</div><div style={{fontSize:18,fontWeight:800,margin:"6px 0"}}>Ready to start</div>
+  if(step==="prep") return <IvShell><div style={{textAlign:"center",fontWeight:700}}>Preparing... allow the camera and microphone if your browser asks.</div></IvShell>;
+  if(step==="ready") return <IvShell><div style={{textAlign:"center"}}><div style={{fontSize:36}}>✅</div><div style={{fontSize:18,fontWeight:800,margin:"6px 0"}}>Ready to start</div>
     <div style={{fontSize:13,color:"var(--text-2)",lineHeight:1.6,marginBottom:16}}>{prep.voice?"Voice answers are available for written questions. ":""}{prep.lm?"Camera is on and proctoring is ready.":"Camera is on, but face analysis could not load on this device, so the camera will be on but not analysed."}<br/>Click below to go full screen. <b>The {info.durationMin}-minute timer starts as soon as the interview opens</b>, and leaving full screen ends the interview.</div>
     {msg && <div style={{color:"#b91c1c",fontSize:13,marginBottom:10}}>{msg}</div>}
-    <div style={{display:"flex",gap:10,justifyContent:"center"}}><Btn v="sec" onClick={cancelPrep}>Back</Btn><Btn onClick={goFull}>Enter full screen and start</Btn></div></div></Shell>;
+    <div style={{display:"flex",gap:10,justifyContent:"center"}}><Btn v="sec" onClick={cancelPrep}>Back</Btn><Btn onClick={goFull}>Enter full screen and start</Btn></div></div></IvShell>;
   const li = {marginBottom:7,lineHeight:1.5};
-  return <Shell>
+  return <IvShell>
     <div style={{fontSize:12,fontWeight:700,color:"var(--brand)",letterSpacing:.5}}>ONLINE INTERVIEW</div>
     <div style={{fontSize:22,fontWeight:800,margin:"2px 0 4px"}}>{info.roleTitle}</div>
     <div style={{fontSize:13,color:"var(--text-3)",marginBottom:14}}>Hello {info.candidateName}. {info.questionCount} questions · {info.durationMin} minutes · single attempt.</div>
@@ -7214,7 +7220,7 @@ function CandidateInterview({token}) {
       {msg && <div style={{color:"#b91c1c",fontSize:13,marginBottom:10}}>{msg}</div>}
       <Btn disabled={!ok||!name.trim()} onClick={begin}>Continue to camera check</Btn>
     </>}
-  </Shell>;
+  </IvShell>;
 }
 
 // ===== Leave management: members record leave; net capacity = headcount x 160h - leave (working days x 8h) =====
