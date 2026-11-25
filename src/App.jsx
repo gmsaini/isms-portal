@@ -7065,7 +7065,7 @@ function LeavePage({leaves, setLeaves, users, user, isAdmin, isMgr, capMonth, lo
 }
 
 // ===== AI Ops: incident triage assistant, cached weekly digest, AI quality review =====
-const AI_FEATURE = {query:"Ask your data", insights:"Action Center AI", incident:"Incident RCA / review", triage:"Incident triage", digest:"Weekly digest"};
+const AI_FEATURE = {query:"Ask your data", insights:"Action Center AI", explain:"Explain a finding", incident:"Incident RCA / review", triage:"Incident triage", digest:"Weekly digest"};
 async function aiSendFeedback(cloud, row) {
   if(!cloud || !cloud.sb || !cloud.me) return;
   try { await cloud.sb.from("ai_feedback").insert([{user_id:cloud.me.id, user_name:cloud.me.name, role:cloud.me.role, team:cloud.me.team||null, feature:row.feature, rating:row.rating, comment:(row.comment||"").slice(0,500)||null, context:row.context||{}}]); } catch(e) { /* table missing or offline: the local tally still works */ }
@@ -7143,6 +7143,41 @@ function TriageAssist({cloud, form, setForm, mis, services, teams}) {
         <AiRate kind="triage" cloud={cloud} ctx={{nSim:r.nSim, confidence:r.confidence, severity:r.severity}}/>
       </div>}
     </div>);
+}
+
+// ---- 2. Explain a finding (Action Center). Evidence-only, cached per finding and day.
+function ExplainFinding({cloud, f, teams, org, people, anchor}) {
+  const ck = "isms_ai_explain"; const ckey = f.id+"|"+anchor+"|"+f.title;
+  const read = () => { try { return JSON.parse(localStorage.getItem(ck)||"{}"); } catch(e) { return {}; } };
+  const [st, setSt] = useState(()=>{ const c = read()[ckey]; return {open:false, busy:false, err:"", text:c?c.text:"", model:c?c.model:"", cached:!!c}; });
+  const run = async (force) => {
+    setSt(s=>({...s, open:true, busy:true, err:""}));
+    try {
+      const hay = (f.title+" "+f.detail).toLowerCase();
+      let txt = JSON.stringify({finding:{severity:f.sev, area:f.domain, title:f.title, detail:f.detail, why:f.why, suggestedAction:f.action&&f.action.label},
+        relatedTeams:teams.filter(t=>hay.includes(String(t.team).toLowerCase())), org, asOf:anchor});
+      const alias = {}; people.forEach((n,i)=>{ alias[n]="Engineer "+(i<26?String.fromCharCode(65+i):(i+1)); });
+      people.forEach(n=>{ txt = txt.split(n).join(alias[n]); });
+      const d = await callAiFn(cloud, {mode:"explain", snapshot:JSON.parse(txt)});
+      let out = String(d.text||""); Object.keys(alias).forEach(n=>{ out = out.split(alias[n]).join(n); });
+      const all = read(); all[ckey] = {text:out, model:d.model, at:Date.now()};
+      Object.keys(all).sort((a,b)=>(all[b].at||0)-(all[a].at||0)).slice(60).forEach(k=>{ delete all[k]; });
+      try { localStorage.setItem(ck, JSON.stringify(all)); } catch(e) {}
+      setSt({open:true, busy:false, err:"", text:out, model:d.model||"", cached:false});
+    } catch(e) { setSt(s=>({...s, busy:false, err:e.message||String(e)})); }
+  };
+  return (<div style={{marginTop:6}}>
+    <button type="button" data-testid="explain-btn" onClick={()=>{ if(st.text) setSt(s=>({...s,open:!s.open})); else run(); }} disabled={st.busy} style={{fontSize:11.5,border:"1px solid #ddd6fe",background:"#f5f3ff",color:"#5b21b6",borderRadius:14,padding:"2px 11px",cursor:st.busy?"wait":"pointer",fontWeight:600}}>{st.busy?"Thinking…":st.open&&st.text?"Hide explanation":"✨ Explain this"}</button>
+    {st.err && <div style={{marginTop:6,fontSize:12,color:"#b91c1c",wordBreak:"break-word"}}>{st.err}</div>}
+    {st.open && st.text && <div data-testid="explain-box" style={{marginTop:8,padding:"10px 12px",background:"#faf5ff",border:"1px solid #e9d5ff",borderRadius:8}}>
+      <MiniMd text={st.text}/>
+      <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginTop:6}}>
+        <span style={{fontSize:11,color:"var(--text-4)"}}>AI explanation using only this finding and your scorecard numbers · {st.model}{st.cached?" · saved copy":""}</span>
+        <button type="button" onClick={()=>run(true)} disabled={st.busy} style={{fontSize:11,border:"none",background:"none",color:"var(--text-3)",cursor:"pointer",textDecoration:"underline"}}>Refresh</button>
+      </div>
+      <AiRate kind="explain" cloud={cloud} ctx={{finding:f.id, sev:f.sev}}/>
+    </div>}
+  </div>);
 }
 
 // ---- 4. Weekly digest (cached). Numbers are computed here; the AI only writes the narrative.
@@ -7248,7 +7283,12 @@ function WeeklyDigest({cloud, isAdmin, user, anchorStr, logs, mis, users, findin
 
 // ---- 6. Admin: how useful is the AI really?
 function AiQualityPanel({cloud}) {
-  const [rows, setRows] = useState(null); const [err, setErr] = useState("");
+  const [rows, setRows] = useState(null); const [err, setErr] = useState(""); const [use, setUse] = useState(null); const [useErr, setUseErr] = useState("");
+  React.useEffect(()=>{ (async()=>{
+    if(!cloud || !cloud.sb) { setUse([]); return; }
+    try { const since = new Date(Date.now()-7*86400000).toISOString(); const r = await cloud.sb.from("ai_usage").select("*").gte("at", since).order("at",{ascending:false}).limit(2000);
+      if(r.error) throw r.error; setUse(r.data||[]); } catch(e) { setUseErr(e.message||String(e)); setUse([]); }
+  })(); }, []);
   React.useEffect(()=>{ (async()=>{
     if(!cloud || !cloud.sb) { setRows([]); return; }
     try { const r = await cloud.sb.from("ai_feedback").select("*").order("created_at",{ascending:false}).limit(500);
@@ -7263,6 +7303,27 @@ function AiQualityPanel({cloud}) {
     <Card><div style={{fontWeight:700,fontSize:14}}>🤖 AI quality</div>
       <div style={{fontSize:12,color:"var(--text-3)",marginTop:2}}>Every 👍 / 👎 people give on an AI result is collected here, with the comment they leave on a 👎. Use it to see which AI features earn trust and which need work.</div>
       {err && <div style={{marginTop:8,fontSize:12,color:"#92400e"}}>Could not read feedback: {err}. Run <code>ai_ops.sql</code> in the Supabase SQL Editor if you have not.</div>}</Card>
+    <Card style={{padding:0,overflow:"hidden"}} data-testid="ai-usage">
+      <div style={{padding:"12px 14px",fontWeight:700,fontSize:13}}>Usage, last 7 days</div>
+      {useErr && <div style={{padding:"0 14px 12px",fontSize:12,color:"#92400e"}}>Could not read usage: {useErr}. Run <code>ai_ops.sql</code> and redeploy the <code>ai</code> function.</div>}
+      {use!==null && use.length===0 && !useErr && <div style={{padding:"0 14px 14px",fontSize:12.5,color:"var(--text-3)"}}>No AI calls recorded yet.</div>}
+      {use!==null && use.length>0 && (()=>{ const ok = use.filter(u=>u.ok), bad = use.length-ok.length; const ms = ok.filter(u=>u.ms).map(u=>u.ms); const avg = ms.length?Math.round(ms.reduce((a,b)=>a+b,0)/ms.length/100)/10:null;
+        const cnt = (key) => { const c={}; use.forEach(u=>{ const k=u[key]||"(none)"; c[k]=(c[k]||0)+1; }); return Object.entries(c).sort((a,b)=>b[1]-a[1]); };
+        const day = {}; use.forEach(u=>{ const d=String(u.at).slice(0,10); day[d]=(day[d]||0)+1; }); const days = Object.keys(day).sort(); const mx = Math.max(...Object.values(day));
+        return <div style={{padding:"0 14px 14px"}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:12}}>
+            <StStat icon="🤖" label="AI calls" value={use.length} sub={ok.length+" succeeded"} tone="blue"/>
+            <StStat icon="⚠️" label="Failed" value={bad} sub={bad?Math.round(bad/use.length*100)+"% of calls":"none"} tone={bad?"amber":"green"}/>
+            <StStat icon="⏱" label="Average time" value={avg==null?"-":avg+"s"} sub="successful calls" tone="grey"/>
+            <StStat icon="👥" label="People using it" value={new Set(use.map(u=>u.user_id)).size} sub="distinct users" tone="grey"/>
+          </div>
+          <div style={{display:"flex",gap:3,alignItems:"flex-end",height:44,marginBottom:6}}>{days.map(d=><div key={d} title={d+": "+day[d]} style={{flex:1,maxWidth:36,height:Math.max(4,day[d]/mx*44),background:"var(--brand)",borderRadius:3,opacity:.85}}/>)}</div>
+          <div style={{display:"flex",gap:24,flexWrap:"wrap",fontSize:12.5}}>
+            <div><div style={{fontWeight:700,marginBottom:3}}>By feature</div>{cnt("mode").slice(0,8).map(([k,n])=><div key={k}>{k}: <strong>{n}</strong></div>)}</div>
+            <div><div style={{fontWeight:700,marginBottom:3}}>Top users</div>{cnt("user_name").slice(0,5).map(([k,n])=><div key={k}>{k}: <strong>{n}</strong></div>)}</div>
+            {bad>0 && <div style={{flex:"1 1 260px"}}><div style={{fontWeight:700,marginBottom:3}}>Latest errors</div>{use.filter(u=>!u.ok).slice(0,3).map((u,i)=><div key={i} style={{color:"#b91c1c",fontSize:11.5,wordBreak:"break-word"}}>{String(u.at).slice(5,16).replace("T"," ")} · {u.mode}: {String(u.error||"").slice(0,120)}</div>)}</div>}
+          </div></div>; })()}
+    </Card>
     {rows===null && <Card>Loading…</Card>}
     {rows!==null && Object.keys(by).length===0 && !err && <Card><StEmpty icon="🗳" title="No feedback yet" text="Ratings appear here after people use the 👍 / 👎 buttons under AI results."/></Card>}
     {Object.keys(by).length>0 && <Card style={{padding:0,overflow:"hidden"}}><table style={{width:"100%",borderCollapse:"collapse"}}>
@@ -17063,6 +17124,9 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
                     <div style={{fontSize:14,fontWeight:700,color:"var(--text-1)",marginTop:6,lineHeight:1.35}}>{f.title}</div>
                     <div style={{fontSize:12.5,color:"var(--text-2)",marginTop:3,lineHeight:1.45}}>{f.detail}</div>
                     <div style={{fontSize:11.5,color:"var(--text-3)",marginTop:5,lineHeight:1.45}}>💡 {f.why}</div>
+                    <ExplainFinding cloud={cloud} f={f} anchor={model.anchorStr} org={{avgTeamScore:org, openFindings:{critical:cnt("critical"),high:cnt("high"),medium:cnt("medium"),info:cnt("info")}}}
+                      teams={model.scorecard.map(t=>({team:t.team,score:t.score,engineers:t.hc,utilisationPct:Math.round(t.util),reactivePct:Math.round(t.re),suspendedActivities:t.sp,overEstimate:t.over,openIncidents:t.openMi,hoursLogged:Math.round(t.hrs)}))}
+                      people={(isAdmin ? allUsers.filter(u=>u.team) : allUsers.filter(u=>u.team===user.team)).map(u=>u.name).filter(Boolean).sort((a,b)=>b.length-a.length)}/>
                   </div>
                   <button onClick={()=>{ f.action.run(); }} style={{padding:"8px 16px",minWidth:150,borderRadius:"var(--radius-md)",border:"none",background:"var(--brand)",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>{f.action.label}</button>
                 </div>
