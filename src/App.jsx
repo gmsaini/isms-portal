@@ -7199,7 +7199,43 @@ function ResourcePlanningPage({items, setItems, users, leaves, cloud, user, isAd
     } catch(e) { setTr({busy:false, err:e.message||String(e), res:null}); }
   };
 
-  const TABS = [["plan","🗓 Coverage plan"],["projects","📁 Projects ("+projects.length+")"],["skills","🧩 Skills & people"],["train","🎓 Training"]];
+  // ---- monthly calendar per project ----
+  const [calMonth, setCalMonth] = React.useState(rpToday().slice(0,7));
+  const [calProj, setCalProj] = React.useState("");
+  const calData = React.useMemo(()=>{
+    if(tab!=="cal") return null;
+    const [y,m] = calMonth.split("-").map(Number);
+    const first = calMonth+"-01"; const last = lvStr(new Date(Date.UTC(y, m, 0)));
+    const cp = rpBuildPlan({from:first, to:last, projects, memberSkills:mskills, users, leaves, opts:{crossTeam:cross}});
+    const av = rpAvailability(leaves, people);
+    const segs = cp.segments.map(s=>{ const o = ov[rpKey(s)]; return o && rpLevelOf(mskills,o,s.skill) && s.dates.every(d=>!av.isOff(o,d)) ? {...s, picks:[{userId:o, dates:s.dates, manual:true}], open:[]} : s; });
+    const lead = (new Date(first+"T00:00:00Z").getUTCDay()+6)%7;   // Monday-first grid
+    const cells = []; for(let i=0;i<lead;i++) cells.push(null);
+    for(let d=1; d<=new Date(Date.UTC(y,m,0)).getUTCDate(); d++) cells.push(calMonth+"-"+String(d).padStart(2,"0"));
+    while(cells.length%7) cells.push(null);
+    const dayInfo = (p, d) => {
+      const wd = lvDate(d).getUTCDay(); if(wd===0||wd===6) return {kind:"off"};
+      if((p.start&&d<p.start)||(p.end&&d>p.end)) return {kind:"out"};
+      if(av.hol[p.team]&&av.hol[p.team][d]) return {kind:"hol"};
+      const lines = []; let worst = 0;   // 0 ok, 1 covered, 2 gap
+      (p.requirements||[]).forEach(rq=>{
+        const owners = (p.staff||[]).filter(x=>x.skill===rq.skill && users.some(u=>u.id===x.userId));
+        if(!owners.length) { lines.push({t:rq.skill+": no owner", c:"#b45309"}); worst = Math.max(worst,1); return; }
+        const absent = owners.filter(x=>av.isOff(x.userId,d)).map(x=>x.userId);
+        if(!absent.length) return;
+        const sg = segs.find(x=>x.projectId===p.id && x.skill===rq.skill && x.dates.includes(d));
+        const cov = sg ? sg.picks.filter(pk=>pk.dates.includes(d)).map(pk=>pk.userId) : [];
+        const need = Math.max(1, Number(rq.need)||1); const have = owners.length-absent.length+cov.length;
+        if(have>=need) { lines.push({t:rq.skill+": "+absent.map(nameOf).join(", ")+" out → "+cov.map(nameOf).join(", "), c:"#166534"}); worst = Math.max(worst,1); }
+        else { lines.push({t:rq.skill+": "+absent.map(nameOf).join(", ")+" out – NOT COVERED", c:"#991b1b"}); worst = 2; }
+      });
+      return {kind:worst===2?"gap":worst===1?"cov":"ok", lines};
+    };
+    return {cells, dayInfo};
+  }, [tab, calMonth, items, users, leaves, cross, ov]);
+  const shiftMonth = n => { const [y,m] = calMonth.split("-").map(Number); setCalMonth(lvStr(new Date(Date.UTC(y,m-1+n,1))).slice(0,7)); };
+
+  const TABS = [["plan","🗓 Coverage plan"],["cal","📅 Calendar"],["projects","📁 Projects ("+projects.length+")"],["skills","🧩 Skills & people"],["train","🎓 Training"]];
   const cell = {padding:"8px 10px",borderBottom:"1px solid var(--border)",fontSize:12.5,verticalAlign:"top"};
   const th = {...cell,fontWeight:700,color:"var(--text-2)",background:"var(--surface-2)",textAlign:"left",whiteSpace:"nowrap"};
   const setReq = (i,k,v) => setPm(p=>({...p, requirements:p.requirements.map((r,j)=>j===i?{...r,[k]:v}:r)}));
@@ -7271,6 +7307,35 @@ function ResourcePlanningPage({items, setItems, users, leaves, cloud, user, isAd
             </tr>; })}</tbody></table>
         </Card>}
         {eff.length===0 && projects.length>0 && <Card><StEmpty icon="✅" title="No cover needed in this period" text="Nobody staffed on a required skill is on leave between these dates."/></Card>}
+      </>}
+
+      {tab==="cal" && calData && <>
+        <Card style={{padding:14,display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+          <Btn sm v="sec" onClick={()=>shiftMonth(-1)}>‹</Btn>
+          <b style={{minWidth:150,textAlign:"center"}}>{["January","February","March","April","May","June","July","August","September","October","November","December"][Number(calMonth.slice(5))-1]} {calMonth.slice(0,4)}</b>
+          <Btn sm v="sec" onClick={()=>shiftMonth(1)}>›</Btn>
+          <Btn sm v="sec" onClick={()=>setCalMonth(rpToday().slice(0,7))}>Today</Btn>
+          <div style={{flex:1}}/>
+          <select aria-label="Project filter" style={{...sS,width:220}} value={calProj} onChange={e=>setCalProj(e.target.value)}><option value="">All projects</option>{projects.filter(p=>p.status!=="Closed").map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
+          <div style={{display:"flex",gap:10,fontSize:11.5,color:"var(--text-2)",flexWrap:"wrap"}}><span>🟩 Fully staffed</span><span>🟨 Covered</span><span>🟥 Gap</span><span>⬜ Weekly off (Sat–Sun)</span></div>
+        </Card>
+        {!projects.length && <Card><StEmpty icon="📁" title="No projects yet"/></Card>}
+        {projects.filter(p=>p.status!=="Closed" && (!calProj||p.id===calProj)).map(p=>{ return <Card key={p.id} style={{padding:12}}>
+          <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:8,flexWrap:"wrap"}}><b>{p.name}</b>{p.client && <span style={{color:"var(--text-3)",fontSize:12}}>{p.client}</span>}<StPill tone={p.criticality==="critical"?"red":"grey"}>{p.criticality||"normal"}</StPill><span style={{fontSize:12,color:"var(--text-3)"}}>Needs: {(p.requirements||[]).map(r=>r.skill).join(", ")||"–"}</span></div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(7,minmax(0,1fr))",gap:4}}>
+            {["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map((h,i)=><div key={h} style={{fontSize:11.5,fontWeight:700,textAlign:"center",color:i>4?"var(--text-3)":"var(--text-2)",padding:"2px 0"}}>{h}{i>4?" · off":""}</div>)}
+            {calData.cells.map((d,i)=>{ if(!d) return <div key={i}/>; const inf = calData.dayInfo(p,d); const n = Number(d.slice(8));
+              const bg = {off:"var(--surface-2)", out:"transparent", hol:"#eef2ff", ok:"#f0fdf4", cov:"#fef9c3", gap:"#fee2e2"}[inf.kind]; const bd = {gap:"#fca5a5", cov:"#fde68a", ok:"#bbf7d0", hol:"#c7d2fe"}[inf.kind]||"var(--border)";
+              return <div key={d} data-day={d} data-kind={inf.kind} title={(inf.lines||[]).map(l=>l.t).join("\n")} style={{minHeight:inf.kind==="off"?54:74,background:bg,border:"1px solid "+bd,borderRadius:8,padding:"4px 6px",opacity:inf.kind==="out"?0.45:1}}>
+                <div style={{fontSize:12,fontWeight:700,color:inf.kind==="off"?"var(--text-3)":"var(--text-1)"}}>{n}</div>
+                {inf.kind==="off" && <div style={{fontSize:10.5,color:"var(--text-3)"}}>Weekly off</div>}
+                {inf.kind==="hol" && <div style={{fontSize:10.5,color:"#4338ca"}}>Holiday</div>}
+                {inf.kind==="out" && <div style={{fontSize:10.5,color:"var(--text-3)"}}>Not active</div>}
+                {inf.kind==="ok" && <div style={{fontSize:10.5,color:"#166534"}}>✓ Staffed</div>}
+                {(inf.lines||[]).map((l,j)=><div key={j} style={{fontSize:10.5,lineHeight:1.25,color:l.c,wordBreak:"break-word"}}>{l.t}</div>)}
+              </div>; })}
+          </div>
+        </Card>; })}
       </>}
 
       {tab==="projects" && <>
