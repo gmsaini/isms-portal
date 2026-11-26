@@ -6945,19 +6945,30 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
   React.useEffect(()=>{ loadTpls(); }, [loadTpls]);
   const useTemplate = async id => {
     setTplSel(id); const t = tpls.find(x=>x.id===id); if(!t) return;
-    const qlist = (t.questions||[]).map(({id:_i,...q})=>q); const need = qlist.reduce((a,q)=>a+(IV_MIN_CLIENT[q.type]||2),0);
-    const dur = [30,35,40,45].find(d=>need<=d+5) || 45;
     setBusy("plan");
     try {
-      const pl = await callAiFn(cloud, {mode:"iv_plan", years:Number(t.years)||0, skills:t.skills, jd:f.jd, duration:dur});
-      setF(p=>({...p, role_title:p.role_title||t.role_title||"", skills:t.skills, years:String(t.years||0), duration:String(dur), difficulty:""})); setPlan(pl); setQs(qlist);
-      toast("Template loaded. Review the questions, then create the link.");
+      const yrs = Number(f.years)||Number(t.years)||0;
+      if(!(yrs>3)) {   // up to 3 years: the whole saved set is reused
+        const qlist = (t.questions||[]).map(({id:_i,...q})=>q); const need = qlist.reduce((a,q)=>a+(IV_MIN_CLIENT[q.type]||2),0);
+        const dur = [30,35,40,45].find(d=>need<=d+5) || 45;
+        const pl0 = await callAiFn(cloud, {mode:"iv_plan", years:yrs, skills:t.skills, jd:f.jd, duration:dur});
+        setF(p=>({...p, role_title:p.role_title||t.role_title||"", skills:t.skills, years:String(yrs), duration:String(dur), difficulty:""})); setPlan(pl0); setQs(qlist);
+        toast("Question set loaded. Review the questions, then create the link."); setBusy(""); return;
+      }
+      const pl = await callAiFn(cloud, {mode:"iv_plan", years:yrs, skills:t.skills, jd:f.jd, difficulty:f.difficulty||undefined, duration:Number(f.duration)||undefined});
+      // more than 3 years: only a small shared core (about 30%) is reused; the rest is written for this candidate from the resume and JD
+      const keep = Math.max(2, Math.round(pl.total*0.3)); const bySkill = {}; (t.questions||[]).forEach(q=>{ (bySkill[q.skill]=bySkill[q.skill]||[]).push(q); });
+      const core = []; let more = true; while(core.length<keep && more) { more = false; for(const k of Object.keys(bySkill)) { const q = bySkill[k].shift(); if(q && core.length<keep) { core.push({...q, id:undefined, core:true, basis:"core"}); more = true; } } }
+      setF(p=>({...p, role_title:p.role_title||t.role_title||"", skills:[...new Set([...p.skills, ...t.skills])].slice(0,8)})); setPlan(pl); setQs(core);
+      toast(core.length+" shared core questions loaded. Press Generate to add questions written for this candidate.");
     } catch(e) { toast(e.message,"err"); }
     setBusy("");
   };
   const saveTemplate = async () => {
-    const name = window.prompt("Name for this question set (for example \"Control-M Mid level\")", f.role_title+" "+(plan?plan.level:"")); if(!name) return;
-    try { await callAiFn(cloud, {mode:"iv_tpl_save", name, role_title:f.role_title, years:Number(f.years)||0, skills:f.skills, questions:qs}); toast("Template saved"); loadTpls(); } catch(e) { toast(e.message,"err"); }
+    const generic = (Number(f.years)>3) ? qs.filter(q=>q.basis==="jd"||q.basis==="core"||!q.basis) : qs;
+    if(generic.length<5) { toast("Only questions based on the JD alone can be saved for reuse, and there are "+generic.length+". Questions written from this candidate's resume stay with this interview.","err"); return; }
+    const name = window.prompt("Name for this question set (for example \"Control-M Junior\")."+(Number(f.years)>3?" Only the "+generic.length+" JD-based questions are saved; resume-based ones stay private to this candidate.":""), f.role_title+" "+(plan?plan.level:"")); if(!name) return;
+    try { await callAiFn(cloud, {mode:"iv_tpl_save", name, role_title:f.role_title, years:Number(f.years)||0, skills:f.skills, questions:generic}); toast("Template saved"); loadTpls(); } catch(e) { toast(e.message,"err"); }
   };
   const delTemplate = async () => { const t = tpls.find(x=>x.id===tplSel); if(!t || !window.confirm("Delete the template \""+t.name+"\"?")) return; try { await callAiFn(cloud, {mode:"iv_tpl_delete", id:t.id}); setTplSel(""); loadTpls(); toast("Template deleted"); } catch(e) { toast(e.message,"err"); } };
   const onResumeFile = async e => {
@@ -6992,13 +7003,13 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
     setBusy("");
   };
   const generate = async () => {
-    if(!plan) return; setBusy("gen"); let all = []; let n = 0; const total = plan.total;
+    if(!plan) return; setBusy("gen"); let all = qs.filter(q=>q.core); setQs(all.slice()); let n = all.length; const total = plan.total;
     try {
       for(const bl of plan.blocks) {
-        let left = bl.count;
+        let left = bl.count - all.filter(q=>q.type===bl.type).length;
         while(left>0) {
           const take = Math.min(6,left); setGenMsg("Generating questions "+Math.min(total,n+take)+" of "+total+"...");
-          const d = await callAiFn(cloud, {mode:"iv_generate", ...body(), type:bl.type, count:take, difficulty:plan.difficulty, avoid:all.map(q=>q.text)});
+          const d = await callAiFn(cloud, {mode:"iv_generate", ...body(), type:bl.type, count:take, difficulty:plan.difficulty, avoid:[...all.map(q=>q.text), ...qs.filter(q=>q.core).map(q=>q.text)]});
           const got = d.questions||[]; all = all.concat(got); n += take; left -= take; if(!got.length) break;
           setQs(all.slice());
         }
@@ -7086,10 +7097,10 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
       {tab==="new" && <div style={{display:"grid",gap:14}}>
         <Card>
           {tpls.length>0 && <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:14,padding:"10px 12px",background:"var(--surface-2,#f6f7fb)",borderRadius:10}}>
-            <span style={{fontSize:12.5,fontWeight:700}}>Start from a saved question set</span>
-            <select aria-label="Saved template" value={tplSel} onChange={e=>useTemplate(e.target.value)} style={{...sS,width:"auto",minWidth:220}}><option value="">Write new questions with AI</option>{tpls.map(t=><option key={t.id} value={t.id}>{t.name} · {t.level} · {(t.questions||[]).length} questions</option>)}</select>
+            <span style={{fontSize:12.5,fontWeight:700}}>Start with shared core questions</span>
+            <select aria-label="Saved template" value={tplSel} onChange={e=>useTemplate(e.target.value)} style={{...sS,width:"auto",minWidth:220}}><option value="">None, write everything for this candidate</option>{tpls.map(t=><option key={t.id} value={t.id}>{t.name} · {t.level} · {(t.questions||[]).length} questions</option>)}</select>
             {tplSel && <Btn v="dan" sm onClick={delTemplate}>Delete template</Btn>}
-            <span style={{fontSize:11.5,color:"var(--text-3)"}}>Reusing a set gives candidates for the same role identical questions, so scores can be compared fairly.</span>
+            <span style={{fontSize:11.5,color:"var(--text-3)"}}>Up to 3 years: the whole set is reused. More than 3 years: about 30% is reused as a shared baseline and the rest is written for the candidate from the resume and JD.</span>
           </div>}
           <div style={{fontSize:14,fontWeight:700,marginBottom:12}}>1. Candidate and role</div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:12}}>
@@ -7136,7 +7147,9 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
             {plan.blocks.map(b=><StPill key={b.type} tone="grey">{b.count} {IV_TYPE_LABEL[b.type].toLowerCase()}</StPill>)}
           </div>
           <ul style={{margin:"0 0 12px",paddingLeft:18,fontSize:12.5,color:"var(--text-2)",lineHeight:1.6}}>{plan.why.map((w,i)=><li key={i}>{w}</li>)}</ul>
-          <Btn onClick={generate} disabled={busy==="gen"}>{busy==="gen"?genMsg||"Generating...":(qs.length?"Regenerate all questions":"Generate "+plan.total+" questions")}</Btn>
+          {plan.years>3 ? (f.resume.trim().length>=80 ? <div style={{fontSize:12.5,color:"#166534",background:"#f0fdf4",borderRadius:8,padding:"8px 12px",marginBottom:10}}>More than 3 years of experience, so questions are written for this candidate: about half verify what the resume claims, a quarter cover JD requirements the resume does not show, and the rest are core JD fundamentals.</div> : <div style={{fontSize:12.5,color:"#92400e",background:"#fffbeb",borderRadius:8,padding:"8px 12px",marginBottom:10}}>More than 3 years of experience, but no resume was added, so questions come only from the JD and skills and will look alike for every candidate. Add the resume above to personalise them.</div>)
+            : <div style={{fontSize:12.5,color:"var(--text-2)",background:"var(--surface-2,#f6f7fb)",borderRadius:8,padding:"8px 12px",marginBottom:10}}>Up to 3 years of experience, so questions follow the JD and skills{f.resume.trim().length>=80?", with some drawn from the resume":""}. Saved question sets are reused in full for this level.</div>}
+          <Btn onClick={generate} disabled={busy==="gen"}>{busy==="gen"?genMsg||"Generating...":(qs.filter(q=>!q.core).length?"Regenerate questions":qs.length?"Generate "+(plan.total-qs.length)+" tailored questions":"Generate "+plan.total+" questions")}</Btn>
         </Card>}
 
         {qs.length>0 && <Card>
@@ -7146,7 +7159,7 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
           <div style={{display:"grid",gap:8}}>{qs.map((q,i)=>(
             <div key={i} style={{border:"1px solid var(--border)",borderRadius:10,padding:"10px 12px"}}>
               <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center"}}>
-                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}><StPill tone="blue">{q.skill}</StPill><StPill tone="grey">{IV_TYPE_LABEL[q.type]}</StPill><StPill tone="grey">{q.difficulty}</StPill></div>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}><StPill tone="blue">{q.skill}</StPill><StPill tone="grey">{IV_TYPE_LABEL[q.type]}</StPill><StPill tone="grey">{q.difficulty}</StPill>{!(plan&&plan.years>3)?null:q.core?<StPill tone="amber">Shared core</StPill>:q.basis==="resume"?<StPill tone="green">From resume</StPill>:q.basis==="gap"?<StPill tone="amber">JD gap</StPill>:<StPill tone="grey">JD core</StPill>}</div>
                 <Btn v="dan" sm onClick={()=>setQs(a=>a.filter((_,j)=>j!==i))}>Remove</Btn>
               </div>
               <div style={{fontSize:13.5,fontWeight:600,margin:"8px 0 4px",whiteSpace:"pre-wrap"}}>{i+1}. {q.text}</div>
@@ -7154,7 +7167,7 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
               {q.type!=="mcq" && <div style={{fontSize:12,color:"var(--text-3)",whiteSpace:"pre-wrap"}}><b>Reference:</b> {q.answer}</div>}
             </div>))}</div>
           <div style={{marginTop:14,display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
-            <Btn v="sec" onClick={saveTemplate} disabled={qs.length<5}>💾 Save as template</Btn>
+            <Btn v="sec" onClick={saveTemplate} disabled={qs.length<5}>💾 Save JD questions as core set</Btn>
             <Btn v="suc" onClick={create} disabled={busy==="create"||qs.length<5||mins>dur+5}>{busy==="create"?"Creating...":"Create one-time link"}</Btn>
             {qs.length<5 && <span style={{fontSize:12.5,color:"#b45309"}}>At least 5 questions are needed.</span>}
             {mins>dur+5 && <span style={{fontSize:12.5,color:"#b45309"}}>Too long for {dur} minutes. Remove a few questions.</span>}
@@ -7172,7 +7185,7 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
           {!roles.length ? <StEmpty icon="📊" title="Nothing to compare yet" text="Completed and scored interviews appear here, grouped by role."/> : <>
           <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:10}}>
             <select aria-label="Role to compare" value={role} onChange={e=>setCmpRole(e.target.value)} style={{...sS,width:"auto"}}>{roles.map(r=><option key={r} value={r}>{r} ({done.filter(x=>x.role_title===r).length})</option>)}</select>
-            <span style={{fontSize:12,color:"var(--text-3)"}}>Scores are comparable only when candidates had the same questions (use a saved question set). Candidates here: {set.length}.</span>
+            <span style={{fontSize:12,color:"var(--text-3)"}}>Candidates with more than 3 years get questions tailored to them, so for those read the skill columns and the interviewer briefs rather than the total alone. Candidates here: {set.length}.</span>
           </div>
           <div style={{overflowX:"auto"}}><table data-testid="cmp" style={{width:"100%",borderCollapse:"collapse"}}>
             <thead><tr>{["#","Candidate","Level","Score",...skills,"Proctoring","Decision",""].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
