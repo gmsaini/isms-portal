@@ -7217,19 +7217,26 @@ function ResourcePlanningPage({items, setItems, users, leaves, cloud, user, isAd
       const wd = lvDate(d).getUTCDay(); if(wd===0||wd===6) return {kind:"off"};
       if((p.start&&d<p.start)||(p.end&&d>p.end)) return {kind:"out"};
       if(av.hol[p.team]&&av.hol[p.team][d]) return {kind:"hol"};
-      const lines = []; let worst = 0;   // 0 ok, 1 covered, 2 gap
+      const lines = [], tip = []; let worst = 0; const present = new Set();   // 0 fully staffed, 2 partially, 3 short
+      const nm = a => a.map(nameOf).join(", ");
       (p.requirements||[]).forEach(rq=>{
-        const owners = (p.staff||[]).filter(x=>x.skill===rq.skill && users.some(u=>u.id===x.userId));
-        if(!owners.length) { lines.push({t:rq.skill+": no owner", c:"#b45309"}); worst = Math.max(worst,1); return; }
-        const absent = owners.filter(x=>av.isOff(x.userId,d)).map(x=>x.userId);
-        if(!absent.length) return;
+        const need = Math.max(1, Number(rq.need)||1);
+        const owners = (p.staff||[]).filter(x=>x.skill===rq.skill && users.some(u=>u.id===x.userId)).map(x=>x.userId);
+        const out = owners.filter(o=>av.isOff(o,d)), work = owners.filter(o=>!av.isOff(o,d));
         const sg = segs.find(x=>x.projectId===p.id && x.skill===rq.skill && x.dates.includes(d));
         const cov = sg ? sg.picks.filter(pk=>pk.dates.includes(d)).map(pk=>pk.userId) : [];
-        const need = Math.max(1, Number(rq.need)||1); const have = owners.length-absent.length+cov.length;
-        if(have>=need) { lines.push({t:rq.skill+": "+absent.map(nameOf).join(", ")+" out → "+cov.map(nameOf).join(", "), c:"#166534"}); worst = Math.max(worst,1); }
-        else { lines.push({t:rq.skill+": "+absent.map(nameOf).join(", ")+" out – NOT COVERED", c:"#991b1b"}); worst = 2; }
+        const have = work.length + cov.length;
+        work.concat(cov).forEach(x=>present.add(x));
+        tip.push(rq.skill+": "+have+" of "+need+" needed"+(work.length?"\n   Working: "+nm(work):"")+(out.length?"\n   On leave: "+nm(out):"")+(cov.length?"\n   Cover: "+nm(cov):"")+(have<need?"\n   SHORT by "+(need-have):""));
+        if(have<need) { lines.push({t:rq.skill+" "+have+"/"+need+(out.length?" ("+nm(out)+" out)":""), c:have===0?"#991b1b":"#b45309"}); worst = Math.max(worst, have===0?3:2); }
+        else if(cov.length) lines.push({t:rq.skill+": "+nm(out)+" out → "+nm(cov), c:"#166534"});
       });
-      return {kind:worst===2?"gap":worst===1?"cov":"ok", lines};
+      const min = Number(p.minTotal)||0;
+      if(min) {
+        tip.push("Whole team: "+present.size+" of "+min+" minimum"+(present.size<min?"  – SHORT":""));
+        if(present.size<min) { lines.push({t:"Team "+present.size+"/"+min, c:present.size===0?"#991b1b":"#b45309"}); worst = Math.max(worst, present.size===0?3:2); }
+      }
+      return {kind:worst===3?"short":worst===2?"part":"ok", lines, tip:tip.join("\n")};
     };
     return {cells, dayInfo};
   }, [tab, calMonth, items, users, leaves, cross, ov]);
@@ -7317,7 +7324,7 @@ function ResourcePlanningPage({items, setItems, users, leaves, cloud, user, isAd
           <Btn sm v="sec" onClick={()=>setCalMonth(rpToday().slice(0,7))}>Today</Btn>
           <div style={{flex:1}}/>
           <select aria-label="Project filter" style={{...sS,width:220}} value={calProj} onChange={e=>setCalProj(e.target.value)}><option value="">All projects</option>{projects.filter(p=>p.status!=="Closed").map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
-          <div style={{display:"flex",gap:10,fontSize:11.5,color:"var(--text-2)",flexWrap:"wrap"}}><span>🟩 Fully staffed</span><span>🟨 Covered</span><span>🟥 Gap</span><span>⬜ Weekly off (Sat–Sun)</span></div>
+          <div style={{display:"flex",gap:10,fontSize:11.5,color:"var(--text-2)",flexWrap:"wrap"}}><span>🟩 Fully staffed (minimum met)</span><span>🟨 Partially staffed</span><span>🟥 Short staffed</span><span>⬜ Weekly off (Sat–Sun)</span></div>
         </Card>
         {!projects.length && <Card><StEmpty icon="📁" title="No projects yet"/></Card>}
         {projects.filter(p=>p.status!=="Closed" && (!calProj||p.id===calProj)).map(p=>{ return <Card key={p.id} style={{padding:12}}>
@@ -7325,13 +7332,15 @@ function ResourcePlanningPage({items, setItems, users, leaves, cloud, user, isAd
           <div style={{display:"grid",gridTemplateColumns:"repeat(7,minmax(0,1fr))",gap:4}}>
             {["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map((h,i)=><div key={h} style={{fontSize:11.5,fontWeight:700,textAlign:"center",color:i>4?"var(--text-3)":"var(--text-2)",padding:"2px 0"}}>{h}{i>4?" · off":""}</div>)}
             {calData.cells.map((d,i)=>{ if(!d) return <div key={i}/>; const inf = calData.dayInfo(p,d); const n = Number(d.slice(8));
-              const bg = {off:"var(--surface-2)", out:"transparent", hol:"#eef2ff", ok:"#f0fdf4", cov:"#fef9c3", gap:"#fee2e2"}[inf.kind]; const bd = {gap:"#fca5a5", cov:"#fde68a", ok:"#bbf7d0", hol:"#c7d2fe"}[inf.kind]||"var(--border)";
-              return <div key={d} data-day={d} data-kind={inf.kind} title={(inf.lines||[]).map(l=>l.t).join("\n")} style={{minHeight:inf.kind==="off"?54:74,background:bg,border:"1px solid "+bd,borderRadius:8,padding:"4px 6px",opacity:inf.kind==="out"?0.45:1}}>
+              const bg = {off:"var(--surface-2)", out:"transparent", hol:"#eef2ff", ok:"#f0fdf4", part:"#fef9c3", short:"#fee2e2"}[inf.kind]; const bd = {short:"#fca5a5", part:"#fde68a", ok:"#bbf7d0", hol:"#c7d2fe"}[inf.kind]||"var(--border)";
+              return <div key={d} data-day={d} data-kind={inf.kind} title={inf.tip||""} style={{minHeight:inf.kind==="off"?54:74,background:bg,border:"1px solid "+bd,borderRadius:8,padding:"4px 6px",opacity:inf.kind==="out"?0.45:1}}>
                 <div style={{fontSize:12,fontWeight:700,color:inf.kind==="off"?"var(--text-3)":"var(--text-1)"}}>{n}</div>
                 {inf.kind==="off" && <div style={{fontSize:10.5,color:"var(--text-3)"}}>Weekly off</div>}
                 {inf.kind==="hol" && <div style={{fontSize:10.5,color:"#4338ca"}}>Holiday</div>}
                 {inf.kind==="out" && <div style={{fontSize:10.5,color:"var(--text-3)"}}>Not active</div>}
-                {inf.kind==="ok" && <div style={{fontSize:10.5,color:"#166534"}}>✓ Staffed</div>}
+                {inf.kind==="ok" && <div style={{fontSize:10.5,color:"#166534",fontWeight:700}}>✓ Fully staffed</div>}
+                {inf.kind==="part" && <div style={{fontSize:10.5,color:"#92400e",fontWeight:700}}>Partially staffed</div>}
+                {inf.kind==="short" && <div style={{fontSize:10.5,color:"#991b1b",fontWeight:700}}>Short staffed</div>}
                 {(inf.lines||[]).map((l,j)=><div key={j} style={{fontSize:10.5,lineHeight:1.25,color:l.c,wordBreak:"break-word"}}>{l.t}</div>)}
               </div>; })}
           </div>
@@ -7343,7 +7352,7 @@ function ResourcePlanningPage({items, setItems, users, leaves, cloud, user, isAd
         {!projects.length && <Card><StEmpty icon="📁" title="No projects yet"/></Card>}
         {projects.map(p=><Card key={p.id} style={{padding:14,cursor:"pointer"}} onClick={()=>setPm({...p})}>
           <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}><b>{p.name}</b>{p.client && <span style={{color:"var(--text-3)",fontSize:12}}>{p.client}</span>}<StPill tone={p.criticality==="critical"?"red":p.criticality==="high"?"amber":"grey"}>{p.criticality||"normal"}</StPill><StPill tone={p.status==="Active"?"green":"grey"}>{p.status}</StPill>{p.team && <StPill tone="blue">{p.team}</StPill>}</div>
-          <div style={{fontSize:12.5,marginTop:6,color:"var(--text-2)"}}>Needs: {(p.requirements||[]).map(r=>r.skill+(Number(r.need)>1?" ×"+r.need:"")).join(", ")||"–"}</div>
+          <div style={{fontSize:12.5,marginTop:6,color:"var(--text-2)"}}>Needs: {(p.requirements||[]).map(r=>r.skill+" (min "+(Number(r.need)||1)+")").join(", ")||"–"}{Number(p.minTotal)>0 && " · team minimum "+p.minTotal}</div>
           <div style={{fontSize:12.5,color:"var(--text-2)"}}>Team: {(p.staff||[]).map(s=>nameOf(s.userId)+" ("+(s.skill||"?")+(s.role?" · "+s.role:"")+")").join(", ")||"–"}</div>
         </Card>)}
       </>}
@@ -7393,8 +7402,9 @@ function ResourcePlanningPage({items, setItems, users, leaves, cloud, user, isAd
             <Lbl t="End"><input type="date" style={iS} value={pm.end} onChange={e=>setPm({...pm,end:e.target.value})}/></Lbl>
             <Lbl t="Status"><select style={sS} value={pm.status} onChange={e=>setPm({...pm,status:e.target.value})}><option>Active</option><option>On hold</option><option>Closed</option></select></Lbl>
           </div>
-          <div><div style={{fontWeight:700,fontSize:13,marginBottom:6}}>Skills this project needs</div>
-            {pm.requirements.map((r,i)=><div key={i} style={{display:"flex",gap:8,marginBottom:6}}><select aria-label="Required skill" style={sS} value={r.skill} onChange={e=>setReq(i,"skill",e.target.value)}><option value="">Select skill</option>{skills.map(s=><option key={s}>{s}</option>)}</select><input aria-label="People needed" type="number" min="1" max="20" style={{...iS,width:80}} value={r.need} onChange={e=>setReq(i,"need",e.target.value)}/><Btn sm v="sec" onClick={()=>setPm({...pm,requirements:pm.requirements.filter((_,j)=>j!==i)})}>✕</Btn></div>)}
+          <div style={{maxWidth:360}}><Lbl t="Minimum people to count as staffed (whole project, optional)"><input aria-label="Minimum team size" type="number" min="0" max="100" style={iS} value={pm.minTotal||""} placeholder="e.g. 4" onChange={e=>setPm({...pm,minTotal:e.target.value})}/></Lbl></div>
+          <div><div style={{fontWeight:700,fontSize:13,marginBottom:2}}>Skills this project needs, with the minimum people needed on each</div><div style={{fontSize:11.5,color:"var(--text-3)",marginBottom:6}}>A day counts as fully staffed only when every skill has at least its minimum and the whole-project minimum is met.</div>
+            {pm.requirements.map((r,i)=><div key={i} style={{display:"flex",gap:8,marginBottom:6}}><select aria-label="Required skill" style={sS} value={r.skill} onChange={e=>setReq(i,"skill",e.target.value)}><option value="">Select skill</option>{skills.map(s=><option key={s}>{s}</option>)}</select><input aria-label="People needed" title="Minimum people needed with this skill" type="number" min="1" max="20" style={{...iS,width:80}} value={r.need} onChange={e=>setReq(i,"need",e.target.value)}/><Btn sm v="sec" onClick={()=>setPm({...pm,requirements:pm.requirements.filter((_,j)=>j!==i)})}>✕</Btn></div>)}
             <Btn sm v="sec" onClick={()=>setPm({...pm,requirements:[...pm.requirements,{skill:"",need:1}]})}>+ Add required skill</Btn>{!skills.length && <span style={{fontSize:12,color:"var(--text-3)",marginLeft:8}}>Add skills in the Skills & people tab first.</span>}</div>
           <div><div style={{fontWeight:700,fontSize:13,marginBottom:6}}>Who works on it</div>
             {pm.staff.map((s,i)=><div key={i} style={{display:"grid",gridTemplateColumns:"1.2fr 1fr 1.4fr 70px auto",gap:8,marginBottom:6}}>
