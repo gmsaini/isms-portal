@@ -6133,7 +6133,7 @@ function StRunner({cloud, run, cfg, onClose}) {
   const {attemptId, deadline, questions, skill} = run;
   const iv = run.kind==="interview"; const nm = iv ? "interview" : "test";
   const [idx, setIdx] = React.useState(0);
-  const [answers, setAnswers] = React.useState({});
+  const [answers, setAnswers] = React.useState(run.initialAnswers||{});
   const [left, setLeft] = React.useState(Math.max(0, Math.round((new Date(deadline).getTime()-Date.now())/1000)));
   const [end, setEnd] = React.useState(null);      // {type:"terminated",reason} | {type:"result",res} | {type:"failed",msg}
   const [busy, setBusy] = React.useState(false);
@@ -6928,7 +6928,7 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
   const [fStatus, setFStatus] = React.useState("");
   const [open, setOpen] = React.useState(null);        // interview id being viewed
   const [shown, setShown] = React.useState(null);      // {id, token, expiresAt, row} link just created
-  const blank = {candidate_name:"", candidate_email:"", role_title:"", years:"3", skills:[], skillText:"", jd:"", resume:"", difficulty:"", duration:"", expiresDays:"7"};
+  const blank = {candidate_name:"", candidate_email:"", role_title:"", years:"3", skills:[], skillText:"", jd:"", resume:"", difficulty:"", duration:"", expiresDays:"7", extraPct:"0"};
   const [f, setF] = React.useState(blank);
   const [plan, setPlan] = React.useState(null);
   const [qs, setQs] = React.useState([]);
@@ -6937,6 +6937,29 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
   const [notes, setNotes] = React.useState({});
   const [mail, setMail] = React.useState(null);
   const [rs, setRs] = React.useState(null);            // resume suggestion {years, skills, summary, claims}
+  const [tpls, setTpls] = React.useState([]);
+  const [tplSel, setTplSel] = React.useState("");
+  const [cmpRole, setCmpRole] = React.useState("");
+  const [ovNote, setOvNote] = React.useState({});
+  const loadTpls = React.useCallback(async () => { if(!sb) return; try { const r = await sb.from("interview_templates").select("*").order("created_at",{ascending:false}).limit(100); setTpls((r&&r.data)||[]); } catch(e) { setTpls([]); } }, [sb]);
+  React.useEffect(()=>{ loadTpls(); }, [loadTpls]);
+  const useTemplate = async id => {
+    setTplSel(id); const t = tpls.find(x=>x.id===id); if(!t) return;
+    const qlist = (t.questions||[]).map(({id:_i,...q})=>q); const need = qlist.reduce((a,q)=>a+(IV_MIN_CLIENT[q.type]||2),0);
+    const dur = [30,35,40,45].find(d=>need<=d+5) || 45;
+    setBusy("plan");
+    try {
+      const pl = await callAiFn(cloud, {mode:"iv_plan", years:Number(t.years)||0, skills:t.skills, jd:f.jd, duration:dur});
+      setF(p=>({...p, role_title:p.role_title||t.role_title||"", skills:t.skills, years:String(t.years||0), duration:String(dur), difficulty:""})); setPlan(pl); setQs(qlist);
+      toast("Template loaded. Review the questions, then create the link.");
+    } catch(e) { toast(e.message,"err"); }
+    setBusy("");
+  };
+  const saveTemplate = async () => {
+    const name = window.prompt("Name for this question set (for example \"Control-M Mid level\")", f.role_title+" "+(plan?plan.level:"")); if(!name) return;
+    try { await callAiFn(cloud, {mode:"iv_tpl_save", name, role_title:f.role_title, years:Number(f.years)||0, skills:f.skills, questions:qs}); toast("Template saved"); loadTpls(); } catch(e) { toast(e.message,"err"); }
+  };
+  const delTemplate = async () => { const t = tpls.find(x=>x.id===tplSel); if(!t || !window.confirm("Delete the template \""+t.name+"\"?")) return; try { await callAiFn(cloud, {mode:"iv_tpl_delete", id:t.id}); setTplSel(""); loadTpls(); toast("Template deleted"); } catch(e) { toast(e.message,"err"); } };
   const onResumeFile = async e => {
     const file = e.target.files && e.target.files[0]; e.target.value = ""; if(!file) return;
     setBusy("file");
@@ -6959,7 +6982,7 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
   React.useEffect(()=>{ load(); }, [load]);
 
   const addSkill = txt => { const parts = String(txt).split(",").map(x=>x.trim()).filter(Boolean); if(!parts.length) return; setF(p=>({...p, skills:[...new Set([...p.skills, ...parts])].slice(0,8), skillText:""})); setPlan(null); setQs([]); };
-  const edit = (k,v) => { setF(p=>({...p,[k]:v})); if(k!=="candidate_name"&&k!=="candidate_email"&&k!=="expiresDays"){ setPlan(null); setQs([]); } };
+  const edit = (k,v) => { setF(p=>({...p,[k]:v})); if(k!=="candidate_name"&&k!=="candidate_email"&&k!=="expiresDays"&&k!=="extraPct"){ setPlan(null); setQs([]); } };
   const body = () => ({years:Number(f.years)||0, skills:f.skills, jd:f.jd, resume:f.resume, role_title:f.role_title, difficulty:f.difficulty||undefined, duration:Number(f.duration)||undefined});
   const doPlan = async () => {
     if(!f.role_title.trim()) { toast("Enter the role title","err"); return; }
@@ -6990,7 +7013,7 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
     if(!f.candidate_name.trim()) { toast("Enter the candidate name","err"); return; }
     setBusy("create");
     try {
-      const d = await callAiFn(cloud, {mode:"iv_create", ...body(), candidate_name:f.candidate_name, candidate_email:f.candidate_email, duration:dur, difficulty:plan.difficulty, questions:qs, expiresDays:Number(f.expiresDays)||7});
+      const d = await callAiFn(cloud, {mode:"iv_create", ...body(), candidate_name:f.candidate_name, candidate_email:f.candidate_email, duration:dur, difficulty:plan.difficulty, questions:qs, expiresDays:Number(f.expiresDays)||7, extraPct:Number(f.extraPct)||0});
       const sh = {...d, name:f.candidate_name, email:f.candidate_email.trim(), role:f.role_title, dur};
       setShown(sh); setF(blank); setPlan(null); setQs([]); setTab("list"); load();
       if(sh.email) emailLink(sh);
@@ -7010,6 +7033,11 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
     try { const d = await callAiFn(cloud, {mode, id, ...(extra||{})}); if(okMsg) toast(okMsg); load(); return d; } catch(e) { toast(e.message,"err"); }
   };
   const relink = async r => { const d = await act("iv_relink", r.id); if(d) { setMail(null); const sh={...d, name:r.candidate_name, email:(r.candidate_email||"").trim(), role:r.role_title, dur:r.duration_min}; setShown(sh); if(sh.email) emailLink(sh); } };
+  const reopen = async r => {
+    const left = r.data && r.data.leftMin > 0 ? r.data.leftMin : r.duration_min;
+    if(!window.confirm("Allow "+r.candidate_name+" one more try?\n\nThey get a NEW one-time link (the old one stops working), keep their earlier answers and have "+left+" minutes. The first attempt stays on record. Use this for lost connections, not to give a second chance after a proctoring violation unless you decide to.")) return;
+    const d = await act("iv_reopen", r.id); if(d) { setMail(null); const sh={...d, name:r.candidate_name, email:(r.candidate_email||"").trim(), role:r.role_title, dur:d.minutes}; setShown(sh); if(sh.email) emailLink(sh); }
+  };
   const remove = async r => { if(!window.confirm("Delete the interview for "+r.candidate_name+"? This cannot be undone.")) return; try { await sb.from("interviews").delete().eq("id", r.id); setOpen(null); load(); toast("Deleted"); } catch(e) { toast(e.message,"err"); } };
 
   const list = (rows||[]).filter(r=>!fStatus||r.status===fStatus);
@@ -7022,7 +7050,7 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
   return (
     <div>
       <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
-        {[["list","📋 Interviews"],["new","➕ New interview"]].map(([k,l])=><button key={k} onClick={()=>setTab(k)} style={{padding:"8px 16px",borderRadius:999,border:"1.5px solid "+(tab===k?"var(--brand)":"var(--border)"),background:tab===k?"var(--brand-light, #eff6ff)":"var(--surface)",fontWeight:700,fontSize:13,cursor:"pointer",color:"var(--text-1)"}}>{l}</button>)}
+        {[["list","📋 Interviews"],["compare","📊 Compare"],["new","➕ New interview"]].map(([k,l])=><button key={k} onClick={()=>setTab(k)} style={{padding:"8px 16px",borderRadius:999,border:"1.5px solid "+(tab===k?"var(--brand)":"var(--border)"),background:tab===k?"var(--brand-light, #eff6ff)":"var(--surface)",fontWeight:700,fontSize:13,cursor:"pointer",color:"var(--text-1)"}}>{l}</button>)}
       </div>
 
       {tab==="list" && <>
@@ -7049,7 +7077,7 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
                   <td style={td}>{r.score==null?"-":<b>{r.score}%</b>}</td>
                   <td style={td}>{ivProctorPill(r.data&&r.data.proctor)}</td>
                   <td style={td}>{new Date(r.created_at).toLocaleDateString()}{isAdmin && <div style={{fontSize:11,color:"var(--text-3)"}}>{r.created_by_name}</div>}</td>
-                  <td style={{...td,whiteSpace:"nowrap"}}><Btn v="sec" sm onClick={()=>setOpen(r.id)}>Open</Btn>{r.status==="invited" && <> <Btn v="sec" sm onClick={()=>relink(r)}>New link</Btn> <Btn v="dan" sm onClick={()=>act("iv_cancel", r.id, null, "Interview cancelled")}>Cancel</Btn></>}</td>
+                  <td style={{...td,whiteSpace:"nowrap"}}><Btn v="sec" sm onClick={()=>setOpen(r.id)}>Open</Btn>{["terminated","expired"].includes(r.status) && (r.data&&r.data.retries||0)<2 && <> <Btn v="sec" sm onClick={()=>reopen(r)}>Allow retry</Btn></>}{r.status==="invited" && <> <Btn v="sec" sm onClick={()=>relink(r)}>New link</Btn> <Btn v="dan" sm onClick={()=>act("iv_cancel", r.id, null, "Interview cancelled")}>Cancel</Btn></>}</td>
                 </tr>))}</tbody>
             </table></div>)}
         </Card>
@@ -7057,6 +7085,12 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
 
       {tab==="new" && <div style={{display:"grid",gap:14}}>
         <Card>
+          {tpls.length>0 && <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:14,padding:"10px 12px",background:"var(--surface-2,#f6f7fb)",borderRadius:10}}>
+            <span style={{fontSize:12.5,fontWeight:700}}>Start from a saved question set</span>
+            <select aria-label="Saved template" value={tplSel} onChange={e=>useTemplate(e.target.value)} style={{...sS,width:"auto",minWidth:220}}><option value="">Write new questions with AI</option>{tpls.map(t=><option key={t.id} value={t.id}>{t.name} · {t.level} · {(t.questions||[]).length} questions</option>)}</select>
+            {tplSel && <Btn v="dan" sm onClick={delTemplate}>Delete template</Btn>}
+            <span style={{fontSize:11.5,color:"var(--text-3)"}}>Reusing a set gives candidates for the same role identical questions, so scores can be compared fairly.</span>
+          </div>}
           <div style={{fontSize:14,fontWeight:700,marginBottom:12}}>1. Candidate and role</div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:12}}>
             <Lbl t="Candidate name"><input aria-label="Candidate name" value={f.candidate_name} onChange={e=>edit("candidate_name",e.target.value)} style={iS}/></Lbl>
@@ -7089,6 +7123,7 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:12,marginTop:10}}>
               <Lbl t="Difficulty"><select aria-label="Difficulty" value={f.difficulty} onChange={e=>edit("difficulty",e.target.value)} style={sS}><option value="">Automatic from experience</option><option value="easy">Easy</option><option value="medium">Medium</option><option value="hard">Hard</option></select></Lbl>
               <Lbl t="Duration"><select aria-label="Duration" value={f.duration} onChange={e=>edit("duration",e.target.value)} style={sS}><option value="">Automatic (30-45 min)</option>{[30,35,40,45].map(m=><option key={m} value={m}>{m} minutes</option>)}</select></Lbl>
+              <Lbl t="Extra time (accessibility)"><select aria-label="Extra time" value={f.extraPct} onChange={e=>edit("extraPct",e.target.value)} style={sS}>{[[0,"None"],[25,"+25%"],[50,"+50%"],[100,"+100%"]].map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></Lbl>
               <Lbl t="Link valid for"><select aria-label="Link valid for" value={f.expiresDays} onChange={e=>edit("expiresDays",e.target.value)} style={sS}>{[1,3,7,14,30].map(d=><option key={d} value={d}>{d} day{d>1?"s":""}</option>)}</select></Lbl>
             </div></details>
           <div style={{marginTop:14}}><Btn onClick={doPlan} disabled={busy==="plan"}>{busy==="plan"?"Planning...":"Plan the interview"}</Btn></div>
@@ -7119,12 +7154,40 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
               {q.type!=="mcq" && <div style={{fontSize:12,color:"var(--text-3)",whiteSpace:"pre-wrap"}}><b>Reference:</b> {q.answer}</div>}
             </div>))}</div>
           <div style={{marginTop:14,display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+            <Btn v="sec" onClick={saveTemplate} disabled={qs.length<5}>💾 Save as template</Btn>
             <Btn v="suc" onClick={create} disabled={busy==="create"||qs.length<5||mins>dur+5}>{busy==="create"?"Creating...":"Create one-time link"}</Btn>
             {qs.length<5 && <span style={{fontSize:12.5,color:"#b45309"}}>At least 5 questions are needed.</span>}
             {mins>dur+5 && <span style={{fontSize:12.5,color:"#b45309"}}>Too long for {dur} minutes. Remove a few questions.</span>}
           </div>
         </Card>}
       </div>}
+
+      {tab==="compare" && (()=>{
+        const done = (rows||[]).filter(r=>r.status==="submitted" && r.score!=null);
+        const roles = [...new Set(done.map(r=>r.role_title))]; const role = cmpRole && roles.includes(cmpRole) ? cmpRole : roles[0] || "";
+        const set = done.filter(r=>r.role_title===role).sort((a,b)=>b.score-a.score);
+        const skills = [...new Set(set.flatMap(r=>Object.keys((r.data&&r.data.bySkill)||{})))];
+        const decTone = {advance:"green",hold:"amber",reject:"red"};
+        return <Card>
+          {!roles.length ? <StEmpty icon="📊" title="Nothing to compare yet" text="Completed and scored interviews appear here, grouped by role."/> : <>
+          <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:10}}>
+            <select aria-label="Role to compare" value={role} onChange={e=>setCmpRole(e.target.value)} style={{...sS,width:"auto"}}>{roles.map(r=><option key={r} value={r}>{r} ({done.filter(x=>x.role_title===r).length})</option>)}</select>
+            <span style={{fontSize:12,color:"var(--text-3)"}}>Scores are comparable only when candidates had the same questions (use a saved question set). Candidates here: {set.length}.</span>
+          </div>
+          <div style={{overflowX:"auto"}}><table data-testid="cmp" style={{width:"100%",borderCollapse:"collapse"}}>
+            <thead><tr>{["#","Candidate","Level","Score",...skills,"Proctoring","Decision",""].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
+            <tbody>{set.map((r,i)=>(
+              <tr key={r.id}>
+                <td style={td}>{i+1}</td><td style={td}><b>{r.candidate_name}</b></td><td style={td}>{r.level} · {r.years}y</td>
+                <td style={td}><b>{r.score}%</b></td>
+                {skills.map(k=>{ const o=r.data.bySkill&&r.data.bySkill[k]; const pc=o?o.pct:null; return <td key={k} style={{...td,color:pc==null?"var(--text-3)":pc>=70?"#166534":pc>=50?"#92400e":"#991b1b",fontWeight:700}}>{pc==null?"-":pc+"%"}</td>; })}
+                <td style={td}>{ivProctorPill(r.data.proctor)}</td>
+                <td style={td}>{r.data.decision?<StPill tone={decTone[r.data.decision]}>{r.data.decision}</StPill>:<span style={{color:"var(--text-3)"}}>-</span>}</td>
+                <td style={td}><Btn v="sec" sm onClick={()=>setOpen(r.id)}>Open</Btn></td>
+              </tr>))}</tbody>
+          </table></div></>}
+        </Card>;
+      })()}
 
       {shown && <ModalWrap title="One-time interview link" onClose={()=>{ setShown(null); setMail(null); }}>
         <div style={{padding:"18px 28px 24px"}}>
@@ -7142,6 +7205,9 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
         <div style={{padding:"16px 28px 24px"}}>
           <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:12}}>{stat(cur.status,cur)}<StPill tone="blue">{cur.level} · {cur.years} yrs</StPill><StPill tone="grey">{cur.difficulty}</StPill><StPill tone="grey">{cur.duration_min} min</StPill>{cur.score!=null && <StPill tone={cur.score>=70?"green":cur.score>=50?"amber":"red"}>Score {cur.score}%</StPill>}{ivProctorPill(cur.data.proctor)}</div>
           {cur.data.reason && <div style={{fontSize:13,color:"#b91c1c",marginBottom:10}}>Reason: {cur.data.reason}</div>}
+          {(cur.data.retries>0) && <div style={{fontSize:12.5,color:"var(--text-2)",marginBottom:10,background:"#fffbeb",borderRadius:8,padding:"8px 12px"}}>🔁 Reopened {cur.data.retries} time(s). Earlier attempt(s): {(cur.data.priorAttempts||[]).map(a=>a.status+(a.reason?" ("+a.reason+")":"")+(a.proctor&&a.proctor.score!=null?", proctoring "+a.proctor.score:"")).join("; ")}</div>}
+          {cur.status==="invited" && <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:10,fontSize:12.5}}><b>Extra time:</b><select aria-label="Extra time for this interview" value={String(cur.data.extraPct||0)} onChange={e=>act("iv_extend", cur.id, {extraPct:Number(e.target.value)}, "Extra time set")} style={{...sS,width:"auto"}}>{[[0,"None"],[25,"+25%"],[50,"+50%"],[100,"+100%"]].map(([v,l])=><option key={v} value={v}>{l}</option>)}</select><span style={{color:"var(--text-3)"}}>can be changed until the candidate starts</span></div>}
+          {(cur.data.extraPct>0 && cur.status!=="invited") && <div style={{fontSize:12,color:"var(--text-3)",marginBottom:8}}>Extra time of {cur.data.extraPct}% was arranged.</div>}
           {cur.data.resume && <details style={{marginBottom:10}}><summary style={{cursor:"pointer",fontSize:12.5,fontWeight:700,color:"var(--text-2)"}}>Resume used for this interview</summary><div style={{fontSize:12,whiteSpace:"pre-wrap",color:"var(--text-2)",maxHeight:220,overflowY:"auto",marginTop:6,padding:"8px 10px",background:"var(--surface-2,#f6f7fb)",borderRadius:8}}>{cur.data.resume}</div></details>}
           {cur.data.confirmedName && <div style={{fontSize:12,color:"var(--text-3)",marginBottom:10}}>Name confirmed by the candidate: {cur.data.confirmedName}</div>}
           {cur.data.bySkill && <div style={{marginBottom:14}}><div style={{fontSize:12,fontWeight:700,color:"var(--text-3)",marginBottom:6}}>SCORE BY SKILL</div>
@@ -7162,6 +7228,12 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
                 <div style={{fontSize:12.5,marginTop:4,whiteSpace:"pre-wrap"}}><b>Answer:</b> {picked||<i style={{color:"var(--text-3)"}}>not answered</i>}</div>
                 <div style={{fontSize:12,color:"var(--text-3)",whiteSpace:"pre-wrap"}}><b>Reference:</b> {q.type==="mcq"?q.options["ABCD".indexOf(q.answer)]:q.answer}</div>
                 {p.comment && <div style={{fontSize:12,color:"var(--text-2)",marginTop:2}}>AI: {p.comment}</div>}
+                {p.overridden && <div style={{fontSize:12,color:"#92400e",marginTop:2}}>✏️ Adjusted by {p.overrideBy} from {p.aiScore>=1?"correct":p.aiScore>0?"partly correct":"incorrect"}{p.overrideNote?": "+p.overrideNote:""}</div>}
+                {cur.status==="submitted" && q.type!=="mcq" && <div style={{display:"flex",gap:6,alignItems:"center",marginTop:6,flexWrap:"wrap"}}>
+                  <span style={{fontSize:11.5,color:"var(--text-3)"}}>Adjust score:</span>
+                  {[[0,"Incorrect"],[0.5,"Partly"],[1,"Correct"]].map(([v,l])=><Btn key={v} v={p.score===v?"pri":"sec"} sm onClick={()=>act("iv_override", cur.id, {qid:q.id, score:v, note:ovNote[cur.id+q.id]||""}, "Score updated")}>{l}</Btn>)}
+                  <input aria-label={"Adjustment note "+(i+1)} value={ovNote[cur.id+q.id]||""} onChange={e=>setOvNote(n=>({...n,[cur.id+q.id]:e.target.value}))} placeholder="Reason (optional)" style={{...iS,width:180,padding:"4px 8px",fontSize:12}}/>
+                </div>}
               </div>; })}</div></div>}
           {["submitted","scoring_failed"].includes(cur.status) && <div style={{borderTop:"1px solid var(--border)",paddingTop:12}}>
             <div style={{fontSize:12,fontWeight:700,color:"var(--text-3)",marginBottom:6}}>YOUR DECISION</div>
@@ -7171,6 +7243,7 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
             <div style={{marginTop:10}}><Btn v="sec" sm onClick={()=>act("iv_rescore", cur.id, null, "Re-scored")}>Re-score</Btn></div>
           </div>}
           {cur.status==="in_progress" && <div style={{marginTop:8}}><Btn v="dan" sm onClick={()=>act("iv_cancel", cur.id, null, "Interview ended")}>End this interview</Btn></div>}
+          {["terminated","expired"].includes(cur.status) && (cur.data.retries||0)<2 && <div style={{marginTop:8}}><Btn v="sec" sm onClick={()=>{ setOpen(null); reopen(cur); }}>Allow retry (new link)</Btn></div>}
           <div style={{marginTop:14,textAlign:"right"}}><Btn v="dan" sm onClick={()=>remove(cur)}>Delete record</Btn></div>
         </div></ModalWrap>}
     </div>
@@ -7201,6 +7274,38 @@ async function ivReadResume(file) {
 }
 
 const IvShell = ({children}) => <div style={{minHeight:"100vh",background:"var(--bg, #f6f7fb)",display:"flex",alignItems:"center",justifyContent:"center",padding:20,boxSizing:"border-box"}}><div style={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:16,padding:"28px 32px",maxWidth:620,width:"100%",boxShadow:"var(--shadow-xl)"}}>{children}</div></div>;
+// Candidate equipment check: nothing is sent or recorded, it only tests this device before the real interview.
+function IvEquipCheck({onDone}) {
+  const vref = React.useRef(null); const streamRef = React.useRef(null);
+  const [st, setSt] = React.useState({cam:"checking", mic:"checking", model:"checking", face:"-"});
+  const fsOk = !!(document.documentElement.requestFullscreen);
+  const isChrome = /Chrome\//.test(navigator.userAgent) && !/Edg\//.test(navigator.userAgent) ? "Chrome" : /Edg\//.test(navigator.userAgent) ? "Edge" : "other";
+  React.useEffect(()=>{
+    let off = false, iv = null, lm = null;
+    (async()=>{
+      try { const ms = await navigator.mediaDevices.getUserMedia({audio:true}); ms.getTracks().forEach(t=>t.stop()); if(!off) setSt(x=>({...x,mic:"ok"})); } catch(e) { if(!off) setSt(x=>({...x,mic:"blocked"})); }
+      let stream = null;
+      try { stream = await navigator.mediaDevices.getUserMedia({video:{width:640,height:480,facingMode:"user"}, audio:false}); streamRef.current = stream; if(!off) { setSt(x=>({...x,cam:"ok"})); if(vref.current) { vref.current.srcObject = stream; vref.current.play && vref.current.play().catch(()=>{}); } } } catch(e) { if(!off) setSt(x=>({...x,cam:"blocked",model:"-"})); return; }
+      try { lm = await stLoadLandmarker(); if(!off) setSt(x=>({...x,model:"ok"})); } catch(e) { if(!off) setSt(x=>({...x,model:"fail"})); return; }
+      iv = setInterval(()=>{ const v = vref.current; if(!v || v.readyState<2) return; try { const r = stClassify(lm.detectForVideo(v, performance.now())); setSt(x=>({...x,face:r})); } catch(e) {} }, 400);
+    })();
+    return ()=>{ off = true; if(iv) clearInterval(iv); try { if(streamRef.current) streamRef.current.getTracks().forEach(t=>t.stop()); } catch(e) {} };
+  }, []);
+  const row = (label, ok, text) => <div style={{display:"flex",gap:8,fontSize:13,marginBottom:6}}><span>{ok===true?"✅":ok===false?"❌":"⏳"}</span><span><b>{label}:</b> {text}</span></div>;
+  const faceTxt = {ok:"your face is visible and centred",noface:"no face found: move into the light and face the screen",multi:"more than one face: be alone in the room",head:"turn your head towards the screen",gaze:"look at the screen","-":"waiting"}[st.face];
+  return <div data-testid="equip">
+    <div style={{fontSize:18,fontWeight:800,marginBottom:10}}>Equipment check</div>
+    <video ref={vref} muted playsInline style={{width:"100%",maxWidth:320,borderRadius:10,background:"#000",transform:"scaleX(-1)",display:"block",marginBottom:12}}/>
+    {row("Camera", st.cam==="ok"?true:st.cam==="blocked"?false:null, st.cam==="ok"?"working":st.cam==="blocked"?"blocked. Allow the camera for this site in your browser and retry":"checking")}
+    {row("Microphone", st.mic==="ok"?true:st.mic==="blocked"?false:null, st.mic==="ok"?"working (only needed if you want to answer by voice)":st.mic==="blocked"?"blocked. You can still type your answers":"checking")}
+    {row("Face analysis", st.model==="ok"?true:st.model==="fail"?false:null, st.model==="ok"?faceTxt:st.model==="fail"?"could not load on this device or network. The interview can still run, but your camera will not be analysed":"loading")}
+    {row("Full screen", fsOk, fsOk?"supported":"not supported on this browser, use a desktop browser")}
+    {row("Browser", isChrome!=="other", isChrome!=="other"?isChrome+" (recommended)":"Chrome or Edge on a desktop or laptop is recommended")}
+    <div style={{fontSize:12,color:"var(--text-3)",margin:"10px 0 14px"}}>Nothing from this check is recorded or sent anywhere. Close other apps and tabs now, because switching away during the interview ends it.</div>
+    <Btn onClick={onDone}>Done, back to the interview</Btn>
+  </div>;
+}
+
 // ---- Public page: opened from the candidate's one-time link (?interview=TOKEN). No portal sign-in. ----
 function CandidateInterview({token}) {
   const [cloud, setCloud] = React.useState(null);
@@ -7232,7 +7337,7 @@ function CandidateInterview({token}) {
     try {
       const d = await callAiFn(cloud, {mode:"iv_pub_start", token, name:name.trim(), consent:true, ua:navigator.userAgent});
       const sess = d.sess;
-      setRun({kind:"interview", title:d.roleTitle+" interview", attemptId:"iv", deadline:d.deadline, questions:d.questions, stream:prep.stream, lm:prep.lm, voice:prep.voice,
+      setRun({kind:"interview", title:d.roleTitle+" interview", attemptId:"iv", deadline:d.deadline, questions:d.questions, initialAnswers:d.answers||{}, stream:prep.stream, lm:prep.lm, voice:prep.voice,
         api:{ terminate:(reason, proctor, answers)=>callAiFn(cloud, {mode:"iv_pub_terminate", token, sess, reason, proctor, answers}), submit:(answers, proctor)=>callAiFn(cloud, {mode:"iv_pub_submit", token, sess, answers, proctor}) }});
     } catch(e) { stopStream(prep); setPrep(null); try{ if(document.fullscreenElement) document.exitFullscreen(); }catch(x){} setStep("info"); setInfo({valid:false, reason:/already been used|ended/i.test(e.message)?"used":"error", message:e.message}); }
   };
@@ -7252,11 +7357,14 @@ function CandidateInterview({token}) {
   return <IvShell>
     <div style={{fontSize:12,fontWeight:700,color:"var(--brand)",letterSpacing:.5}}>ONLINE INTERVIEW</div>
     <div style={{fontSize:22,fontWeight:800,margin:"2px 0 4px"}}>{info.roleTitle}</div>
-    <div style={{fontSize:13,color:"var(--text-3)",marginBottom:14}}>Hello {info.candidateName}. {info.questionCount} questions · {info.durationMin} minutes · single attempt.</div>
+    <div style={{fontSize:13,color:"var(--text-3)",marginBottom:14}}>Hello {info.candidateName}. {info.questionCount} questions · {info.durationMin} minutes · {info.resumed?"second attempt":"single attempt"}.</div>
     {step==="info" && <>
       <div style={{fontSize:13.5,color:"var(--text-2)",lineHeight:1.6,marginBottom:14}}>This interview is proctored. You need a desktop or laptop with <b>Chrome</b>, a working <b>camera</b> and microphone, and a quiet room where you will not be disturbed. It uses your <b>one-time link</b>, so you cannot restart it.</div>
-      <Btn onClick={()=>setStep("terms")}>Read the terms and continue</Btn>
+      {info.resumed && <div style={{background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:10,padding:"10px 14px",fontSize:13,marginBottom:14}}>You have been given another try. Your earlier answers are restored and you have <b>{info.durationMin} minutes</b> left. The same rules apply.</div>}
+      {info.extraPct>0 && !info.resumed && <div style={{background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:10,padding:"10px 14px",fontSize:13,marginBottom:14}}>Extra time of {info.extraPct}% has been arranged for you.</div>}
+      <div style={{display:"flex",gap:10,flexWrap:"wrap"}}><Btn onClick={()=>setStep("terms")}>Read the terms and continue</Btn><Btn v="sec" onClick={()=>setStep("check")}>Test my camera and microphone first</Btn></div>
     </>}
+    {step==="check" && <IvEquipCheck onDone={()=>setStep("info")}/>}
     {step==="terms" && <>
       <ol style={{fontSize:13,color:"var(--text-2)",paddingLeft:20,margin:0}}>
         <li style={li}>The interview has <b>{info.questionCount} questions</b> ({info.hasWritten?"including written"+(info.hasCode?" and coding":"")+" answers":"multiple choice"}) and a time limit of <b>{info.durationMin} minutes</b>. The timer starts when you enter full screen.</li>
@@ -7266,6 +7374,7 @@ function CandidateInterview({token}) {
         <li style={li}><b>Camera proctoring.</b> Your face, head position and eye direction are analysed <b>on your device</b>. <b>No video or images are recorded or uploaded</b>; only counts of events (for example "looked away", "more than one face") and a score are saved. Turning the camera off ends the interview. The analysis is approximate and is only an indicator for the interviewer.</li>
         {stSpeechCtor() && <li style={li}><b>Voice answers (optional).</b> Your browser converts speech to text (in Chrome the audio is sent to Google). The audio is not recorded or stored here; only the text you submit is saved.</li>}
         <li style={li}>Written answers are scored by AI against a reference, and the hiring team reviews the results, your answers and the proctoring summary.</li>
+        <li style={li}>If you need an adjustment (for example extra time or a different way to answer), tell the person who invited you <b>before</b> you start. Once the interview starts it cannot be changed.</li>
       </ol>
       <div style={{margin:"14px 0 8px"}}><Lbl t="Your full name (to confirm it is you)"><input aria-label="Your full name" value={name} onChange={e=>setName(e.target.value)} style={iS}/></Lbl></div>
       <label style={{display:"flex",gap:9,alignItems:"flex-start",margin:"10px 0 14px",fontSize:13,cursor:"pointer"}}><input type="checkbox" checked={ok} onChange={e=>setOk(e.target.checked)} style={{marginTop:3}}/><span>I have read and accept these terms and I understand that leaving the interview will end it.</span></label>
