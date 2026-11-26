@@ -7056,7 +7056,17 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
     try { const d = await callAiFn(cloud, {mode, id, ...(extra||{})}); if(okMsg) toast(okMsg); load(); return d; } catch(e) { toast(e.message,"err"); }
   };
   const relink = async r => { const d = await act("iv_relink", r.id); if(d) { setMail(null); const sh={...d, name:r.candidate_name, email:(r.candidate_email||"").trim(), role:r.role_title, dur:r.duration_min}; setShown(sh); if(sh.email) emailLink(sh); } };
-  const rescore = async id => { const d = await act("iv_rescore", id); if(d) toast(d.status==="scoring_failed" ? "Scoring failed again. "+(d.reason||"") : "Scored", d.status==="scoring_failed"?"err":undefined); };
+  const [rsBusy, setRsBusy] = React.useState({});
+  const [rsErr, setRsErr] = React.useState("");
+  const rescore = async id => {
+    setRsErr(""); setRsBusy(b=>({...b,[id]:true})); toast("Scoring started. This can take up to 2 minutes.");
+    try {
+      const d = await Promise.race([callAiFn(cloud, {mode:"iv_rescore", id}), new Promise((_,rej)=>setTimeout(()=>rej(new Error("No answer from the server after 2.5 minutes. The ai function may be an old version or the AI is not responding. Redeploy the ai function and check its logs.")),150000))]);
+      if(d.status==="scoring_failed") setRsErr("Scoring failed again. "+(d.reason||"Open the interview to see the reason."));
+      else toast("Scored");
+    } catch(e) { setRsErr("Re-score failed: "+e.message); }
+    setRsBusy(b=>{ const n={...b}; delete n[id]; return n; }); load();
+  };
   const reopen = async r => {
     const left = r.data && r.data.leftMin > 0 ? r.data.leftMin : r.duration_min;
     if(!window.confirm("Allow "+r.candidate_name+" one more try?\n\nThey get a NEW one-time link (the old one stops working), keep their earlier answers and have "+left+" minutes. The first attempt stays on record. Use this for lost connections, not to give a second chance after a proctoring violation unless you decide to.")) return;
@@ -7084,6 +7094,7 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
           <StStat icon="✅" label="Completed" value={counts.done}/>
         </div>
         <Card>
+          {rsErr && <div role="alert" data-testid="rs-err" style={{background:"#fef2f2",border:"1px solid #fecaca",color:"#991b1b",borderRadius:10,padding:"10px 14px",fontSize:13,marginBottom:12,display:"flex",justifyContent:"space-between",gap:10}}><span>{rsErr}</span><button onClick={()=>setRsErr("")} aria-label="Dismiss" style={{border:"none",background:"none",cursor:"pointer",color:"#991b1b",fontSize:16}}>×</button></div>}
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,gap:10,flexWrap:"wrap"}}>
             <select value={fStatus} onChange={e=>setFStatus(e.target.value)} aria-label="Filter by status" style={{...sS,width:"auto"}}><option value="">All statuses</option>{Object.keys(IV_STATUS).map(k=><option key={k} value={k}>{IV_STATUS[k][0]}</option>)}</select>
             <Btn onClick={()=>setTab("new")}>➕ New interview</Btn>
@@ -7101,7 +7112,7 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
                   <td style={td}>{r.score==null?"-":<b>{r.score}%</b>}</td>
                   <td style={td}>{ivProctorPill(r.data&&r.data.proctor)}</td>
                   <td style={td}>{new Date(r.created_at).toLocaleDateString()}{isAdmin && <div style={{fontSize:11,color:"var(--text-3)"}}>{r.created_by_name}</div>}</td>
-                  <td style={{...td,whiteSpace:"nowrap"}}><Btn v="sec" sm onClick={()=>setOpen(r.id)}>Open</Btn>{(r.status==="scoring_failed"||stale(r)) && <> <Btn v="sec" sm onClick={()=>rescore(r.id)}>Re-score</Btn></>}{["terminated","expired"].includes(r.status) && (r.data&&r.data.retries||0)<2 && <> <Btn v="sec" sm onClick={()=>reopen(r)}>Allow retry</Btn></>}{r.status==="invited" && <> <Btn v="sec" sm onClick={()=>relink(r)}>New link</Btn> <Btn v="dan" sm onClick={()=>act("iv_cancel", r.id, null, "Interview cancelled")}>Cancel</Btn></>}</td>
+                  <td style={{...td,whiteSpace:"nowrap"}}><Btn v="sec" sm onClick={()=>setOpen(r.id)}>Open</Btn>{(r.status==="scoring_failed"||stale(r)) && <> <Btn v="sec" sm onClick={()=>rescore(r.id)} disabled={!!rsBusy[r.id]}>{rsBusy[r.id]?"Scoring...":"Re-score"}</Btn></>}{["terminated","expired"].includes(r.status) && (r.data&&r.data.retries||0)<2 && <> <Btn v="sec" sm onClick={()=>reopen(r)}>Allow retry</Btn></>}{r.status==="invited" && <> <Btn v="sec" sm onClick={()=>relink(r)}>New link</Btn> <Btn v="dan" sm onClick={()=>act("iv_cancel", r.id, null, "Interview cancelled")}>Cancel</Btn></>}</td>
                 </tr>))}</tbody>
             </table></div>)}
         </Card>
@@ -7267,7 +7278,7 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
             <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:8}}>{[["advance","Advance"],["hold","Hold"],["reject","Reject"],["","Clear"]].map(([k,l])=><Btn key={k||"c"} v={(cur.data.decision||"")===k?"pri":"sec"} sm onClick={()=>act("iv_decide", cur.id, {decision:k, notes:notes[cur.id]!=null?notes[cur.id]:(cur.data.notes||"")}, "Saved")}>{l}</Btn>)}</div>
             <textarea aria-label="Decision notes" rows={2} value={notes[cur.id]!=null?notes[cur.id]:(cur.data.notes||"")} onChange={e=>setNotes(n=>({...n,[cur.id]:e.target.value}))} onBlur={()=>{ if(notes[cur.id]!=null) act("iv_decide", cur.id, {decision:cur.data.decision||"", notes:notes[cur.id]}); }} placeholder="Notes for the hiring team" style={{...iS,width:"100%",boxSizing:"border-box"}}/>
             <div style={{fontSize:11.5,color:"var(--text-3)",marginTop:4}}>Scores and the AI brief support your judgement. The hiring decision is yours.</div>
-            <div style={{marginTop:10}}><Btn v="sec" sm onClick={()=>rescore(cur.id)}>Re-score</Btn>{cur.data.reason && cur.status==="scoring_failed" && <span style={{fontSize:12,color:"#b91c1c",marginLeft:10}}>Last error: {cur.data.reason}</span>}</div>
+            <div style={{marginTop:10}}><Btn v="sec" sm onClick={()=>rescore(cur.id)} disabled={!!rsBusy[cur.id]}>{rsBusy[cur.id]?"Scoring...":"Re-score"}</Btn>{cur.data.reason && cur.status==="scoring_failed" && <span style={{fontSize:12,color:"#b91c1c",marginLeft:10}}>Last error: {cur.data.reason}</span>}</div>
           </div>}
           {cur.status==="in_progress" && <div style={{marginTop:8}}><Btn v="dan" sm onClick={()=>act("iv_cancel", cur.id, null, "Interview ended")}>End this interview</Btn></div>}
           {["terminated","expired"].includes(cur.status) && (cur.data.retries||0)<2 && <div style={{marginTop:8}}><Btn v="sec" sm onClick={()=>{ setOpen(null); reopen(cur); }}>Allow retry (new link)</Btn></div>}
