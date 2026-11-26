@@ -5595,7 +5595,7 @@ const ImprovementMatrix = ({items}) => {
 };
 
 // ===== Audit log: who changed what =====
-const AUDIT_ENT = {users:"member", teams:"team", acts:"activity", mis:"incident", logs:"time log", leaves:"leave", settings:"setting"};
+const AUDIT_ENT = {users:"member", teams:"team", acts:"activity", mis:"incident", logs:"time log", leaves:"leave", rplan:"resource plan", settings:"setting"};
 const AUDIT_MASK = new Set(["password"]);
 const AUDIT_SKIP = new Set(["lastLogin"]);
 const auditLabel = (name, it) => name==="acts" ? (it.name||it.id) : name==="mis" ? ((it.incidentNo||it.id)+" "+(it.name||"")).trim() : name==="logs" ? ((it.member||"")+" · "+(it.activity||it.actId||"")+" · "+(it.mins||0)+"m") : name==="leaves" ? ((it.member||"")+" · "+(it.type||"")+" · "+(it.from||"")+(it.to&&it.to!==it.from?" to "+it.to:"")) : name==="settings" ? it.key : (it.name||it.id||"");
@@ -6911,6 +6911,438 @@ function SkillTestsPage({cloud, user, users, isAdmin, isMgr, toast}) {
         </div></div>}
       {terms && <StTerms cfg={cfg} skill={terms} onCancel={()=>setTerms(null)} onAccept={()=>begin(terms)}/>}
       {run && <StRunner cloud={cloud} run={run} cfg={cfg} onClose={closeRun}/>}
+    </div>
+  );
+}
+
+// ===== Resource planning engine (pure functions, no React). Uses lvDate / lvStr from the leave code. =====
+const RP_LEVELS = {primary:"Primary", secondary:"Secondary", backup:"Backup"};
+const RP_LEVEL_W = {primary:3, secondary:2, backup:1.2};
+const RP_CRIT_W = {critical:3, high:2, normal:1};
+const rpWorkdayList = (from, to) => { const out = []; if(!from || !to || to < from) return out; const b = lvDate(to); for(let d = lvDate(from); d <= b; d.setUTCDate(d.getUTCDate()+1)) { const w = d.getUTCDay(); if(w !== 0 && w !== 6) out.push(lvStr(d)); } return out; };
+const rpAddDays = (iso, n) => { const d = lvDate(iso); d.setUTCDate(d.getUTCDate()+n); return lvStr(d); };
+const rpLevelOf = (ms, uid, skill) => { const e = ((ms||{})[uid]||[]).find(x=>x.skill===skill); return e ? e : null; };
+
+// Who is off on which day. Half-day leave is ignored for cover planning (the person is still working that day). Public holidays are handled per team.
+function rpAvailability(leaves, users) {
+  const off = {}, hol = {};   // off[userId][date] = true ; hol[team][date] = true
+  const teamOf = {}; users.forEach(u=>{ teamOf[u.id] = u.team; });
+  (leaves||[]).forEach(l=>{
+    if(l.half) return;
+    const days = rpWorkdayList(l.from, l.to);
+    if(l.type === "Public Holiday" || l.teamWide) { const t = l.team; days.forEach(d=>{ if(!t || t==="All teams" || t==="All") users.forEach(u=>{ (hol[u.team]=hol[u.team]||{})[d] = true; }); else (hol[t]=hol[t]||{})[d] = true; }); return; }
+    if(!l.userId) return; days.forEach(d=>{ (off[l.userId]=off[l.userId]||{})[d] = true; });
+  });
+  return {off, hol, isOff:(uid,d)=>!!(off[uid]&&off[uid][d]) || !!(hol[teamOf[uid]]&&hol[teamOf[uid]][d])};
+}
+
+// Free capacity (0-1) of a person across projects: explicit allocations, otherwise an even split across the projects they are staffed on
+function rpFreeCapacity(projects, uid) {
+  const mine = []; projects.forEach(p=>(p.staff||[]).forEach(s=>{ if(s.userId===uid) mine.push(Number(s.allocation)||0); }));
+  if(!mine.length) return 1;
+  const explicit = mine.filter(x=>x>0), implicit = mine.length - explicit.length;
+  const used = explicit.reduce((a,b)=>a+b,0) + implicit * (explicit.length ? Math.max(10,(100-explicit.reduce((a,b)=>a+b,0))/Math.max(1,implicit)) : 100/mine.length);
+  return Math.max(0, Math.min(1, (100-used)/100));
+}
+
+function rpScore(c, ctx) {   // c = {userId}; ctx = {project, skill, ms, users, projects, loadDays, prevPick, opts}
+  const u = ctx.userById[c.userId]; const e = rpLevelOf(ctx.ms, c.userId, ctx.skill);
+  const f = {};
+  f.level = RP_LEVEL_W[e.level] || 1;
+  f.experience = Math.min(10, Number(e.years)||0) / 10 * 2;
+  const staff = (ctx.project.staff||[]).find(s=>s.userId===c.userId);
+  f.onProject = staff ? 2 : 0;
+  f.sameTeam = u && u.team === ctx.project.team ? 1.5 : 0;
+  f.roleFit = staff && staff.role && String(staff.role).toLowerCase().includes(String(ctx.skill).toLowerCase()) ? 0.8 : 0;
+  f.freeTime = rpFreeCapacity(ctx.projects, c.userId) * 1.5;
+  f.loadBalance = -1.2 * Math.min(4, (ctx.loadDays[c.userId]||0) / 5);
+  f.continuity = ctx.prevPick === c.userId ? 1.2 : 0;
+  const total = Object.values(f).reduce((a,b)=>a+b,0);
+  return {score:Math.round(total*100)/100, factors:f};
+}
+
+// Main entry. projects: [{id,name,client,team,status,start,end,criticality,requirements:[{skill,need}],staff:[{userId,role,skill,allocation}]}]
+function rpBuildPlan({from, to, projects, memberSkills, users, leaves, opts}) {
+  opts = {maxCovers:1, crossTeam:true, ...(opts||{})};
+  const activeUsers = users.filter(u=>u.status!=="Inactive");
+  const userById = {}; activeUsers.forEach(u=>{ userById[u.id] = u; });
+  const av = rpAvailability(leaves, activeUsers);
+  const live = projects.filter(p=>p.status==="Active" || !p.status);
+  const days = rpWorkdayList(from, to);
+  const busy = {}, loadDays = {};     // busy[uid][date] = covers that day; loadDays[uid] = total cover days
+  const segments = [], gaps = [], unstaffed = [];
+  // 1. slots: per project / skill / day, how many people are missing
+  const slotsByReq = [];
+  live.forEach(p=>{
+    const pDays = days.filter(d=>(!p.start||d>=p.start) && (!p.end||d<=p.end) && !(av.hol[p.team]&&av.hol[p.team][d]));
+    (p.requirements||[]).forEach(rq=>{
+      const need = Math.max(1, Number(rq.need)||1);
+      const owners = (p.staff||[]).filter(s=>s.skill===rq.skill && userById[s.userId]).map(s=>s.userId);
+      if(!owners.length) { unstaffed.push({projectId:p.id, skill:rq.skill, need, severity:p.criticality==="critical"?"critical":"warning"}); }
+      const rows = [];
+      pDays.forEach(d=>{
+        const absent = owners.filter(o=>av.isOff(o,d));
+        const here = owners.length - absent.length;
+        const deficit = Math.max(0, need - here);
+        if(deficit>0 && owners.length) rows.push({d, absent, deficit, here});
+      });
+      slotsByReq.push({p, rq, need, owners, rows});
+    });
+  });
+  // 2. segments: runs of consecutive working days with the same people absent
+  const segs = [];
+  slotsByReq.forEach(({p, rq, need, owners, rows})=>{
+    let cur = null;
+    rows.forEach(r=>{
+      const key = r.absent.slice().sort().join(",")+"|"+r.deficit;
+      const consecutive = cur && days.indexOf(r.d) === days.indexOf(cur.dates[cur.dates.length-1]) + 1;
+      if(cur && cur.key===key && consecutive) cur.dates.push(r.d);
+      else { cur = {key, p, rq, need, owners, absent:r.absent, deficit:r.deficit, dates:[r.d]}; segs.push(cur); }
+    });
+  });
+  // 3. candidates per segment, then the most constrained / most critical segments choose first
+  const poolFor = (seg, dates) => activeUsers.filter(u=>{
+    if(seg.owners.includes(u.id)) return false;
+    if(!rpLevelOf(memberSkills, u.id, seg.rq.skill)) return false;
+    if(!opts.crossTeam && u.team !== seg.p.team) return false;
+    return dates.every(d=>!av.isOff(u.id,d));
+  });
+  segs.forEach(s=>{ s.pool = poolFor(s, s.dates); });
+  segs.sort((a,b)=> (RP_CRIT_W[b.p.criticality]||1)-(RP_CRIT_W[a.p.criticality]||1) || a.pool.length-b.pool.length || a.dates[0].localeCompare(b.dates[0]));
+  let n = 0;
+  segs.forEach(s=>{
+    const mk = (uid, dates, prev) => rpScore({userId:uid}, {project:s.p, skill:s.rq.skill, ms:memberSkills, userById, projects:live, loadDays, prevPick:prev, opts});
+    const free = (uid, dates) => dates.every(d=>((busy[uid]||{})[d]||0) < opts.maxCovers);
+    const ranked = (dates, prev) => poolFor(s, dates).filter(u=>free(u.id, dates)).map(u=>({userId:u.id, ...mk(u.id, dates, prev), name:u.name})).sort((a,b)=>b.score-a.score);
+    const mark = (uid, dates) => dates.forEach(d=>{ (busy[uid]=busy[uid]||{})[d] = ((busy[uid]||{})[d]||0)+1; loadDays[uid] = (loadDays[uid]||0)+1; });
+    const need = s.deficit; const picks = [];   // one entry per cover; a segment with deficit 2 needs two covers
+    let remaining = s.dates.slice(); let covered = [];
+    for(let k=0;k<need;k++) {
+      const alts = ranked(s.dates, null);
+      if(alts.length) { const top = alts[0]; mark(top.userId, s.dates); picks.push({userId:top.userId, dates:s.dates.slice(), score:top.score, factors:top.factors, alternatives:alts.slice(1,6).map(a=>({userId:a.userId, score:a.score}))}); }
+      else {   // nobody can take the whole stretch: cover day by day with whoever is free, keeping the same person where possible
+        let prev = null; const byUser = {};
+        s.dates.forEach(d=>{ const a = ranked([d], prev); if(a.length) { const t = a[0]; mark(t.userId, [d]); prev = t.userId; (byUser[t.userId]=byUser[t.userId]||{userId:t.userId, dates:[], score:0, factors:t.factors, n:0}); byUser[t.userId].dates.push(d); byUser[t.userId].score += t.score; byUser[t.userId].n++; } else prev = null; });
+        Object.values(byUser).forEach(b=>picks.push({userId:b.userId, dates:b.dates, score:Math.round(b.score/b.n*100)/100, factors:b.factors, alternatives:[], partial:true}));
+      }
+    }
+    // days of this segment that still have fewer covers than the deficit
+    const cnt = {}; picks.forEach(pk=>pk.dates.forEach(d=>{ cnt[d] = (cnt[d]||0)+1; }));
+    const open = s.dates.filter(d=>(cnt[d]||0) < need);
+    n++;
+    segments.push({id:"SEG-"+n, projectId:s.p.id, skill:s.rq.skill, absent:s.absent, deficit:need, from:s.dates[0], to:s.dates[s.dates.length-1], dates:s.dates, picks, open, criticality:s.p.criticality||"normal"});
+    if(open.length) {
+      const holders = activeUsers.some(u=>!s.owners.includes(u.id) && rpLevelOf(memberSkills,u.id,s.rq.skill));
+      const reason = holders ? "Everyone else with this skill is on leave or already covering another project" : "Nobody else has this skill";
+      gaps.push({id:"GAP-"+n, projectId:s.p.id, skill:s.rq.skill, absent:s.absent, from:open[0], to:open[open.length-1], dates:open, reason, severity:(s.p.criticality==="critical" || s.owners.length - s.absent.length === 0) ? "critical" : "warning", noOneHasSkill:s.pool.length===0 && !activeUsers.some(u=>!s.owners.includes(u.id) && rpLevelOf(memberSkills,u.id,s.rq.skill))});
+    }
+  });
+  segments.sort((a,b)=>a.from.localeCompare(b.from) || a.projectId.localeCompare(b.projectId));
+  gaps.sort((a,b)=>(a.severity==="critical"?0:1)-(b.severity==="critical"?0:1) || a.from.localeCompare(b.from));
+  const needDays = segments.reduce((s,x)=>s+x.dates.length*x.deficit,0);
+  const openDays = gaps.reduce((s,g)=>s+g.dates.length,0);
+  return {days, segments, gaps, unstaffed, load:loadDays, stats:{needDays, openDays, coveredDays:needDays-openDays, absences:segments.length, pct:needDays?Math.round((needDays-openDays)/needDays*100):100}};
+}
+
+// Skill matrix summary and single points of failure
+function rpSkillDepth(skills, memberSkills, users, projects) {
+  const act = users.filter(u=>u.status!=="Inactive");
+  return skills.map(sk=>{
+    const lv = {primary:[], secondary:[], backup:[]};
+    act.forEach(u=>{ const e = rpLevelOf(memberSkills, u.id, sk); if(e && lv[e.level]) lv[e.level].push(u.id); });
+    const reqs = []; projects.filter(p=>p.status==="Active"||!p.status).forEach(p=>(p.requirements||[]).forEach(r=>{ if(r.skill===sk) reqs.push({p, need:Math.max(1,Number(r.need)||1)}); }));
+    const demand = reqs.reduce((s,r)=>s+r.need*(RP_CRIT_W[r.p.criticality]||1),0);
+    const total = lv.primary.length+lv.secondary.length+lv.backup.length;
+    const owners = new Set(); reqs.forEach(r=>(r.p.staff||[]).forEach(s=>{ if(s.skill===sk) owners.add(s.userId); }));
+    const spare = [...lv.primary, ...lv.secondary, ...lv.backup].filter(id=>!owners.has(id)).length;   // people with the skill who are not already the owner somewhere
+    return {skill:sk, ...lv, total, projects:reqs.length, demand, owners:owners.size, spare, risk: reqs.length && spare===0 ? "none" : reqs.length && spare===1 ? "thin" : "ok"};
+  });
+}
+
+// Who to train for which skill. Deterministic ranking; the AI only explains and re-orders it.
+function rpTrainingPlan({skills, memberSkills, users, projects, plan}) {
+  const act = users.filter(u=>u.status!=="Inactive" && u.team);
+  const depth = rpSkillDepth(skills, memberSkills, users, projects);
+  const gapDays = {}; ((plan&&plan.gaps)||[]).forEach(g=>{ gapDays[g.skill] = (gapDays[g.skill]||0)+g.dates.length; });
+  const out = []; const trainCount = {};
+  depth.filter(d=>d.projects>0).forEach(d=>{
+    const need = d.risk==="none" ? 2 : d.risk==="thin" ? 1 : (gapDays[d.skill] ? 1 : 0);
+    if(!need) return;
+    const teams = [...new Set(projects.filter(p=>(p.requirements||[]).some(r=>r.skill===d.skill)).map(p=>p.team))];
+    const cands = act.filter(u=>{ const e = rpLevelOf(memberSkills,u.id,d.skill); return !e || e.level==="backup"; }).map(u=>{
+      const e = rpLevelOf(memberSkills,u.id,d.skill); const mine = memberSkills[u.id]||[];
+      const bestYears = mine.reduce((m,x)=>Math.max(m,Number(x.years)||0),0);
+      const f = {upgrade: e ? 1.5 : 0, sameTeam: teams.includes(u.team) ? 1.5 : 0, experience: Math.min(10,bestYears)/10*1.5, freeTime: rpFreeCapacity(projects,u.id)*1.5, alreadyTraining: -1.5*(trainCount[u.id]||0), breadth: Math.min(3,mine.length)*0.2};
+      return {userId:u.id, name:u.name, team:u.team, from:e?"Backup":"None", to:"Secondary", score:Math.round(Object.values(f).reduce((a,b)=>a+b,0)*100)/100, factors:f};
+    }).sort((a,b)=>b.score-a.score).slice(0, need+1);
+    cands.slice(0,need).forEach(c=>{ trainCount[c.userId] = (trainCount[c.userId]||0)+1; });
+    out.push({skill:d.skill, priority:Math.round((d.demand*(d.risk==="none"?3:d.risk==="thin"?2:1) + (gapDays[d.skill]||0)*2)*10)/10, risk:d.risk, reason:(d.risk==="none"?"Nobody outside the current owners has this skill":d.risk==="thin"?"Only one person besides the owners has this skill":"Gaps appeared in the leave plan")+(gapDays[d.skill]?" ("+gapDays[d.skill]+" uncovered day"+(gapDays[d.skill]===1?"":"s")+" in the plan)":""), projects:d.projects, candidates:cands, need});
+  });
+  return out.sort((a,b)=>b.priority-a.priority);
+}
+
+// ===== Resource planning page (Operations): client projects, skills, leave cover, gaps, training =====
+const rpToday = () => lvStr(new Date());
+const rpKey = s => s.projectId+"|"+s.skill+"|"+s.from+"|"+s.to;
+const rpFmt = d => { const x = lvDate(d); return x.getUTCDate()+" "+["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][x.getUTCMonth()]; };
+const rpRange = (a,b) => a===b ? rpFmt(a) : rpFmt(a)+" – "+rpFmt(b);
+const rpNewId = p => p+"-"+Date.now().toString(36)+Math.random().toString(36).slice(2,5);
+const RP_LV_TONE = {primary:"green", secondary:"blue", backup:"grey"};
+
+function ResourcePlanningPage({items, setItems, users, leaves, cloud, user, isAdmin, toast}) {
+  const [tab, setTab] = React.useState("plan");
+  const projects = items.filter(i=>i.kind==="project");
+  const skills = ((items.find(i=>i.id==="skills")||{}).list)||[];
+  const mskills = {}; items.filter(i=>i.kind==="mskill").forEach(i=>{ mskills[i.userId] = i.list||[]; });
+  const published = items.find(i=>i.id==="plan");
+  const people = users.filter(u=>u.status!=="Inactive");
+  const nameOf = id => (users.find(u=>u.id===id)||{}).name || id;
+  const projName = id => (projects.find(p=>p.id===id)||{}).name || id;
+  const saveItem = it => setItems(a=>a.some(x=>x.id===it.id) ? a.map(x=>x.id===it.id?it:x) : [...a, it]);
+  const setSkills = list => saveItem({id:"skills", kind:"skills", list});
+  const setUserSkills = (uid, list) => setItems(a=>{ const id = "ms-"+uid; const rest = a.filter(x=>x.id!==id); return list.length ? [...rest, {id, kind:"mskill", userId:uid, list}] : rest; });
+
+  const [from, setFrom] = React.useState(rpToday());
+  const [to, setTo] = React.useState(lvStr(new Date(Date.now()+28*86400000)));
+  const [cross, setCross] = React.useState(true);
+  const [ov, setOv] = React.useState({});            // manual overrides: segment key -> userId
+  const plan = React.useMemo(()=>rpBuildPlan({from, to, projects, memberSkills:mskills, users, leaves, opts:{crossTeam:cross}}), [items, users, leaves, from, to, cross]);
+  // effective picks after manual overrides (an override is only honoured when the person still holds the skill and is free)
+  const eff = React.useMemo(()=>{
+    const av = rpAvailability(leaves, people);
+    const busy = {}; plan.segments.forEach(s=>{ if(ov[rpKey(s)]) return; s.picks.forEach(pk=>pk.dates.forEach(d=>{ (busy[pk.userId]=busy[pk.userId]||{})[d]=true; })); });
+    return plan.segments.map(s=>{
+      const o = ov[rpKey(s)];
+      if(o && rpLevelOf(mskills, o, s.skill) && s.dates.every(d=>!av.isOff(o,d) && !(busy[o]&&busy[o][d]))) {
+        s.dates.forEach(d=>{ (busy[o]=busy[o]||{})[d]=true; });
+        return {...s, picks:[{userId:o, dates:s.dates, score:null, manual:true, factors:{}}], open:[]};
+      }
+      return s;
+    });
+  }, [plan, ov]);
+  const effGaps = plan.gaps.filter(g=>{ const s = eff.find(x=>x.projectId===g.projectId && x.skill===g.skill && x.from<=g.from && x.to>=g.to); return !s || s.open.length>0; });
+  const needDays = plan.stats.needDays, openDays = effGaps.reduce((a,g)=>a+g.dates.length,0);
+  const pct = needDays ? Math.round((needDays-openDays)/needDays*100) : 100;
+
+  // ---- AI optimise ----
+  const [ai, setAi] = React.useState({busy:false, err:"", res:null});
+  const refs = {}; const back = {}; people.forEach((u,i)=>{ refs[u.id] = "P"+(i+1); back["P"+(i+1)] = u.id; });
+  const runAssign = async () => {
+    setAi({busy:true, err:"", res:null});
+    try {
+      const snap = {period:{from,to},
+        projects:projects.filter(p=>p.status!=="Closed").map(p=>({id:p.id, name:p.name, criticality:p.criticality||"normal", team:p.team||"", requirements:(p.requirements||[]).map(r=>({skill:r.skill,need:r.need})), staff:(p.staff||[]).map(s=>({person:refs[s.userId], role:String(s.role||"").slice(0,80), skill:s.skill}))})),
+        people:people.map(u=>({ref:refs[u.id], team:u.team||"", skills:(mskills[u.id]||[]).map(x=>({skill:x.skill, level:x.level, years:x.years}))})),
+        segments:eff.map(s=>({id:rpKey(s), projectId:s.projectId, skill:s.skill, from:s.from, to:s.to, absent:s.absent.map(a=>refs[a]), picks:s.picks.map(p=>({person:refs[p.userId], score:p.score}))})),
+        gaps:effGaps.map(g=>({id:g.projectId+"|"+g.skill+"|"+g.from, projectId:g.projectId, skill:g.skill, from:g.from, to:g.to, reason:g.reason}))};
+      const d = await callAiFn(cloud, {mode:"rp_assign", snapshot:snap});
+      let j; try { j = parseAiJson(d.text); } catch(e) { throw new Error("The AI reply could not be read. Try again."); }
+      const av = rpAvailability(leaves, people);
+      const changes = (Array.isArray(j.changes)?j.changes:[]).map(c=>{
+        const s = eff.find(x=>rpKey(x)===c.segmentId); const uid = back[c.personRef];
+        if(!s || !uid || !rpLevelOf(mskills, uid, s.skill)) return null;
+        if(s.picks.length===1 && s.picks[0].userId===uid) return null;
+        if(!s.dates.every(d=>!av.isOff(uid,d))) return null;
+        const clash = eff.some(x=>x!==s && x.picks.some(pk=>pk.userId===uid && pk.dates.some(d=>s.dates.includes(d))));
+        if(clash) return null;
+        return {key:c.segmentId, userId:uid, why:String(c.why||"").slice(0,240), seg:s};
+      }).filter(Boolean);
+      setAi({busy:false, err:"", res:{summary:String(j.summary||"").slice(0,500), changes, risks:(Array.isArray(j.risks)?j.risks:[]).slice(0,5).map(x=>String(x).slice(0,200)), gapAdvice:(Array.isArray(j.gapAdvice)?j.gapAdvice:[]).slice(0,10).map(x=>({id:String(x.gapId||""), advice:String(x.advice||"").slice(0,240)})), model:d.model||""}});
+    } catch(e) { setAi({busy:false, err:e.message||String(e), res:null}); }
+  };
+  const applyChange = c => { setOv(o=>({...o, [c.key]:c.userId})); setAi(a=>({...a, res:{...a.res, changes:a.res.changes.filter(x=>x!==c)}})); toast("Assignment changed to "+nameOf(c.userId)); };
+
+  const publish = () => {
+    const rec = {id:"plan", kind:"plan", from, to, at:new Date().toISOString(), by:user.name, pct, openDays, needDays,
+      segments:eff.map(s=>({projectId:s.projectId, skill:s.skill, from:s.from, to:s.to, absent:s.absent, picks:s.picks.map(p=>({userId:p.userId, dates:p.dates, manual:!!p.manual}))})),
+      gaps:effGaps.map(g=>({projectId:g.projectId, skill:g.skill, from:g.from, to:g.to, reason:g.reason, severity:g.severity}))};
+    saveItem(rec); toast("Plan published ("+eff.length+" cover assignment"+(eff.length===1?"":"s")+", "+effGaps.length+" gap"+(effGaps.length===1?"":"s")+")");
+  };
+
+  // ---- projects modal ----
+  const [pm, setPm] = React.useState(null);
+  const blankP = {id:"", kind:"project", name:"", client:"", team:"", status:"Active", criticality:"normal", start:"", end:"", requirements:[], staff:[]};
+  const savePm = () => {
+    if(!pm.name.trim()) { toast("Project name is required","err"); return; }
+    if(pm.end && pm.start && pm.end<pm.start) { toast("End date is before the start date","err"); return; }
+    const rec = {...pm, id:pm.id||rpNewId("RPJ"), name:pm.name.trim(), requirements:pm.requirements.filter(r=>r.skill), staff:pm.staff.filter(s=>s.userId)};
+    saveItem(rec); setPm(null); toast("Project saved");
+  };
+  const delProject = p => { if(!window.confirm("Delete project "+p.name+"?")) return; setItems(a=>a.filter(x=>x.id!==p.id)); setPm(null); toast("Project deleted"); };
+
+  // ---- skills & matrix ----
+  const [newSkill, setNewSkill] = React.useState("");
+  const [fTeam, setFTeam] = React.useState("");
+  const teamsList = [...new Set(people.map(u=>u.team).filter(Boolean))].sort();
+  const addSkill = () => { const n = newSkill.trim(); if(!n) return; if(skills.some(x=>x.toLowerCase()===n.toLowerCase())) { toast("That skill already exists","err"); return; } setSkills([...skills, n]); setNewSkill(""); };
+  const rmSkill = sk => { if(!window.confirm("Remove skill "+sk+" from the list and from everyone's profile?")) return; setSkills(skills.filter(x=>x!==sk)); items.filter(i=>i.kind==="mskill").forEach(i=>setUserSkills(i.userId, i.list.filter(x=>x.skill!==sk))); };
+  const setCell = (uid, sk, level, years) => {
+    const cur = (mskills[uid]||[]).filter(x=>x.skill!==sk);
+    setUserSkills(uid, level ? [...cur, {skill:sk, level, years:Math.max(0,Math.min(40,Number(years)||0))}] : cur);
+  };
+  const depth = rpSkillDepth(skills, mskills, users, projects);
+
+  // ---- training ----
+  const training = React.useMemo(()=>rpTrainingPlan({skills, memberSkills:mskills, users, projects, plan:{gaps:effGaps}}), [items, users, plan]);
+  const [tr, setTr] = React.useState({busy:false, err:"", res:null});
+  const runTrain = async () => {
+    setTr({busy:true, err:"", res:null});
+    try {
+      const snap = {skills:depth.map(d=>({name:d.skill, primary:d.primary.length, secondary:d.secondary.length, backup:d.backup.length, projects:d.projects, risk:d.risk})),
+        people:people.map(u=>({ref:refs[u.id], team:u.team||"", skills:(mskills[u.id]||[]).map(x=>({skill:x.skill, level:x.level, years:x.years}))})),
+        candidates:training.map(t=>({skill:t.skill, reason:t.reason, ranked:t.candidates.map(c=>({person:refs[c.userId], from:c.from, score:c.score}))}))};
+      const d = await callAiFn(cloud, {mode:"rp_train", snapshot:snap});
+      let j; try { j = parseAiJson(d.text); } catch(e) { throw new Error("The AI reply could not be read. Try again."); }
+      const ok = new Set(training.flatMap(t=>t.candidates.map(c=>t.skill+"|"+c.userId)));
+      const list = (Array.isArray(j.training)?j.training:[]).map(x=>({skill:String(x.skill||""), userId:back[x.personRef], why:String(x.why||"").slice(0,260), effort:["low","medium","high"].includes(x.effort)?x.effort:"medium", weeks:Math.max(1,Math.min(26,Number(x.weeks)||4))})).filter(x=>x.userId && ok.has(x.skill+"|"+x.userId));
+      setTr({busy:false, err:"", res:{summary:String(j.summary||"").slice(0,500), list, model:d.model||""}});
+    } catch(e) { setTr({busy:false, err:e.message||String(e), res:null}); }
+  };
+
+  const TABS = [["plan","🗓 Coverage plan"],["projects","📁 Projects ("+projects.length+")"],["skills","🧩 Skills & people"],["train","🎓 Training"]];
+  const cell = {padding:"8px 10px",borderBottom:"1px solid var(--border)",fontSize:12.5,verticalAlign:"top"};
+  const th = {...cell,fontWeight:700,color:"var(--text-2)",background:"var(--surface-2)",textAlign:"left",whiteSpace:"nowrap"};
+  const setReq = (i,k,v) => setPm(p=>({...p, requirements:p.requirements.map((r,j)=>j===i?{...r,[k]:v}:r)}));
+  const setStf = (i,k,v) => setPm(p=>({...p, staff:p.staff.map((r,j)=>j===i?{...r,[k]:v}:r)}));
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:14}}>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+        {TABS.map(([k,l])=><button key={k} onClick={()=>setTab(k)} style={{padding:"8px 14px",borderRadius:10,border:"1px solid "+(tab===k?"var(--brand)":"var(--border-2)"),background:tab===k?"var(--brand)":"var(--surface)",color:tab===k?"#fff":"var(--text-2)",fontWeight:600,fontSize:13,cursor:"pointer"}}>{l}</button>)}
+      </div>
+
+      {tab==="plan" && <>
+        <Card style={{padding:14}}>
+          <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-end"}}>
+            <Lbl t="From"><input type="date" style={iS} value={from} onChange={e=>setFrom(e.target.value)}/></Lbl>
+            <Lbl t="To"><input type="date" style={iS} value={to} onChange={e=>setTo(e.target.value)}/></Lbl>
+            <label style={{fontSize:12.5,color:"var(--text-2)",display:"flex",gap:6,alignItems:"center",paddingBottom:10}}><input type="checkbox" checked={cross} onChange={e=>setCross(e.target.checked)}/> Allow cover from other teams</label>
+            <div style={{flex:1}}/>
+            <Btn v="sec" onClick={runAssign} disabled={ai.busy||!eff.length}>{ai.busy?"Analysing…":"✨ Ask AI to review assignments"}</Btn>
+            <Btn v="suc" onClick={publish}>Confirm & publish plan</Btn>
+          </div>
+          {published && <div style={{fontSize:11.5,color:"var(--text-3)",marginTop:8}}>Last published {new Date(published.at).toLocaleString()} by {published.by} for {rpRange(published.from,published.to)} · {published.pct}% covered</div>}
+          {ai.err && <div style={{color:"#b91c1c",fontSize:12.5,marginTop:8}}>{ai.err}</div>}
+        </Card>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10}}>
+          <StStat icon="🛡" label="Cover coverage" value={pct+"%"} sub={(needDays-openDays)+" of "+needDays+" person-days"} tone={pct>=100?"green":pct>=80?"amber":"red"}/>
+          <StStat icon="🏖" label="Absences needing cover" value={eff.length} tone="blue"/>
+          <StStat icon="🚨" label="Gaps (nobody available)" value={effGaps.length} tone={effGaps.length?"red":"green"}/>
+          <StStat icon="⚠" label="Skills with no owner" value={plan.unstaffed.length} sub="on a project, nobody staffed" tone={plan.unstaffed.length?"amber":"green"}/>
+        </div>
+        {!projects.length && <Card><StEmpty icon="📁" title="No projects yet" text="Add your client projects, the skills each needs and who works on them, then the plan appears here."/></Card>}
+        {ai.res && <Card style={{padding:14,borderLeft:"4px solid #7c3aed"}}>
+          <div style={{fontWeight:700,marginBottom:6}}>✨ AI review</div>
+          <div style={{fontSize:13,marginBottom:8}}>{ai.res.summary}</div>
+          {ai.res.changes.length===0 && <div style={{fontSize:12.5,color:"var(--text-3)"}}>The AI found no better valid assignment than the automatic one.</div>}
+          {ai.res.changes.map((c,i)=><div key={i} style={{display:"flex",gap:10,alignItems:"center",padding:"6px 0",borderTop:"1px solid var(--border)",fontSize:12.5}}>
+            <div style={{flex:1}}><b>{projName(c.seg.projectId)}</b> · {c.seg.skill} · {rpRange(c.seg.from,c.seg.to)} → <b>{nameOf(c.userId)}</b><div style={{color:"var(--text-3)"}}>{c.why}</div></div>
+            <Btn sm v="sec" onClick={()=>applyChange(c)}>Apply</Btn></div>)}
+          {ai.res.risks.length>0 && <ul style={{margin:"8px 0 0 18px",padding:0,fontSize:12.5,color:"var(--text-2)"}}>{ai.res.risks.map((r,i)=><li key={i}>{r}</li>)}</ul>}
+        </Card>}
+        {effGaps.length>0 && <Card style={{padding:0,border:"1.5px solid #fecaca"}}>
+          <div style={{padding:"10px 14px",background:"#fee2e2",color:"#991b1b",fontWeight:700,borderRadius:"12px 12px 0 0"}}>🚨 Coverage gaps – nobody available</div>
+          {effGaps.map((g,i)=>{ const adv = ai.res && ai.res.gapAdvice.find(a=>a.id===g.projectId+"|"+g.skill+"|"+g.from);
+            return <div key={i} style={{padding:"10px 14px",borderTop:i?"1px solid var(--border)":"none",fontSize:13}}>
+              <StPill tone={g.severity==="critical"?"red":"amber"}>{g.severity==="critical"?"Critical":"Warning"}</StPill> <b>{projName(g.projectId)}</b> · {g.skill} · {rpRange(g.from,g.to)} ({g.dates.length} day{g.dates.length===1?"":"s"})
+              <div style={{fontSize:12,color:"var(--text-2)",marginTop:3}}>{g.absent.length?nameOf(g.absent[0])+(g.absent.length>1?" +"+(g.absent.length-1):"")+" is on leave. ":""}{g.reason}.{g.noOneHasSkill?" Consider training someone (see Training tab).":""}</div>
+              {adv && <div style={{fontSize:12,color:"#6d28d9",marginTop:3}}>✨ {adv.advice}</div>}
+            </div>; })}
+        </Card>}
+        {plan.unstaffed.length>0 && <Card style={{padding:"10px 14px",background:"#fffbeb"}}>
+          <b style={{fontSize:13}}>⚠ Projects with a required skill but nobody staffed on it</b>
+          <div style={{fontSize:12.5,marginTop:4}}>{plan.unstaffed.map((u,i)=><div key={i}>{projName(u.projectId)} needs {u.skill} (×{u.need})</div>)}</div>
+        </Card>}
+        {eff.length>0 && <Card style={{padding:0,overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr>{["Project","Skill","When","Out of office","Cover (best match)","Why",""].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
+          <tbody>{eff.map(s=>{ const key = rpKey(s); const first = s.picks[0];
+            const opts = people.filter(u=>!(s.absent||[]).includes(u.id) && rpLevelOf(mskills,u.id,s.skill));
+            return <tr key={key} style={{background:s.open.length?"#fff5f5":"transparent"}}>
+              <td style={cell}><b>{projName(s.projectId)}</b>{s.criticality==="critical" && <> <StPill tone="red">critical</StPill></>}</td>
+              <td style={cell}>{s.skill}</td>
+              <td style={cell}>{rpRange(s.from,s.to)}<div style={{color:"var(--text-3)",fontSize:11}}>{s.dates.length} working day{s.dates.length===1?"":"s"}</div></td>
+              <td style={cell}>{s.absent.map(nameOf).join(", ")}</td>
+              <td style={cell}>
+                {s.picks.map((pk,i)=><div key={i}>{pk.manual && <span title="Manual">✋ </span>}<b>{nameOf(pk.userId)}</b>{s.picks.length>1 && <span style={{color:"var(--text-3)"}}> {rpRange(pk.dates[0],pk.dates[pk.dates.length-1])}</span>}</div>)}
+                {s.open.length>0 && <div style={{color:"#b91c1c",fontWeight:700}}>Not covered: {rpRange(s.open[0],s.open[s.open.length-1])}</div>}
+              </td>
+              <td style={{...cell,color:"var(--text-3)",fontSize:11.5}}>{first && !first.manual ? (()=>{ const f = first.factors||{}; const bits = []; const e = rpLevelOf(mskills, first.userId, s.skill); if(e) bits.push(RP_LEVELS[e.level]+" "+s.skill+", "+e.years+"y"); if(f.onProject) bits.push("already on this project"); if(f.sameTeam) bits.push("same team"); if(f.freeTime>1) bits.push("light load"); return bits.join(" · "); })() : first && first.manual ? "Chosen by "+user.name : ""}</td>
+              <td style={cell}><select style={{...sS,padding:"4px 8px",fontSize:12,width:130}} value={ov[key]||""} onChange={e=>setOv(o=>{ const n={...o}; if(e.target.value) n[key]=e.target.value; else delete n[key]; return n; })}><option value="">Auto</option>{opts.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></td>
+            </tr>; })}</tbody></table>
+        </Card>}
+        {eff.length===0 && projects.length>0 && <Card><StEmpty icon="✅" title="No cover needed in this period" text="Nobody staffed on a required skill is on leave between these dates."/></Card>}
+      </>}
+
+      {tab==="projects" && <>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><div style={{fontSize:13,color:"var(--text-2)"}}>Each client service delivery is a project: set the skills it needs and who works on it, with their role.</div><Btn onClick={()=>setPm({...blankP})}>+ New project</Btn></div>
+        {!projects.length && <Card><StEmpty icon="📁" title="No projects yet"/></Card>}
+        {projects.map(p=><Card key={p.id} style={{padding:14,cursor:"pointer"}} onClick={()=>setPm({...p})}>
+          <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}><b>{p.name}</b>{p.client && <span style={{color:"var(--text-3)",fontSize:12}}>{p.client}</span>}<StPill tone={p.criticality==="critical"?"red":p.criticality==="high"?"amber":"grey"}>{p.criticality||"normal"}</StPill><StPill tone={p.status==="Active"?"green":"grey"}>{p.status}</StPill>{p.team && <StPill tone="blue">{p.team}</StPill>}</div>
+          <div style={{fontSize:12.5,marginTop:6,color:"var(--text-2)"}}>Needs: {(p.requirements||[]).map(r=>r.skill+(Number(r.need)>1?" ×"+r.need:"")).join(", ")||"–"}</div>
+          <div style={{fontSize:12.5,color:"var(--text-2)"}}>Team: {(p.staff||[]).map(s=>nameOf(s.userId)+" ("+(s.skill||"?")+(s.role?" · "+s.role:"")+")").join(", ")||"–"}</div>
+        </Card>)}
+      </>}
+
+      {tab==="skills" && <>
+        <Card style={{padding:14}}>
+          <div style={{fontWeight:700,marginBottom:8}}>Shared skill list</div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>{skills.map(sk=><span key={sk} style={{background:"var(--surface-2)",border:"1px solid var(--border-2)",borderRadius:999,padding:"3px 4px 3px 10px",fontSize:12.5,display:"inline-flex",gap:6,alignItems:"center"}}>{sk}<button title="Remove" onClick={()=>rmSkill(sk)} style={{border:"none",background:"none",cursor:"pointer",color:"var(--text-3)"}}>×</button></span>)}{!skills.length && <span style={{color:"var(--text-3)",fontSize:12.5}}>No skills yet. Add the skills your projects need.</span>}</div>
+          <div style={{display:"flex",gap:8}}><input style={{...iS,maxWidth:280}} placeholder="e.g. Control-M, Talend, Linux" value={newSkill} onChange={e=>setNewSkill(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") addSkill(); }}/><Btn sm onClick={addSkill}>Add skill</Btn></div>
+        </Card>
+        {skills.length>0 && <Card style={{padding:0,overflowX:"auto"}}>
+          <div style={{padding:"12px 14px",display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}><b>Skill matrix</b><span style={{fontSize:12,color:"var(--text-3)"}}>Primary = owns it · Secondary = can cover · Backup = can help, needs support</span><div style={{flex:1}}/><select style={{...sS,width:160}} value={fTeam} onChange={e=>setFTeam(e.target.value)}><option value="">All teams</option>{teamsList.map(t=><option key={t}>{t}</option>)}</select></div>
+          <table style={{borderCollapse:"collapse",minWidth:"100%"}}><thead><tr><th style={th}>Person</th>{skills.map(sk=><th key={sk} style={th}>{sk}</th>)}</tr>
+            <tr><td style={{...cell,fontSize:11,color:"var(--text-3)"}}>Depth (P/S/B)</td>{depth.map(d=><td key={d.skill} style={{...cell,fontSize:11.5}}><span style={{color:d.risk==="none"?"#b91c1c":d.risk==="thin"?"#b45309":"var(--text-2)",fontWeight:d.risk==="ok"?400:700}}>{d.primary.length}/{d.secondary.length}/{d.backup.length}{d.risk==="none"?" ⚠ no spare":d.risk==="thin"?" thin":""}</span></td>)}</tr></thead>
+          <tbody>{people.filter(u=>!fTeam||u.team===fTeam).map(u=><tr key={u.id}><td style={cell}><b>{u.name}</b><div style={{fontSize:11,color:"var(--text-3)"}}>{u.team||""}</div></td>
+            {skills.map(sk=>{ const e = rpLevelOf(mskills,u.id,sk); return <td key={sk} style={cell}>
+              <select aria-label={u.name+" "+sk} style={{...sS,padding:"3px 6px",fontSize:12,width:96,background:e?ST_TONE[RP_LV_TONE[e.level]][1]:undefined}} value={e?e.level:""} onChange={ev=>setCell(u.id,sk,ev.target.value,e?e.years:1)}><option value="">–</option><option value="primary">Primary</option><option value="secondary">Secondary</option><option value="backup">Backup</option></select>
+              {e && <div style={{marginTop:3,fontSize:11,color:"var(--text-3)"}}><input type="number" min="0" max="40" title="Years of experience" style={{...iS,width:48,padding:"2px 5px",fontSize:11}} value={e.years} onChange={ev=>setCell(u.id,sk,e.level,ev.target.value)}/> yrs</div>}
+            </td>; })}</tr>)}</tbody></table>
+        </Card>}
+      </>}
+
+      {tab==="train" && <>
+        <Card style={{padding:14,display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+          <div style={{flex:1,minWidth:240,fontSize:13,color:"var(--text-2)"}}>Skills with thin or no backup are ranked first. People are suggested by team, experience, current workload and how close they already are (a Backup is one step from Secondary).</div>
+          <Btn v="sec" onClick={runTrain} disabled={tr.busy||!training.length}>{tr.busy?"Analysing…":"✨ Ask AI to explain & prioritise"}</Btn>
+        </Card>
+        {tr.err && <div style={{color:"#b91c1c",fontSize:12.5}}>{tr.err}</div>}
+        {tr.res && <Card style={{padding:14,borderLeft:"4px solid #7c3aed"}}><b>✨ AI advice</b><div style={{fontSize:13,margin:"6px 0"}}>{tr.res.summary}</div>
+          {tr.res.list.map((x,i)=><div key={i} style={{fontSize:12.5,padding:"5px 0",borderTop:"1px solid var(--border)"}}><b>{x.skill}</b> → {nameOf(x.userId)} <StPill tone="grey">{x.effort} effort · ~{x.weeks} wk</StPill><div style={{color:"var(--text-3)"}}>{x.why}</div></div>)}</Card>}
+        {!training.length && <Card><StEmpty icon="🎓" title="No training needs found" text={projects.length?"Every required skill has enough spare people.":"Add projects and skills first."}/></Card>}
+        {training.map(t=><Card key={t.skill} style={{padding:14}}>
+          <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}><b>{t.skill}</b><StPill tone={t.risk==="none"?"red":"amber"}>{t.risk==="none"?"No spare person":t.risk==="thin"?"Thin backup":"Gaps in plan"}</StPill><span style={{fontSize:12,color:"var(--text-3)"}}>needed on {t.projects} project{t.projects===1?"":"s"}</span></div>
+          <div style={{fontSize:12.5,color:"var(--text-2)",margin:"4px 0 8px"}}>{t.reason}</div>
+          {t.candidates.slice(0,t.need).map(c=><div key={c.userId} style={{fontSize:12.5,padding:"4px 0",borderTop:"1px solid var(--border)"}}>Train <b>{c.name}</b> <span style={{color:"var(--text-3)"}}>({c.team}) · {c.from==="None"?"new skill":"Backup"} → Secondary · score {c.score}</span></div>)}
+        </Card>)}
+      </>}
+
+      {pm && <ModalWrap title={pm.id?"Edit project":"New project"} wide onClose={()=>setPm(null)}>
+        <div style={{padding:"18px 28px 24px",display:"flex",flexDirection:"column",gap:12}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <Lbl t="Project name *"><input style={iS} value={pm.name} onChange={e=>setPm({...pm,name:e.target.value})}/></Lbl>
+            <Lbl t="Client"><input style={iS} value={pm.client} onChange={e=>setPm({...pm,client:e.target.value})}/></Lbl>
+            <Lbl t="Owning team"><select style={sS} value={pm.team} onChange={e=>setPm({...pm,team:e.target.value})}><option value="">–</option>{teamsList.map(t=><option key={t}>{t}</option>)}</select></Lbl>
+            <Lbl t="Criticality"><select style={sS} value={pm.criticality} onChange={e=>setPm({...pm,criticality:e.target.value})}><option value="normal">Normal</option><option value="high">High</option><option value="critical">Critical</option></select></Lbl>
+            <Lbl t="Start"><input type="date" style={iS} value={pm.start} onChange={e=>setPm({...pm,start:e.target.value})}/></Lbl>
+            <Lbl t="End"><input type="date" style={iS} value={pm.end} onChange={e=>setPm({...pm,end:e.target.value})}/></Lbl>
+            <Lbl t="Status"><select style={sS} value={pm.status} onChange={e=>setPm({...pm,status:e.target.value})}><option>Active</option><option>On hold</option><option>Closed</option></select></Lbl>
+          </div>
+          <div><div style={{fontWeight:700,fontSize:13,marginBottom:6}}>Skills this project needs</div>
+            {pm.requirements.map((r,i)=><div key={i} style={{display:"flex",gap:8,marginBottom:6}}><select aria-label="Required skill" style={sS} value={r.skill} onChange={e=>setReq(i,"skill",e.target.value)}><option value="">Select skill</option>{skills.map(s=><option key={s}>{s}</option>)}</select><input aria-label="People needed" type="number" min="1" max="20" style={{...iS,width:80}} value={r.need} onChange={e=>setReq(i,"need",e.target.value)}/><Btn sm v="sec" onClick={()=>setPm({...pm,requirements:pm.requirements.filter((_,j)=>j!==i)})}>✕</Btn></div>)}
+            <Btn sm v="sec" onClick={()=>setPm({...pm,requirements:[...pm.requirements,{skill:"",need:1}]})}>+ Add required skill</Btn>{!skills.length && <span style={{fontSize:12,color:"var(--text-3)",marginLeft:8}}>Add skills in the Skills & people tab first.</span>}</div>
+          <div><div style={{fontWeight:700,fontSize:13,marginBottom:6}}>Who works on it</div>
+            {pm.staff.map((s,i)=><div key={i} style={{display:"grid",gridTemplateColumns:"1.2fr 1fr 1.4fr 70px auto",gap:8,marginBottom:6}}>
+              <select aria-label="Person" style={sS} value={s.userId} onChange={e=>setStf(i,"userId",e.target.value)}><option value="">Select person</option>{people.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select>
+              <select aria-label="Skill they own" style={sS} value={s.skill} onChange={e=>setStf(i,"skill",e.target.value)}><option value="">Skill</option>{skills.map(x=><option key={x}>{x}</option>)}</select>
+              <input aria-label="Role" style={iS} placeholder="Role on this project" value={s.role} onChange={e=>setStf(i,"role",e.target.value)}/>
+              <input aria-label="Allocation" type="number" min="0" max="100" title="Allocation %" style={iS} value={s.allocation} onChange={e=>setStf(i,"allocation",e.target.value)}/>
+              <Btn sm v="sec" onClick={()=>setPm({...pm,staff:pm.staff.filter((_,j)=>j!==i)})}>✕</Btn></div>)}
+            <Btn sm v="sec" onClick={()=>setPm({...pm,staff:[...pm.staff,{userId:"",skill:"",role:"",allocation:""}]})}>+ Add person</Btn>
+            <div style={{fontSize:11.5,color:"var(--text-3)",marginTop:4}}>Allocation % is optional; blank means an even share of their time.</div></div>
+          <div style={{display:"flex",gap:8,justifyContent:"space-between"}}>{pm.id ? <Btn v="dan" onClick={()=>delProject(pm)}>Delete</Btn> : <span/>}<div style={{display:"flex",gap:8}}><Btn v="sec" onClick={()=>setPm(null)}>Cancel</Btn><Btn onClick={savePm}>Save project</Btn></div></div>
+        </div>
+      </ModalWrap>}
     </div>
   );
 }
@@ -9007,6 +9439,7 @@ const CLOUD_COLL = {
   logs: {table:"time_logs", pk:"id", sel:"data", key:l=>l.id, out:r=>r.data, row:l=>({id:l.id, user_id:l.userId||null, team:l.team||null, log_date:l.date||null, data:l})},
   mis:  {table:"major_incidents", pk:"id", sel:"data", key:m=>m.id, out:r=>r.data, row:m=>({id:m.id, data:m})},
   leaves:{table:"leaves", pk:"id", sel:"data", optional:true, key:l=>l.id, out:r=>r.data, row:l=>({id:l.id, user_id:l.userId||null, team:l.team||null, from_date:l.from||null, to_date:l.to||null, data:l})},
+  rplan:{table:"resource_plan", pk:"id", sel:"id,kind,data", optional:true, key:x=>x.id, out:r=>({...r.data, id:r.id, kind:r.kind}), row:x=>({id:x.id, kind:x.kind||null, data:x})},
   settings:{table:"app_settings", pk:"key", sel:"key,data", optional:true, key:s=>s.key, out:r=>r.data, row:s=>({key:s.key, data:s})}
 };
 async function cloudLoadAll(sb) {
@@ -9179,6 +9612,11 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     try { const s = localStorage.getItem('isms_leaves'); return s ? JSON.parse(s) : []; } catch(e) { return []; }
   });
   React.useEffect(()=>{ if(cloud) return; try{ localStorage.setItem('isms_leaves', JSON.stringify(leaves)); }catch(e){} }, [leaves]);
+  const [rpItems, setRpItems] = useState(()=>{
+    if(cloud) return cloud.data.rplan || [];
+    try { const x = localStorage.getItem('isms_rplan'); return x ? JSON.parse(x) : []; } catch(e) { return []; }
+  });
+  React.useEffect(()=>{ if(cloud) return; try{ localStorage.setItem('isms_rplan', JSON.stringify(rpItems)); }catch(e){} }, [rpItems]);
   LEAVE.length = 0; leaves.forEach(l=>LEAVE.push(l));   // keep the module-level list in step with state
   const [miModal,    setMiModal]    = useState(false); // create/edit Major Incident
 
@@ -9243,7 +9681,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
   React.useEffect(()=>{
     if(!cloud) return;
     let stop = false, busy = false;
-    const setters = {users:setAllUsers, teams:setTeams, acts:setActs, mis:setMis, logs:setLogs, leaves:setLeaves,
+    const setters = {users:setAllUsers, teams:setTeams, acts:setActs, mis:setMis, logs:setLogs, leaves:setLeaves, rplan:setRpItems,
       settings:(arr)=>{ const r = arr.find(x=>x.key==="categories"); if(r && Array.isArray(r.items) && r.items.length) setCategories(r.items); const q = arr.find(x=>x.key==="sla"); if(q && q.targets) setSlaTargets({...DEFAULT_SLA, ...q.targets}); const sv = arr.find(x=>x.key==="services"); if(sv && Array.isArray(sv.items)) setServicesRaw(sv.items); }};
     const pull = async () => {
       if(stop || busy || document.hidden) return;
@@ -9277,6 +9715,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
   React.useEffect(()=>{ auditTrack("mis", mis); cloudSave("mis",   mis);      }, [mis]);
   React.useEffect(()=>{ auditTrack("logs", logs); cloudSave("logs",  logs);     }, [logs]);
   React.useEffect(()=>{ auditTrack("leaves", leaves); cloudSave("leaves", leaves); }, [leaves]);
+  React.useEffect(()=>{ auditTrack("rplan", rpItems); cloudSave("rplan", rpItems); }, [rpItems]);
   React.useEffect(()=>{ const st=[{key:"categories", items:categories},{key:"sla", targets:slaTargets},{key:"services", items:services}]; if(catsDirty.current) auditTrack("settings", st); else auditPrev.current.settings = cloudSnap("settings", st); }, [categories, slaTargets, services]);
   React.useEffect(()=>{ if(catsDirty.current) cloudSave("settings", [{key:"categories", items:categories},{key:"sla", targets:slaTargets},{key:"services", items:services}]); }, [categories, slaTargets, services]);
   const [modal,      setModal]      = useState(null);
@@ -9906,6 +10345,13 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       benefits:["Capacity and utilisation reflect who is really available instead of assuming a full team","Everyone sees who is out today and who is out in a given month","Managers see the capacity impact of leave per team and month before committing work"],
     },
     {
+      id:"resource_plan", icon:"🧩", label:"Resource Planning",
+      mgrSec:"Operations",
+      role:"mgr", guideGroup:"📋 Activity & Time Management", guideColor:"#059669", guideBg:"#f0fdf4",
+      desc:"Plan cover for client projects when people go on leave. Map people to a shared skill list as Primary, Secondary or Backup, mark the skills each project needs and who works on it, and the portal proposes the best available cover across all projects, highlights gaps where nobody is free, shows the skill matrix and suggests who to train for better backup. The plan is only published when you confirm it.",
+      benefits:["Leave never leaves a client project without the skill it needs","Gaps are found weeks ahead, with the reason and the dates","Training suggestions target the skills with the thinnest backup"],
+    },
+    {
       id:"bandwidth", icon:"📊", label:"Bandwidth & Capacity",
       mgrSec:"Operations",
       role:"mgr", guideGroup:"📈 Reports & Analytics", guideColor:"#d97706", guideBg:"#fffbeb",
@@ -10012,6 +10458,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
   PAGE_TITLE.changepw  = "Change Password";
   PAGE_TITLE.myprofile = "My Profile";
   PAGE_TITLE.skill_tests = "Skill Tests";
+  PAGE_TITLE.resource_plan = "Resource Planning";
 
   // == MINUTE PRESETS =======================
   const MinPre = ({val,onChange}) => (
@@ -20075,6 +20522,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     action_center: PageActionCenter,
     my_week: PageMyWeek,
     leave: ()=><LeavePage leaves={leaves} setLeaves={setLeaves} users={allUsers} user={user} isAdmin={isAdmin} isMgr={isMgrOrAdmin} capMonth={capMonth} logs={isAdmin?logs:teamLogs} toast={showToast}/>,
+    resource_plan: ()=><ResourcePlanningPage items={rpItems} setItems={setRpItems} users={allUsers} leaves={leaves} cloud={cloud} user={user} isAdmin={isAdmin} toast={showToast}/>,
     interviews: ()=><InterviewsPage cloud={cloud} user={user} users={allUsers} isAdmin={isAdmin} toast={showToast}/>,
     skill_tests: ()=><SkillTestsPage cloud={cloud} user={user} users={allUsers} isAdmin={isAdmin} isMgr={isMgrOrAdmin} toast={showToast}/>,
     services: ()=><ServicesPage services={services} setServices={setServices} acts={acts} logs={logs} mis={mis} users={allUsers} teamNames={teams.map(t=>t.name)} canEdit={isMgrOrAdmin} toast={showToast}/>,
