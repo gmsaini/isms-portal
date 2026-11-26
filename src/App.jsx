@@ -7002,19 +7002,20 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
     try { setPlan(await callAiFn(cloud, {mode:"iv_plan", ...body()})); setQs([]); } catch(e) { toast(e.message,"err"); }
     setBusy("");
   };
-  const generate = async () => {
-    if(!plan) return; setBusy("gen"); let all = qs.filter(q=>q.core); setQs(all.slice()); let n = all.length; const total = plan.total;
+  const generate = async (keepAll) => {
+    if(!plan) return; setBusy("gen"); let all = keepAll ? qs.slice() : qs.filter(q=>q.core); setQs(all.slice()); const total = plan.total;
     try {
       for(const bl of plan.blocks) {
-        let left = bl.count - all.filter(q=>q.type===bl.type).length;
-        while(left>0) {
-          const take = Math.min(6,left); setGenMsg("Generating questions "+Math.min(total,n+take)+" of "+total+"...");
-          const d = await callAiFn(cloud, {mode:"iv_generate", ...body(), type:bl.type, count:take, difficulty:plan.difficulty, avoid:[...all.map(q=>q.text), ...qs.filter(q=>q.core).map(q=>q.text)]});
-          const got = d.questions||[]; all = all.concat(got); n += take; left -= take; if(!got.length) break;
-          setQs(all.slice());
+        let tries = 0;
+        // ask again until the planned number of this type is reached (a batch can come back short), but give up after a few empty tries
+        while(all.filter(q=>q.type===bl.type).length < bl.count && tries < 4) {
+          const left = bl.count - all.filter(q=>q.type===bl.type).length; const take = Math.min(6,left); tries++;
+          setGenMsg("Generating questions "+Math.min(total,all.length+take)+" of "+total+"...");
+          const d = await callAiFn(cloud, {mode:"iv_generate", ...body(), type:bl.type, count:take, difficulty:plan.difficulty, avoid:all.map(q=>q.text)});
+          const got = d.questions||[]; if(got.length) { all = all.concat(got); setQs(all.slice()); tries = got.length>=take ? 0 : tries; }
         }
       }
-      if(all.length<5) toast("Only "+all.length+" usable questions came back. Try generating again.","err");
+      if(all.length<total) toast("Only "+all.length+" of "+total+" questions were produced. Press \"Add missing questions\" to try again for the rest.","err");
     } catch(e) { toast(e.message,"err"); if(all.length) setQs(all); }
     setGenMsg(""); setBusy("");
   };
@@ -7025,6 +7026,7 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
     setBusy("create");
     try {
       const d = await callAiFn(cloud, {mode:"iv_create", ...body(), candidate_name:f.candidate_name, candidate_email:f.candidate_email, duration:dur, difficulty:plan.difficulty, questions:qs, expiresDays:Number(f.expiresDays)||7, extraPct:Number(f.extraPct)||0});
+      toast("Interview created with "+qs.length+" questions");
       const sh = {...d, name:f.candidate_name, email:f.candidate_email.trim(), role:f.role_title, dur};
       setShown(sh); setF(blank); setPlan(null); setQs([]); setTab("list"); load();
       if(sh.email) emailLink(sh);
@@ -7083,7 +7085,7 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
                   <td style={td}><b>{r.candidate_name}</b>{r.candidate_email && <div style={{fontSize:11,color:"var(--text-3)"}}>{r.candidate_email}</div>}</td>
                   <td style={td}>{r.role_title}</td>
                   <td style={td}>{r.level} · {r.difficulty}</td>
-                  <td style={td}>{r.duration_min}</td>
+                  <td style={td}>{r.duration_min}<div style={{fontSize:11,color:"var(--text-3)"}}>{(r.data&&r.data.questions||[]).length} questions</div></td>
                   <td style={td}>{stat(r.status,r)}{r.status==="invited" && <div style={{fontSize:11,color:"var(--text-3)"}}>expires {new Date(r.expires_at).toLocaleDateString()}</div>}</td>
                   <td style={td}>{r.score==null?"-":<b>{r.score}%</b>}</td>
                   <td style={td}>{ivProctorPill(r.data&&r.data.proctor)}</td>
@@ -7149,12 +7151,13 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
           <ul style={{margin:"0 0 12px",paddingLeft:18,fontSize:12.5,color:"var(--text-2)",lineHeight:1.6}}>{plan.why.map((w,i)=><li key={i}>{w}</li>)}</ul>
           {plan.years>3 ? (f.resume.trim().length>=80 ? <div style={{fontSize:12.5,color:"#166534",background:"#f0fdf4",borderRadius:8,padding:"8px 12px",marginBottom:10}}>More than 3 years of experience, so questions are written for this candidate: about half verify what the resume claims, a quarter cover JD requirements the resume does not show, and the rest are core JD fundamentals.</div> : <div style={{fontSize:12.5,color:"#92400e",background:"#fffbeb",borderRadius:8,padding:"8px 12px",marginBottom:10}}>More than 3 years of experience, but no resume was added, so questions come only from the JD and skills and will look alike for every candidate. Add the resume above to personalise them.</div>)
             : <div style={{fontSize:12.5,color:"var(--text-2)",background:"var(--surface-2,#f6f7fb)",borderRadius:8,padding:"8px 12px",marginBottom:10}}>Up to 3 years of experience, so questions follow the JD and skills{f.resume.trim().length>=80?", with some drawn from the resume":""}. Saved question sets are reused in full for this level.</div>}
-          <Btn onClick={generate} disabled={busy==="gen"}>{busy==="gen"?genMsg||"Generating...":(qs.filter(q=>!q.core).length?"Regenerate questions":qs.length?"Generate "+(plan.total-qs.length)+" tailored questions":"Generate "+plan.total+" questions")}</Btn>
+          {qs.length>0 && qs.length<plan.total && busy!=="gen" && <span style={{marginRight:10}}><Btn v="suc" onClick={()=>generate(true)}>➕ Add {plan.total-qs.length} missing questions</Btn></span>}
+          <Btn onClick={()=>generate(false)} disabled={busy==="gen"}>{busy==="gen"?genMsg||"Generating...":(qs.filter(q=>!q.core).length?"Regenerate questions":qs.length?"Generate "+(plan.total-qs.length)+" tailored questions":"Generate "+plan.total+" questions")}</Btn>
         </Card>}
 
         {qs.length>0 && <Card>
           <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",marginBottom:10}}>
-            <div style={{fontSize:14,fontWeight:700}}>3. Review questions <span style={{fontWeight:500,color:"var(--text-3)",fontSize:12.5}}>· {qs.length} questions · about {Math.round(mins)} of {dur} minutes</span></div>
+            <div style={{fontSize:14,fontWeight:700}}>3. Review questions <span style={{fontWeight:500,color:qs.length<plan.total?"#b45309":"var(--text-3)",fontSize:12.5}}>· {qs.length} of {plan.total} planned questions · about {Math.round(mins)} of {dur} minutes</span></div>
           </div>
           <div style={{display:"grid",gap:8}}>{qs.map((q,i)=>(
             <div key={i} style={{border:"1px solid var(--border)",borderRadius:10,padding:"10px 12px"}}>
