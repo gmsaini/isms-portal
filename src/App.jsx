@@ -6921,11 +6921,35 @@ const IV_STATUS = {invited:["Invited","blue"], in_progress:["In progress","amber
 const ivLink = token => location.origin + location.pathname + "?interview=" + token;
 const ivProctorPill = pr => { if(!pr) return <span style={{color:"var(--text-3)"}}>-</span>; const [bl]=stProctorBand(pr.score); const tone=pr.score==null?"grey":pr.score>=85?"green":pr.score>=65?"amber":"red"; return <StPill tone={tone}>{pr.score==null?"":pr.score+" · "}{bl}</StPill>; };
 
+const IV_OUTCOME_TPL = (decision, name, role, sender) => {
+  const hi = "Hello "+name+",\n\n", bye = "\n\nKind regards,\n"+sender;
+  if(decision==="advance") return {subject:"Next steps for your "+role+" application", body:hi+"Thank you for completing the online interview for the "+role+" role. We were pleased with your interview and would like to move you to the next stage. I will contact you shortly with the details and available times."+bye};
+  if(decision==="hold") return {subject:"Update on your "+role+" application", body:hi+"Thank you for completing the online interview for the "+role+" role. We are still reviewing candidates and have not made a decision yet. We will get back to you as soon as we can. Thank you for your patience."+bye};
+  return {subject:"Your "+role+" application", body:hi+"Thank you for the time you put into the online interview for the "+role+" role. After careful consideration we have decided not to move forward with your application at this time. We appreciate your interest and wish you every success."+bye};
+};
 function InterviewsPage({cloud, user, users, isAdmin, toast}) {
   const sb = cloud && cloud.sb;
   const [tab, setTab] = React.useState("list");
   const [rows, setRows] = React.useState(null);
   const [fStatus, setFStatus] = React.useState("");
+  const [fDec, setFDec] = React.useState("");
+  const [decErr, setDecErr] = React.useState("");
+  const [outMail, setOutMail] = React.useState(null);   // {row, subject, body, busy, err}
+  const setDecision = (k) => {
+    const nv = notes[cur.id]!=null ? notes[cur.id] : (cur.data.notes||"");
+    if(k==="reject" && nv.trim().length<10) { setDecErr("Add a reason in the notes (at least 10 characters) before rejecting, so the record explains the decision."); return; }
+    setDecErr(""); act("iv_decide", cur.id, {decision:k, notes:nv}, "Saved");
+  };
+  const openOutcome = r => { const t = IV_OUTCOME_TPL(r.data.decision, r.candidate_name, r.role_title, user.name||""); setOutMail({row:r, ...t, busy:false, err:""}); };
+  const sendOutcome = async () => {
+    const o = outMail; setOutMail({...o, busy:true, err:""});
+    try {
+      const r = await callAiFn(cloud, {title:o.subject, intro:o.body, findings:[], channels:["email"], to:[o.row.candidate_email]}, "notify");
+      if(!(r.sent||[]).some(x=>/email/i.test(x))) throw new Error((r.skipped||[]).join("; ")||"The email was not sent. Check the email settings of the notify function.");
+      await callAiFn(cloud, {mode:"iv_outcome_sent", id:o.row.id, decision:o.row.data.decision});
+      toast("Email sent to "+o.row.candidate_email); setOutMail(null); load();
+    } catch(e) { setOutMail({...o, busy:false, err:e.message}); }
+  };
   const [open, setOpen] = React.useState(null);        // interview id being viewed
   const [shown, setShown] = React.useState(null);      // {id, token, expiresAt, row} link just created
   const blank = {candidate_name:"", candidate_email:"", role_title:"", years:"3", skills:[], skillText:"", jd:"", resume:"", difficulty:"", duration:"", expiresDays:"7", extraPct:"0"};
@@ -7074,7 +7098,7 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
   };
   const remove = async r => { if(!window.confirm("Delete the interview for "+r.candidate_name+"? This cannot be undone.")) return; try { await sb.from("interviews").delete().eq("id", r.id); setOpen(null); load(); toast("Deleted"); } catch(e) { toast(e.message,"err"); } };
 
-  const list = (rows||[]).filter(r=>!fStatus||r.status===fStatus);
+  const list = (rows||[]).filter(r=>(!fStatus||r.status===fStatus) && (!fDec || (fDec==="none" ? !(r.data&&r.data.decision) : (r.data&&r.data.decision)===fDec)));
   const cur = open && (rows||[]).find(r=>r.id===open);
   const td = {padding:"9px 10px",fontSize:12.5,borderBottom:"1px solid var(--border)",verticalAlign:"top"};
   const th = {...td, fontSize:11,fontWeight:700,color:"var(--text-3)",textAlign:"left",textTransform:"uppercase",letterSpacing:.4};
@@ -7098,6 +7122,7 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
           {rsErr && <div role="alert" data-testid="rs-err" style={{background:"#fef2f2",border:"1px solid #fecaca",color:"#991b1b",borderRadius:10,padding:"10px 14px",fontSize:13,marginBottom:12,display:"flex",justifyContent:"space-between",gap:10}}><span>{rsErr}</span><button onClick={()=>setRsErr("")} aria-label="Dismiss" style={{border:"none",background:"none",cursor:"pointer",color:"#991b1b",fontSize:16}}>×</button></div>}
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,gap:10,flexWrap:"wrap"}}>
             <select value={fStatus} onChange={e=>setFStatus(e.target.value)} aria-label="Filter by status" style={{...sS,width:"auto"}}><option value="">All statuses</option>{Object.keys(IV_STATUS).map(k=><option key={k} value={k}>{IV_STATUS[k][0]}</option>)}</select>
+            <select value={fDec} onChange={e=>setFDec(e.target.value)} aria-label="Filter by decision" style={{...sS,width:"auto"}}><option value="">All decisions</option><option value="advance">Advance</option><option value="hold">Hold</option><option value="reject">Reject</option><option value="none">No decision yet</option></select>
             <Btn onClick={()=>setTab("new")}>➕ New interview</Btn>
           </div>
           {rows===null ? <div style={{color:"var(--text-3)",fontSize:13}}>Loading...</div> : !list.length ? <StEmpty icon="🧑‍💼" title="No interviews yet" text="Create one from a job description and skills. You get a one-time link to send to the candidate."/> : (
@@ -7109,7 +7134,7 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
                   <td style={td}>{r.role_title}</td>
                   <td style={td}>{r.level} · {r.difficulty}</td>
                   <td style={td}>{r.duration_min}<div style={{fontSize:11,color:"var(--text-3)"}}>{(r.data&&r.data.questions||[]).length} questions</div></td>
-                  <td style={td}>{stat(r.status,r)}{r.status==="invited" && <div style={{fontSize:11,color:"var(--text-3)"}}>expires {new Date(r.expires_at).toLocaleDateString()}</div>}</td>
+                  <td style={td}>{stat(r.status,r)}{r.data&&r.data.decision && <div style={{marginTop:3}}><StPill tone={{advance:"green",hold:"amber",reject:"red"}[r.data.decision]}>{r.data.decision}</StPill></div>}{r.status==="invited" && <div style={{fontSize:11,color:"var(--text-3)"}}>expires {new Date(r.expires_at).toLocaleDateString()}</div>}</td>
                   <td style={td}>{r.score==null?"-":<b>{r.score}%</b>}</td>
                   <td style={td}>{ivProctorPill(r.data&&r.data.proctor)}</td>
                   <td style={td}>{new Date(r.created_at).toLocaleDateString()}{isAdmin && <div style={{fontSize:11,color:"var(--text-3)"}}>{r.created_by_name}</div>}</td>
@@ -7277,14 +7302,28 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
               </div>; })}</div></div>}
           {["submitted","scoring_failed"].includes(cur.status) && <div style={{borderTop:"1px solid var(--border)",paddingTop:12}}>
             <div style={{fontSize:12,fontWeight:700,color:"var(--text-3)",marginBottom:6}}>YOUR DECISION</div>
-            <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:8}}>{[["advance","Advance"],["hold","Hold"],["reject","Reject"],["","Clear"]].map(([k,l])=><Btn key={k||"c"} v={(cur.data.decision||"")===k?"pri":"sec"} sm onClick={()=>act("iv_decide", cur.id, {decision:k, notes:notes[cur.id]!=null?notes[cur.id]:(cur.data.notes||"")}, "Saved")}>{l}</Btn>)}</div>
-            <textarea aria-label="Decision notes" rows={2} value={notes[cur.id]!=null?notes[cur.id]:(cur.data.notes||"")} onChange={e=>setNotes(n=>({...n,[cur.id]:e.target.value}))} onBlur={()=>{ if(notes[cur.id]!=null) act("iv_decide", cur.id, {decision:cur.data.decision||"", notes:notes[cur.id]}); }} placeholder="Notes for the hiring team" style={{...iS,width:"100%",boxSizing:"border-box"}}/>
-            <div style={{fontSize:11.5,color:"var(--text-3)",marginTop:4}}>Scores and the AI brief support your judgement. The hiring decision is yours.</div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:8}}>{[["advance","Advance"],["hold","Hold"],["reject","Reject"],["","Clear"]].map(([k,l])=><Btn key={k||"c"} v={(cur.data.decision||"")===k?"pri":"sec"} sm onClick={()=>setDecision(k)}>{l}</Btn>)}</div>
+            {decErr && <div role="alert" data-testid="dec-err" style={{fontSize:12.5,color:"#b91c1c",marginBottom:6}}>{decErr}</div>}
+            <textarea aria-label="Decision notes" rows={2} value={notes[cur.id]!=null?notes[cur.id]:(cur.data.notes||"")} onChange={e=>{ setNotes(n=>({...n,[cur.id]:e.target.value})); setDecErr(""); }} onBlur={()=>{ if(notes[cur.id]!=null && notes[cur.id]!==(cur.data.notes||"") && !(cur.data.decision==="reject" && notes[cur.id].trim().length<10)) act("iv_decide", cur.id, {decision:cur.data.decision||"", notes:notes[cur.id]}); }} placeholder={cur.data.decision==="reject"?"Reason for rejecting (required)":"Notes for the hiring team (required if you reject)"} style={{...iS,width:"100%",boxSizing:"border-box"}}/>
+            <div style={{fontSize:11.5,color:"var(--text-3)",marginTop:4}}>Scores and the AI brief support your judgement. The hiring decision is yours. Notes are internal and are never sent to the candidate.</div>
+            {["advance","hold","reject"].includes(cur.data.decision) && <div style={{marginTop:10,display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+              {cur.candidate_email ? <Btn v="sec" sm onClick={()=>openOutcome(cur)}>✉️ Draft email to candidate</Btn> : <span style={{fontSize:12,color:"var(--text-3)"}}>No candidate email on file, so no email can be sent from here.</span>}
+              {cur.data.outcomeEmail && <span style={{fontSize:12,color:cur.data.outcomeEmail.decision===cur.data.decision?"#166534":"#92400e"}}>{cur.data.outcomeEmail.decision===cur.data.decision?"✅":"⚠️"} A "{cur.data.outcomeEmail.decision}" email was sent {new Date(cur.data.outcomeEmail.at).toLocaleString()} by {cur.data.outcomeEmail.by}{cur.data.outcomeEmail.decision!==cur.data.decision?" (the decision has changed since)":""}</span>}
+            </div>}
             <div style={{marginTop:10}}><Btn v="sec" sm onClick={()=>rescore(cur.id)} disabled={!!rsBusy[cur.id]}>{rsBusy[cur.id]?"Scoring...":"Re-score"}</Btn>{cur.data.reason && cur.status==="scoring_failed" && <span style={{fontSize:12,color:"#b91c1c",marginLeft:10}}>Last error: {cur.data.reason}</span>}</div>
           </div>}
           {cur.status==="in_progress" && <div style={{marginTop:8}}><Btn v="dan" sm onClick={()=>act("iv_cancel", cur.id, null, "Interview ended")}>End this interview</Btn></div>}
           {["terminated","expired"].includes(cur.status) && (cur.data.retries||0)<2 && <div style={{marginTop:8}}><Btn v="sec" sm onClick={()=>{ setOpen(null); reopen(cur); }}>Allow retry (new link)</Btn></div>}
           <div style={{marginTop:14,textAlign:"right"}}><Btn v="dan" sm onClick={()=>remove(cur)}>Delete record</Btn></div>
+        </div></ModalWrap>}
+      {outMail && <ModalWrap title={"Email to "+outMail.row.candidate_name} onClose={()=>!outMail.busy&&setOutMail(null)}>
+        <div style={{padding:"16px 28px 24px"}}>
+          <div style={{fontSize:12.5,color:"var(--text-2)",marginBottom:10}}>To: <b>{outMail.row.candidate_email}</b>. Review and edit before sending. Scores, proctoring and your internal notes are not included.</div>
+          <Lbl t="Subject"><input aria-label="Email subject" value={outMail.subject} onChange={e=>setOutMail({...outMail,subject:e.target.value.slice(0,160)})} style={iS}/></Lbl>
+          <div style={{marginTop:10}}><Lbl t="Message"><textarea aria-label="Email message" rows={11} value={outMail.body} onChange={e=>setOutMail({...outMail,body:e.target.value.slice(0,1800)})} style={{...iS,width:"100%",boxSizing:"border-box",resize:"vertical"}}/></Lbl></div>
+          {outMail.err && <div role="alert" style={{color:"#b91c1c",fontSize:13,marginTop:10}}>⚠️ Not sent: {outMail.err}</div>}
+          {outMail.row.data.outcomeEmail && outMail.row.data.outcomeEmail.decision===outMail.row.data.decision && <div style={{color:"#92400e",fontSize:12.5,marginTop:10}}>An email for this decision was already sent. Sending again will email the candidate a second time.</div>}
+          <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:14}}><Btn v="sec" onClick={()=>setOutMail(null)} disabled={outMail.busy}>Cancel</Btn><Btn onClick={sendOutcome} disabled={outMail.busy||!outMail.subject.trim()||outMail.body.trim().length<20}>{outMail.busy?"Sending...":"Send email"}</Btn></div>
         </div></ModalWrap>}
     </div>
   );
