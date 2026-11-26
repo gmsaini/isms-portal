@@ -6991,6 +6991,16 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
     catch(e) { setRows([]); }
   }, [sb]);
   React.useEffect(()=>{ load(); }, [load]);
+  // Scoring normally finishes within a minute. If an interview has been waiting longer, ask for it to be scored again (once per interview per visit).
+  const retried = React.useRef(new Set());
+  const stale = r => r.status==="submitted" && r.score==null && !(r.data&&r.data.perQuestion) && r.ended_at && Date.now()-new Date(r.ended_at).getTime()>45000;
+  React.useEffect(()=>{
+    if(!rows) return; const todo = rows.filter(r=>stale(r) && !retried.current.has(r.id)).slice(0,2); if(!todo.length) return;
+    todo.forEach(r=>retried.current.add(r.id));
+    (async()=>{ for(const r of todo) { try { await callAiFn(cloud, {mode:"iv_rescore", id:r.id}); } catch(e) {} } load(); })();
+  }, [rows]); // eslint-disable-line
+  React.useEffect(()=>{ const t = setInterval(()=>{ if((rows||[]).some(r=>["invited","in_progress"].includes(r.status)||(r.status==="submitted"&&r.score==null&&!(r.data&&r.data.perQuestion)))) load(); }, 15000); return ()=>clearInterval(t); }, [rows, load]);
+
 
   const addSkill = txt => { const parts = String(txt).split(",").map(x=>x.trim()).filter(Boolean); if(!parts.length) return; setF(p=>({...p, skills:[...new Set([...p.skills, ...parts])].slice(0,8), skillText:""})); setPlan(null); setQs([]); };
   const edit = (k,v) => { setF(p=>({...p,[k]:v})); if(k!=="candidate_name"&&k!=="candidate_email"&&k!=="expiresDays"&&k!=="extraPct"){ setPlan(null); setQs([]); } };
@@ -7046,6 +7056,7 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
     try { const d = await callAiFn(cloud, {mode, id, ...(extra||{})}); if(okMsg) toast(okMsg); load(); return d; } catch(e) { toast(e.message,"err"); }
   };
   const relink = async r => { const d = await act("iv_relink", r.id); if(d) { setMail(null); const sh={...d, name:r.candidate_name, email:(r.candidate_email||"").trim(), role:r.role_title, dur:r.duration_min}; setShown(sh); if(sh.email) emailLink(sh); } };
+  const rescore = async id => { const d = await act("iv_rescore", id); if(d) toast(d.status==="scoring_failed" ? "Scoring failed again. "+(d.reason||"") : "Scored", d.status==="scoring_failed"?"err":undefined); };
   const reopen = async r => {
     const left = r.data && r.data.leftMin > 0 ? r.data.leftMin : r.duration_min;
     if(!window.confirm("Allow "+r.candidate_name+" one more try?\n\nThey get a NEW one-time link (the old one stops working), keep their earlier answers and have "+left+" minutes. The first attempt stays on record. Use this for lost connections, not to give a second chance after a proctoring violation unless you decide to.")) return;
@@ -7057,7 +7068,7 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
   const cur = open && (rows||[]).find(r=>r.id===open);
   const td = {padding:"9px 10px",fontSize:12.5,borderBottom:"1px solid var(--border)",verticalAlign:"top"};
   const th = {...td, fontSize:11,fontWeight:700,color:"var(--text-3)",textAlign:"left",textTransform:"uppercase",letterSpacing:.4};
-  const stat = (s, r) => { if(s==="submitted" && r && r.score==null && !(r.data&&r.data.perQuestion)) return <StPill tone="amber">Scoring...</StPill>; const [l,t]=IV_STATUS[s]||[s,"grey"]; return <StPill tone={t}>{l}</StPill>; };
+  const stat = (s, r) => { if(s==="submitted" && r && r.score==null && !(r.data&&r.data.perQuestion)) return stale(r) && retried.current.has(r.id) ? <StPill tone="red" title="Scoring did not finish. Open the interview and press Re-score.">Scoring stalled</StPill> : <StPill tone="amber">Scoring...</StPill>; const [l,t]=IV_STATUS[s]||[s,"grey"]; return <StPill tone={t}>{l}</StPill>; };
   const counts = {total:(rows||[]).length, open:(rows||[]).filter(r=>["invited","in_progress"].includes(r.status)).length, done:(rows||[]).filter(r=>r.status==="submitted").length};
 
   return (
@@ -7090,7 +7101,7 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
                   <td style={td}>{r.score==null?"-":<b>{r.score}%</b>}</td>
                   <td style={td}>{ivProctorPill(r.data&&r.data.proctor)}</td>
                   <td style={td}>{new Date(r.created_at).toLocaleDateString()}{isAdmin && <div style={{fontSize:11,color:"var(--text-3)"}}>{r.created_by_name}</div>}</td>
-                  <td style={{...td,whiteSpace:"nowrap"}}><Btn v="sec" sm onClick={()=>setOpen(r.id)}>Open</Btn>{["terminated","expired"].includes(r.status) && (r.data&&r.data.retries||0)<2 && <> <Btn v="sec" sm onClick={()=>reopen(r)}>Allow retry</Btn></>}{r.status==="invited" && <> <Btn v="sec" sm onClick={()=>relink(r)}>New link</Btn> <Btn v="dan" sm onClick={()=>act("iv_cancel", r.id, null, "Interview cancelled")}>Cancel</Btn></>}</td>
+                  <td style={{...td,whiteSpace:"nowrap"}}><Btn v="sec" sm onClick={()=>setOpen(r.id)}>Open</Btn>{(r.status==="scoring_failed"||stale(r)) && <> <Btn v="sec" sm onClick={()=>rescore(r.id)}>Re-score</Btn></>}{["terminated","expired"].includes(r.status) && (r.data&&r.data.retries||0)<2 && <> <Btn v="sec" sm onClick={()=>reopen(r)}>Allow retry</Btn></>}{r.status==="invited" && <> <Btn v="sec" sm onClick={()=>relink(r)}>New link</Btn> <Btn v="dan" sm onClick={()=>act("iv_cancel", r.id, null, "Interview cancelled")}>Cancel</Btn></>}</td>
                 </tr>))}</tbody>
             </table></div>)}
         </Card>
@@ -7256,7 +7267,7 @@ function InterviewsPage({cloud, user, users, isAdmin, toast}) {
             <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:8}}>{[["advance","Advance"],["hold","Hold"],["reject","Reject"],["","Clear"]].map(([k,l])=><Btn key={k||"c"} v={(cur.data.decision||"")===k?"pri":"sec"} sm onClick={()=>act("iv_decide", cur.id, {decision:k, notes:notes[cur.id]!=null?notes[cur.id]:(cur.data.notes||"")}, "Saved")}>{l}</Btn>)}</div>
             <textarea aria-label="Decision notes" rows={2} value={notes[cur.id]!=null?notes[cur.id]:(cur.data.notes||"")} onChange={e=>setNotes(n=>({...n,[cur.id]:e.target.value}))} onBlur={()=>{ if(notes[cur.id]!=null) act("iv_decide", cur.id, {decision:cur.data.decision||"", notes:notes[cur.id]}); }} placeholder="Notes for the hiring team" style={{...iS,width:"100%",boxSizing:"border-box"}}/>
             <div style={{fontSize:11.5,color:"var(--text-3)",marginTop:4}}>Scores and the AI brief support your judgement. The hiring decision is yours.</div>
-            <div style={{marginTop:10}}><Btn v="sec" sm onClick={()=>act("iv_rescore", cur.id, null, "Re-scored")}>Re-score</Btn></div>
+            <div style={{marginTop:10}}><Btn v="sec" sm onClick={()=>rescore(cur.id)}>Re-score</Btn>{cur.data.reason && cur.status==="scoring_failed" && <span style={{fontSize:12,color:"#b91c1c",marginLeft:10}}>Last error: {cur.data.reason}</span>}</div>
           </div>}
           {cur.status==="in_progress" && <div style={{marginTop:8}}><Btn v="dan" sm onClick={()=>act("iv_cancel", cur.id, null, "Interview ended")}>End this interview</Btn></div>}
           {["terminated","expired"].includes(cur.status) && (cur.data.retries||0)<2 && <div style={{marginTop:8}}><Btn v="sec" sm onClick={()=>{ setOpen(null); reopen(cur); }}>Allow retry (new link)</Btn></div>}
