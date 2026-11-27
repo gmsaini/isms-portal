@@ -323,7 +323,7 @@ const SEED_TEAMS = [
 ];
 
 const SEED_USERS = [
-  { id:"u0",  name:"Admin", email:"admin@isms.local",   username:"admin",  password:"admin",    team:null,       role:"admin",   title:"OpSight Administrator",  status:"Active", lastLogin:null,             mustReset:false, costPerHour:85  , engineerLevel:"SME"},
+  { id:"u0",  name:"Admin", email:"admin@isms.local",   username:"admin",  password:"admin",    team:null,       role:"admin",   title:"Syncore Administrator",  status:"Active", lastLogin:null,             mustReset:false, costPerHour:85  , engineerLevel:"SME"},
   { id:"u1",  name:"Alex Chen",      email:"alex@isms.local",    username:"manager",         password:"manager",    team:"Network",  role:"manager", title:"Network Lead",        status:"Active", lastLogin:"2025-03-14",     mustReset:false, costPerHour:75  , engineerLevel:"SME"},
   { id:"u2",  name:"Maria Santos",   email:"maria@isms.local",   username:"maria.santos",    password:"Manager@2",    team:"Security", role:"manager", title:"Security Lead",       status:"Active", lastLogin:"2025-03-13",     mustReset:false, costPerHour:72 , engineerLevel:"SME"},
   { id:"u3",  name:"James Park",     email:"james@isms.local",   username:"james.park",      password:"Manager@3",    team:"Compute",  role:"manager", title:"Compute Lead",        status:"Active", lastLogin:"2025-03-12",     mustReset:false, costPerHour:74 , engineerLevel:"SME"},
@@ -5344,7 +5344,7 @@ const IntegrationsCard = ({cloud, existing, onImport}) => {
     {list && (list.length===0 ? <div style={{fontSize:12,color:"var(--text-3)"}}>No matching incidents found.</div> : <div data-testid="sync-list">
       {list.map(x=>(<label key={x.incidentNo} style={{display:"flex",gap:8,alignItems:"center",fontSize:12,padding:"4px 0",borderBottom:"1px solid var(--surface-3)"}}>
         <input type="checkbox" checked={!!pick[x.incidentNo]} onChange={e=>setPick(p=>({...p,[x.incidentNo]:e.target.checked}))}/>
-        <strong style={{minWidth:90}}>{x.incidentNo}</strong><span style={{flex:1}}>{x.name}</span><span style={{color:"var(--text-4)"}}>{x.severity}</span>{existing.includes(x.incidentNo)&&<span style={{color:"#a16207",fontSize:11}}>already in OpSight</span>}
+        <strong style={{minWidth:90}}>{x.incidentNo}</strong><span style={{flex:1}}>{x.name}</span><span style={{color:"var(--text-4)"}}>{x.severity}</span>{existing.includes(x.incidentNo)&&<span style={{color:"#a16207",fontSize:11}}>already in Syncore</span>}
       </label>))}
       <div style={{marginTop:10}}><Btn onClick={()=>{ onImport(chosen); setList(null); }} disabled={!chosen.length}>Import {chosen.length} incident{chosen.length===1?"":"s"}</Btn></div>
     </div>)}
@@ -6579,7 +6579,7 @@ function SkillTestsPage({cloud, user, users, isAdmin, isMgr, toast}) {
     try {
       const r = await callAiFn(cloud, {mode:"st_assign", skill:asgForm.skill, due:asgForm.due, note:asgForm.note, userIds:ids});
       let mailErr = null;
-      for(const c of r.created) { const e = await sendMail(c.email, "Skill test assigned: "+asgForm.skill, user.name+" has assigned you the "+asgForm.skill+" skill test.", [{severity:"info", title:"Complete the "+asgForm.skill+" test by "+asgForm.due, detail:(asgForm.note?asgForm.note+" - ":"")+ST_COUNT+" questions, "+cfg.timeLimitMin+" min, full screen with camera. Open OpSight > Learning & Training > Skill Tests."}]); if(e) mailErr = e; }
+      for(const c of r.created) { const e = await sendMail(c.email, "Skill test assigned: "+asgForm.skill, user.name+" has assigned you the "+asgForm.skill+" skill test.", [{severity:"info", title:"Complete the "+asgForm.skill+" test by "+asgForm.due, detail:(asgForm.note?asgForm.note+" - ":"")+ST_COUNT+" questions, "+cfg.timeLimitMin+" min, full screen with camera. Open Syncore > Learning & Training > Skill Tests."}]); if(e) mailErr = e; }
       toast("Assigned to "+r.created.length+(r.skipped.length?" ("+r.skipped.length+" skipped: "+r.skipped.slice(0,3).join(", ")+")":"")+(mailErr?". Email not sent: "+mailErr:r.created.length?". Email sent.":""), mailErr?"err":undefined);
       setAsgForm(f=>({...f, sel:{}, note:""})); loadAsgAll();
     } catch(e) { toast(e.message,"err"); }
@@ -8580,11 +8580,16 @@ const iS = {
 };
 const sS = {...iS, background:"var(--surface-2)"};
 
-// OpSight logo mark: an eye (sight) with a pulse line through it (operations). White on a coloured tile.
+// Syncore logo mark: a solid core with two sync arrows circling it. White on a coloured tile.
 const OpsMark = ({size=24}) => (
-  <svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-label="OpSight" role="img">
-    <path d="M2.5 16C6 9.6 10.7 7 16 7s10 2.6 13.5 9c-3.5 6.4-8.2 9-13.5 9S6 22.4 2.5 16Z" stroke="#fff" strokeWidth="2.2" strokeLinejoin="round" fill="rgba(255,255,255,.14)"/>
-    <path d="M8.5 16h4l2-4.6 3 9.2 2-4.6h4" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
+  <svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-label="Syncore" role="img">
+    <circle cx="16" cy="16" r="3.8" fill="#fff"/>
+    <g stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6.6 12.6A10 10 0 0 1 25.4 12.6"/>
+      <path d="M26.75 8.95 25.4 12.6 22.05 10.65"/>
+      <path d="M25.4 19.4A10 10 0 0 1 6.6 19.4"/>
+      <path d="M5.25 23.05 6.6 19.4 9.95 21.35"/>
+    </g>
   </svg>
 );
 
@@ -8777,7 +8782,7 @@ function CloudLogin({sb, onSignedIn, startMode, note}) {
     const m = (e && e.message) ? e.message : String(e);
     if(/rate limit/i.test(m)) return "Too many emails were sent. In Supabase, turn off Authentication > Providers > Email > Confirm email (or wait an hour), then try again.";
     if(/email address .* invalid|invalid.*email/i.test(m)) return "Supabase does not accept this email address. Use a real email address (for example name@yourcompany.com); fake domains such as .local cannot be activated.";
-    if(/database error/i.test(m) || /No OpSight profile/i.test(m)) return "This email is not registered in OpSight. Ask your manager or administrator to add you first.";
+    if(/database error/i.test(m) || /No Syncore profile/i.test(m)) return "This email is not registered in Syncore. Ask your manager or administrator to add you first.";
     if(/invalid login/i.test(m)) return "Incorrect email or password.";
     if(/already registered/i.test(m)) return "This email already has an account. Use Sign in.";
     return m;
@@ -8829,7 +8834,7 @@ function CloudLogin({sb, onSignedIn, startMode, note}) {
         <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:20}}>
           <div style={{width:36,height:36,borderRadius:"var(--radius-md)",background:"var(--brand)",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:14}}><OpsMark size={22}/></div>
           <div>
-            <div style={{fontWeight:800,fontSize:16,color:"var(--text-1)"}}>OpSight</div>
+            <div style={{fontWeight:800,fontSize:16,color:"var(--text-1)"}}>Syncore</div>
             <div style={{fontSize:11,color:"var(--text-3)"}}>Operations & Team Management</div>
           </div>
         </div>
@@ -8901,7 +8906,7 @@ function SplashLoader({label}) {
             <OpsMark size={28}/>
           </div>
         </div>
-        <div style={{fontSize:22,fontWeight:800,letterSpacing:".5px",color:"#0f172a"}}>OpSight</div>
+        <div style={{fontSize:22,fontWeight:800,letterSpacing:".5px",color:"#0f172a"}}>Syncore</div>
         <div style={{fontSize:12,color:"#64748b",marginTop:2}}>Operations & Team Management Platform</div>
         <div style={{width:180,height:4,borderRadius:4,background:"rgba(37,99,235,.12)",margin:"18px auto 10px",overflow:"hidden"}}>
           <div style={{width:"40%",height:"100%",borderRadius:4,background:"linear-gradient(90deg,#2563eb,#7c3aed)",animation:"spl_bar 1.3s ease-in-out infinite"}}/>
@@ -9025,7 +9030,7 @@ function CloudApp() {
       await sb.auth.signOut();
       setLoginNote(pr.error
         ? "Could not read your profile: " + pr.error.message
-        : "You signed in, but no OpSight profile is linked to this account. If you are setting up for the first time, run the seed script (seed.mjs) and check the profiles table in Supabase.");
+        : "You signed in, but no Syncore profile is linked to this account. If you are setting up for the first time, run the seed script (seed.mjs) and check the profiles table in Supabase.");
       setPhase("login");
       return;
     }
@@ -9126,7 +9131,7 @@ function LoginPage({allUsers, onLogin}) {
           <div style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:56,height:56,borderRadius:16,background:"linear-gradient(135deg,#2563eb,#06b6d4)",boxShadow:"0 8px 32px rgba(37,99,235,.45)",marginBottom:16}}>
             <OpsMark size={30}/>
           </div>
-          <div style={{fontSize:28,fontWeight:800,color:"#fff",letterSpacing:-.8,fontFamily:"var(--font-sans)"}}>OpSight</div>
+          <div style={{fontSize:28,fontWeight:800,color:"#fff",letterSpacing:-.8,fontFamily:"var(--font-sans)"}}>Syncore</div>
           <div style={{fontSize:11,color:"rgba(255,255,255,.38)",letterSpacing:2.5,textTransform:"uppercase",marginTop:4,fontFamily:"var(--font-mono)"}}>Operations & Team Management</div>
         </div>
 
@@ -9247,7 +9252,7 @@ function LoginPage({allUsers, onLogin}) {
         )}
 
         <div style={{textAlign:"center",marginTop:22,fontSize:11,color:"rgba(255,255,255,.18)",fontFamily:"var(--font-mono)"}}>
-          OpSight v1.0.0 · Operations & Team Management
+          Syncore v1.0.0 · Operations & Team Management
         </div>
       </div>
     </div>
@@ -12715,7 +12720,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
               <div style={{textAlign:"center",padding:"8px 0 16px"}}>
                 <div style={{width:52,height:52,borderRadius:14,background:"#fef2f2",border:"1px solid #fecaca",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,margin:"0 auto 14px"}}>🗑</div>
                 <div style={{fontSize:15,fontWeight:700,color:"var(--text-1)",marginBottom:6}}>Remove {m?.name}?</div>
-                <div style={{fontSize:12.5,color:"var(--text-3)",lineHeight:1.6}}>This will remove the member from OpSight.<br/>Their existing time log entries will be preserved.</div>
+                <div style={{fontSize:12.5,color:"var(--text-3)",lineHeight:1.6}}>This will remove the member from Syncore.<br/>Their existing time log entries will be preserved.</div>
               </div>
               <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
                 <button onClick={()=>setMConfirm(null)} style={{padding:"9px 22px",borderRadius:"var(--radius-md)",background:"var(--surface)",border:"1px solid var(--border)",fontWeight:600,fontSize:13,cursor:"pointer",color:"var(--text-2)"}}>Cancel</button>
@@ -13654,7 +13659,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     // == SMTP state ==
     const [smtpEnabled,   setSmtpEnabled]   = React.useState(false);
     const [smtpForm,      setSmtpForm]      = React.useState({
-      host:"", port:"587", user:"", password:"", fromName:"OpSight", fromEmail:"",
+      host:"", port:"587", user:"", password:"", fromName:"Syncore", fromEmail:"",
       security:"starttls", replyTo:"",
     });
     const [smtpStatus,    setSmtpStatus]    = React.useState(null);
@@ -13924,7 +13929,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
               {/* Attribute mapping */}
               <Card style={{marginBottom:16}}>
                 <div style={{fontWeight:700,fontSize:13,color:"var(--text-1)",marginBottom:4}}>Attribute Mapping</div>
-                <div style={{fontSize:11,color:"var(--text-3)",marginBottom:14}}>Map your IdP's claim names to OpSight user fields. Leave blank to use defaults.</div>
+                <div style={{fontSize:11,color:"var(--text-3)",marginBottom:14}}>Map your IdP's claim names to Syncore user fields. Leave blank to use defaults.</div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12}}>
                   {[["Email claim","email","e.g. email / upn"],["Display name claim","displayName","e.g. name / displayName"],["Groups claim","groups","e.g. groups / roles"]].map(([label,key,ph])=>(
                     <div key={key}>
@@ -14017,7 +14022,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
                   <div>
                     <div style={{fontSize:11,fontWeight:700,color:"var(--text-3)",marginBottom:5,textTransform:"uppercase",letterSpacing:.7}}>From Name</div>
-                    <input style={iS} value={smtpForm.fromName} onChange={e=>setSmtpForm(f=>({...f,fromName:e.target.value}))} placeholder="OpSight Notifications"/>
+                    <input style={iS} value={smtpForm.fromName} onChange={e=>setSmtpForm(f=>({...f,fromName:e.target.value}))} placeholder="Syncore Notifications"/>
                   </div>
                   <div>
                     <div style={{fontSize:11,fontWeight:700,color:"var(--text-3)",marginBottom:5,textTransform:"uppercase",letterSpacing:.7}}>From Email *</div>
@@ -15235,7 +15240,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
           {[
             {n:1,icon:"📊",title:"Export from tool",desc:"Download CSV from JIRA, HP Service Manager, OpenText SMAX, or Power BI"},
             {n:2,icon:"📤",title:"Upload here",desc:"Drag & drop your CSV file. Headers are auto-detected."},
-            {n:3,icon:"🔀",title:"Map columns",desc:"Review and adjust field mappings to OpSight fields"},
+            {n:3,icon:"🔀",title:"Map columns",desc:"Review and adjust field mappings to Syncore fields"},
             {n:4,icon:"✅",title:"Import data",desc:"Time logs & activities are created automatically per member"},
           ].map(s=>(
             <div key={s.n} style={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-md)",padding:"14px 16px",display:"flex",gap:12,alignItems:"flex-start"}}>
@@ -15386,7 +15391,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
                 </div>
                 <div style={{padding:"12px 18px",background:"var(--surface-2)",borderTop:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <div style={{fontSize:12,color:"var(--text-3)"}}>
-                    Showing 8 of <strong>{rawRows.length}</strong> rows · Members not found in OpSight will be skipped
+                    Showing 8 of <strong>{rawRows.length}</strong> rows · Members not found in Syncore will be skipped
                   </div>
                   <button onClick={runImport} disabled={uploadState==="importing"}
                     style={{padding:"9px 28px",borderRadius:"var(--radius-md)",background:uploadState==="importing"?"var(--text-4)":"linear-gradient(135deg,#1a56db,#0891b2)",color:"#fff",border:"none",fontWeight:800,fontSize:14,cursor:uploadState==="importing"?"not-allowed":"pointer",boxShadow:"0 3px 10px rgba(26,86,219,.3)"}}>
@@ -15404,7 +15409,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
             <div style={{textAlign:"center",padding:"20px 0 10px"}}>
               <div style={{fontSize:48,marginBottom:12}}>🎉</div>
               <div style={{fontSize:20,fontWeight:800,color:"#059669",marginBottom:6}}>Import Complete!</div>
-              <div style={{fontSize:13,color:"var(--text-3)",marginBottom:24}}>Ticket data has been merged into OpSight — time logs and activities updated</div>
+              <div style={{fontSize:13,color:"var(--text-3)",marginBottom:24}}>Ticket data has been merged into Syncore — time logs and activities updated</div>
             </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:24}}>
               {[
@@ -15466,7 +15471,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
 
     const INTEGRATIONS = [
       {id:"snow", name:"ServiceNow", vendor:"ServiceNow", logo:"🟩", color:"#2e9e4f", bg:"#f0fff4", status:"primary",
-       desc:"Pull incidents, change requests, service requests and tasks from your ServiceNow instance into OpSight time logs and activities.",
+       desc:"Pull incidents, change requests, service requests and tasks from your ServiceNow instance into Syncore time logs and activities.",
        features:[
          "Import INC, CHG, REQ, RITM and TASK records",
          "Basic auth or OAuth 2.0 (client credentials)",
@@ -15504,7 +15509,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
        ],
        docs:"https://developer.servicenow.com/dev.do#!/reference/api/latest/rest/c_TableAPI"},
       {id:"smax", name:"OpenText SMAX", vendor:"OpenText", logo:"🟧", color:"#e35205", bg:"#fff4ec", status:"primary",
-       desc:"Connect OpenText Service Management Automation X (SMAX) to pull incidents, requests, changes and problems into OpSight time logs and activities.",
+       desc:"Connect OpenText Service Management Automation X (SMAX) to pull incidents, requests, changes and problems into Syncore time logs and activities.",
        features:[
          "Import Incident, Request, Change and Problem records",
          "OAuth 2.0 or SMAX user token authentication",
@@ -15542,8 +15547,8 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
        ],
        docs:"https://docs.microfocus.com/doc/SMAX/"},
       {id:"jira", name:"JIRA", vendor:"Atlassian", logo:"🟦", color:"#0052cc", bg:"#e8f0ff", status:"primary",
-       desc:"Connect Atlassian JIRA to pull issues, worklogs and sprint data into OpSight time logs and activities.",
-       features:["Import time logs from JIRA worklogs","Map issue types to activity categories","Map assignees to OpSight team members","Webhook support for near real-time updates"],
+       desc:"Connect Atlassian JIRA to pull issues, worklogs and sprint data into Syncore time logs and activities.",
+       features:["Import time logs from JIRA worklogs","Map issue types to activity categories","Map assignees to Syncore team members","Webhook support for near real-time updates"],
        fields:[
          {key:"url",     label:"JIRA Base URL",  placeholder:"https://yourorg.atlassian.net", type:"text", req:true},
          {key:"email",   label:"Account Email",  placeholder:"admin@yourorg.com", type:"text", req:true},
@@ -15558,7 +15563,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
        ],
        docs:"https://developer.atlassian.com/cloud/jira/platform/rest/v3/"},
       {id:"bmc", name:"BMC Helix", vendor:"BMC Software", logo:"🟥", color:"#cc0000", bg:"#fff0f0", status:"enterprise",
-       desc:"Integrate with BMC Helix ITSM to synchronise incidents, problems and changes with OpSight time tracking.",
+       desc:"Integrate with BMC Helix ITSM to synchronise incidents, problems and changes with Syncore time tracking.",
        features:["Helix ITSM support","REST API connector","Automated ticket-to-activity mapping","Custom field mapping"],
        fields:[
          {key:"url",  label:"Helix URL", placeholder:"https://helix.yourorg.com", type:"text", req:true},
@@ -15573,7 +15578,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
        ],
        docs:"https://docs.bmc.com/docs/helixplatform"},
       {id:"powerbi", name:"Power BI", vendor:"Microsoft", logo:"🟨", color:"#e8a000", bg:"#fffbeb", status:"enterprise",
-       desc:"Embed Power BI dashboards in OpSight for advanced analytics and executive reporting.",
+       desc:"Embed Power BI dashboards in Syncore for advanced analytics and executive reporting.",
        features:["Embed utilisation and cost dashboards","Row-level security per team","Export to PDF"],
        fields:[
          {key:"workspaceId", label:"Workspace ID",  placeholder:"GUID", type:"text", req:true},
@@ -15623,10 +15628,10 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
 
     return (
       <div>
-        <PageHero icon="🔗" title="Integrations" subtitle="Connect OpSight to ServiceNow, OpenText SMAX, JIRA, BMC Helix and Power BI"/>
+        <PageHero icon="🔗" title="Integrations" subtitle="Connect Syncore to ServiceNow, OpenText SMAX, JIRA, BMC Helix and Power BI"/>
 
         <InfoBanner color="#92400e" bg="#fffbeb" border="#fde68a" icon="ℹ️">
-          This screen stores and validates connection settings. Pulling records live needs the OpSight backend connector; until it is deployed, use <strong>Upload Tickets</strong> with a CSV export (steps are shown for each tool).
+          This screen stores and validates connection settings. Pulling records live needs the Syncore backend connector; until it is deployed, use <strong>Upload Tickets</strong> with a CSV export (steps are shown for each tool).
         </InfoBanner>
 
         <Tabs tabs={[{id:"catalog",label:"Catalog ("+INTEGRATIONS.length+")"},{id:"configured",label:"Configure"+(nConfigured?" ("+nConfigured+" set)":"")},{id:"synclog",label:"Activity Log ("+syncLog.length+")"}]} active={tab} onChange={setTab}/>
@@ -15744,7 +15749,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
                     <Card style={{padding:0,overflow:"hidden"}}>
                       <div style={{padding:"12px 16px",fontWeight:700,fontSize:13,color:"var(--text-1)",borderBottom:"1px solid var(--surface-3)"}}>Field mapping</div>
                       <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-                        <thead><tr style={{background:"var(--surface-2)"}}><TH c={curInt.name+" field"}/><TH c="OpSight field"/></tr></thead>
+                        <thead><tr style={{background:"var(--surface-2)"}}><TH c={curInt.name+" field"}/><TH c="Syncore field"/></tr></thead>
                         <tbody>
                           {curInt.mapping.map((m,i)=>(
                             <tr key={m[0]} style={{borderBottom:"1px solid var(--surface-3)",background:i%2===0?"#fff":"var(--surface-2)"}}>
@@ -16392,8 +16397,8 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     return (
       <div style={{maxWidth:520,margin:"0 auto"}}>
         <div style={{marginBottom:22}}>
-          <PageHero icon="🔑" title="Change Password" subtitle="Update your OpSight login credentials"/>
-          <div style={{fontSize:12,color:"var(--text-3)",marginTop:3}}>Update your OpSight account password</div>
+          <PageHero icon="🔑" title="Change Password" subtitle="Update your Syncore login credentials"/>
+          <div style={{fontSize:12,color:"var(--text-3)",marginTop:3}}>Update your Syncore account password</div>
         </div>
 
         <Card style={{marginBottom:14}}>
@@ -16599,7 +16604,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
               <div style={{width:36,height:36,borderRadius:"var(--radius-md)",background:"#fef2f2",display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,flexShrink:0}}>🚪</div>
               <div style={{flex:1}}>
                 <div style={{fontWeight:700,fontSize:13,color:"#dc2626"}}>Sign Out</div>
-                <div style={{fontSize:11,color:"var(--text-3)"}}>Log out of OpSight</div>
+                <div style={{fontSize:11,color:"var(--text-3)"}}>Log out of Syncore</div>
               </div>
               <span style={{color:"var(--border-2)",fontSize:16}}>-></span>
             </div>
@@ -18000,12 +18005,12 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
         else if(pct<40 && sLog.length>20 && (monthByUser[u.id]!==undefined || lastByUser[u.id])) add({id:"u-under-"+u.id, domain:"People", sev:"info", score:25+(40-pct)/3,
           title:u.name+" has spare capacity ("+Math.round(pct)+"% used)", detail:u.team+" · only "+fmtH(m)+" logged in "+monthKey,
           why:"Either effort is not being logged or there is headroom for backlog work.",
-          action:{label:"Copy reminder", run:()=>{ const t="Hi "+u.name.split(" ")[0]+", please make sure your time for "+monthKey+" is logged in OpSight, or let me know if you have capacity for more work."; try{navigator.clipboard.writeText(t);}catch(e){} showToast("Reminder text copied"); }}});
+          action:{label:"Copy reminder", run:()=>{ const t="Hi "+u.name.split(" ")[0]+", please make sure your time for "+monthKey+" is logged in Syncore, or let me know if you have capacity for more work."; try{navigator.clipboard.writeText(t);}catch(e){} showToast("Reminder text copied"); }}});
         const lu = lastByUser[u.id]; const gap = lu ? Math.round((anchor-toD(lu))/dayMs) : null;
         if(gap!==null && gap>=7 && u.role!=="admin") add({id:"u-gap-"+u.id, domain:"People", sev:"medium", score:36+Math.min(gap,30)/3,
           title:u.name+" has not logged time for "+gap+" days", detail:u.team+" · last entry "+lu,
           why:"Gaps break utilisation and cost reporting.",
-          action:{label:"Copy reminder", run:()=>{ const t="Hi "+u.name.split(" ")[0]+", I noticed no time logged since "+lu+". Please update OpSight today."; try{navigator.clipboard.writeText(t);}catch(e){} showToast("Reminder text copied"); }}});
+          action:{label:"Copy reminder", run:()=>{ const t="Hi "+u.name.split(" ")[0]+", I noticed no time logged since "+lu+". Please update Syncore today."; try{navigator.clipboard.writeText(t);}catch(e){} showToast("Reminder text copied"); }}});
       });
       teamNames.forEach(t=>{
         const hc = sUsers.filter(u=>u.team===t).length, cap = hc*MINS_PER_ENGINEER_MONTH;
@@ -18113,7 +18118,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
       const top = active.filter(f=>f.sev==="critical"||f.sev==="high").slice(0,15);
       setDigestBusy(true);
       try {
-        const d = await callAiFn(cloud, {title:"OpSight digest - "+model.anchorStr, intro:(isAdmin?"All teams":user.team+" team")+": "+cnt("critical")+" critical, "+cnt("high")+" high findings.", findings:top.map(f=>({severity:f.sev,title:f.title,detail:f.detail}))}, "notify");
+        const d = await callAiFn(cloud, {title:"Syncore digest - "+model.anchorStr, intro:(isAdmin?"All teams":user.team+" team")+": "+cnt("critical")+" critical, "+cnt("high")+" high findings.", findings:top.map(f=>({severity:f.sev,title:f.title,detail:f.detail}))}, "notify");
         showToast((d.sent&&d.sent.length?"Digest sent: "+d.sent.join(", "):"Nothing sent")+(d.skipped&&d.skipped.length?" (skipped "+d.skipped.join("; ")+")":""), d.sent&&d.sent.length?"ok":"err");
       } catch(e) { showToast(e.message||"Could not send digest","err"); }
       setDigestBusy(false);
@@ -18122,7 +18127,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     const exportScore = () => { dl("isms_team_scorecard_"+model.anchorStr+".csv", ["Team,Score,Headcount,Utilisation %,Reactive %,Suspended,Over estimate,Open incidents,Hours,Cost"].concat(model.scorecard.map(t=>[t.team,t.score,t.hc,Math.round(t.util),Math.round(t.re),t.sp,t.over,t.openMi,Math.round(t.hrs),Math.round(t.cost)].join(","))).join("\n")); showToast("Scorecard exported"); };
     const narrative = () => {
       const top = active.slice(0,5);
-      const lines = ["OpSight Executive Summary - data as of "+model.anchorStr, "", "Average team score: "+org+"/100 across "+model.scorecard.length+" team(s), "+model.nUsers+" engineers, "+model.nAct+" activities.",
+      const lines = ["Syncore Executive Summary - data as of "+model.anchorStr, "", "Average team score: "+org+"/100 across "+model.scorecard.length+" team(s), "+model.nUsers+" engineers, "+model.nAct+" activities.",
         "Open findings: "+cnt("critical")+" critical, "+cnt("high")+" high, "+cnt("medium")+" medium, "+cnt("info")+" informational.", ""];
       if(model.scorecard.length){ const w=model.scorecard[0], b=model.scorecard[model.scorecard.length-1]; lines.push("Strongest team: "+b.team+" ("+b.score+"). Needs most attention: "+w.team+" ("+w.score+").",""); }
       if(model.projHrs!==null) lines.push("Forecast: about "+Math.round(model.projHrs)+"h of effort next month vs "+model.totalCap+"h capacity ("+Math.round(model.projHrs/Math.max(1,model.totalCap)*100)+"%).","");
@@ -18132,7 +18137,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
     const printReport = () => {
       const w = window.open("","_blank"); if(!w){ showToast("Allow pop-ups to print","err"); return; }
       const esc = s=>String(s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
-      w.document.write("<html><head><title>OpSight Executive Summary</title><style>body{font-family:system-ui,Arial;margin:32px;color:#0f172a}h1{margin:0}table{border-collapse:collapse;width:100%;margin:12px 0}td,th{border:1px solid #cbd5e1;padding:6px 8px;font-size:12px;text-align:left}th{background:#f1f5f9}.s{font-weight:700}</style></head><body><h1>Operations & Team Management Platform</h1><div>Executive summary - data as of "+esc(model.anchorStr)+"</div><h2>Average team score: "+org+"/100</h2><pre style='font-family:inherit;white-space:pre-wrap'>"+esc(narrative())+"</pre><h3>Team scorecard</h3><table><tr><th>Team</th><th>Score</th><th>Util %</th><th>Reactive %</th><th>Suspended</th><th>Over est.</th><th>Open inc.</th></tr>"+model.scorecard.map(t=>"<tr><td>"+esc(t.team)+"</td><td class=s>"+t.score+"</td><td>"+Math.round(t.util)+"</td><td>"+Math.round(t.re)+"</td><td>"+t.sp+"</td><td>"+t.over+"</td><td>"+t.openMi+"</td></tr>").join("")+"</table><h3>Open findings</h3><table><tr><th>Severity</th><th>Area</th><th>Finding</th><th>Detail</th></tr>"+active.map(f=>"<tr><td>"+sevMeta[f.sev].l+"</td><td>"+esc(f.domain)+"</td><td>"+esc(f.title)+"</td><td>"+esc(f.detail)+"</td></tr>").join("")+"</table></body></html>");
+      w.document.write("<html><head><title>Syncore Executive Summary</title><style>body{font-family:system-ui,Arial;margin:32px;color:#0f172a}h1{margin:0}table{border-collapse:collapse;width:100%;margin:12px 0}td,th{border:1px solid #cbd5e1;padding:6px 8px;font-size:12px;text-align:left}th{background:#f1f5f9}.s{font-weight:700}</style></head><body><h1>Operations & Team Management Platform</h1><div>Executive summary - data as of "+esc(model.anchorStr)+"</div><h2>Average team score: "+org+"/100</h2><pre style='font-family:inherit;white-space:pre-wrap'>"+esc(narrative())+"</pre><h3>Team scorecard</h3><table><tr><th>Team</th><th>Score</th><th>Util %</th><th>Reactive %</th><th>Suspended</th><th>Over est.</th><th>Open inc.</th></tr>"+model.scorecard.map(t=>"<tr><td>"+esc(t.team)+"</td><td class=s>"+t.score+"</td><td>"+Math.round(t.util)+"</td><td>"+Math.round(t.re)+"</td><td>"+t.sp+"</td><td>"+t.over+"</td><td>"+t.openMi+"</td></tr>").join("")+"</table><h3>Open findings</h3><table><tr><th>Severity</th><th>Area</th><th>Finding</th><th>Detail</th></tr>"+active.map(f=>"<tr><td>"+sevMeta[f.sev].l+"</td><td>"+esc(f.domain)+"</td><td>"+esc(f.title)+"</td><td>"+esc(f.detail)+"</td></tr>").join("")+"</table></body></html>");
       w.document.close(); setTimeout(()=>w.print(),400);
     };
 
@@ -18586,7 +18591,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
           "Implement AIOps/event correlation tooling to auto-filter alert noise (target 40% noise reduction)",
           "Create incident categories and track repeat incidents weekly — eliminate top 3 causes each month",
           "Introduce change freeze windows around major deployments to reduce post-change incidents",
-          "Establish P1/P2 incident post-mortems within 48 hours — mandatory action items tracked in OpSight",
+          "Establish P1/P2 incident post-mortems within 48 hours — mandatory action items tracked in Syncore",
           "Automate first-response runbooks for top 10 incident types using Ansible/Terraform",
         ],
         kpi:`Incident time: ${incidentPct}% -> Target 15% | Est. savings: ${fmtM(Math.round((incidentPct-15)/100*totalMins))}`,
@@ -18627,13 +18632,13 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
         icon:"💰", title:"Resource Utilisation — Optimise Human Capital Efficiency",
         finding:`Average team utilisation is ${avgUtil}%. ${avgUtil<65?"Under-utilised teams represent cost waste and indicate poor demand management.":avgUtil>85?"Over-utilisation risks burnout, quality degradation and attrition.":"Utilisation is in a healthy band but can be optimised."}`,
         rootCause: avgUtil<65
-          ? "Low utilisation signals demand forecasting gaps — work intake isn't being matched to available capacity. Activities may not be captured in OpSight."
+          ? "Low utilisation signals demand forecasting gaps — work intake isn't being matched to available capacity. Activities may not be captured in Syncore."
           : avgUtil>85
           ? "Sustained high utilisation without buffer capacity means no time for proactive work, learning, or incident absorption — a risk multiplier."
           : "Good baseline, but uneven distribution across teams creates bottlenecks.",
         recommendations:[
           avgUtil<65 ? "Conduct demand-capacity matching workshops quarterly — align project intake to available FTE capacity" : "Implement a capacity buffer policy — no team should exceed 85% planned utilisation",
-          "Use OpSight bandwidth data in quarterly business reviews to negotiate headcount or project deferrals",
+          "Use Syncore bandwidth data in quarterly business reviews to negotiate headcount or project deferrals",
           "Implement a 'golden ratio' target: 60% BAU/incidents, 30% projects, 10% learning",
           "Track utilisation trends weekly — flag teams approaching 85% 4 weeks in advance",
           "Consider shared services model for low-utilisation specialist skills across teams",
@@ -18648,7 +18653,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
         rootCause:"Estimation errors often indicate: (a) technical complexity not surfaced during planning, (b) hidden dependencies discovered late, or (c) scope creep absorbed without re-baselining.",
         recommendations:[
           "Run estimation retrospectives on every over-budget activity — identify pattern categories",
-          "Adopt Reference Class Forecasting: use OpSight historical data to calibrate estimates by activity type",
+          "Adopt Reference Class Forecasting: use Syncore historical data to calibrate estimates by activity type",
           "Add complexity scores to new activities (S/M/L/XL) using Planning Poker or T-shirt sizing",
           "Apply 15-20% contingency buffer to all Change and Project activities by default",
           "Track Estimation Accuracy as a KPI — target: <10% of activities exceed estimate by >20%",
@@ -18666,7 +18671,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
           "Weekly 15-minute standup focused exclusively on clearing stale/suspended items",
           "Enforce a 'definition of done' checklist before closing activities — prevent zombie work",
           "Review all stale activities in monthly manager reviews — close, defer, or re-assign within 48h",
-          "Use OpSight flags to auto-alert managers when any activity has no log entry for >3 business days",
+          "Use Syncore flags to auto-alert managers when any activity has no log entry for >3 business days",
         ],
         kpi:`Stale activities: ${staleActs} -> Target 0 | Each stale day costs: ${fmtM(Math.round(totalMins/Math.max(scopeActs.length,1)))} avg effort`,
         frameworks:["Lean: Flow Efficiency","Kanban: WIP Limits","ITIL v4: Change Enablement"]
@@ -18679,7 +18684,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
           ? "Work is systematically mis-allocated — L3/SME engineers are doing L1/L2 work, and/or juniors are unsupported on senior tasks without mentoring structure."
           : avgLevelMatch<75
           ? "Level-match is improving but senior engineers still absorbing too much routine work. Delegation and task routing needs formalising."
-          : "Good level-match overall. Monitor individual outliers and use OpSight Level Analysis to spot regressions.",
+          : "Good level-match overall. Monitor individual outliers and use Syncore Level Analysis to spot regressions.",
         recommendations:[
           "Review Level Analysis page monthly — act on any engineer with >40% under-levelled work",
           "Create a task routing rule: L1 activities should only be assigned to L1/L2 engineers by default",
@@ -18711,12 +18716,12 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
         id:"r8", nav:"prod_overview", framework:"DORA / SRE", priority:meetingPct>15?"High":meetingPct>10?"Medium":"Good",
         icon:"📅", title:"Meeting Load — Protect Deep Work Time",
         finding:`${meetingPct}% of logged time is in meetings (${fmtM(meetingMins)}). For technical infra teams, >10% meeting load significantly degrades engineering output quality.`,
-        rootCause:"High meeting overhead in ops teams often signals poor async communication practices, unclear decision-making structures, or status update meetings that could be replaced by dashboards like OpSight.",
+        rootCause:"High meeting overhead in ops teams often signals poor async communication practices, unclear decision-making structures, or status update meetings that could be replaced by dashboards like Syncore.",
         recommendations:[
-          "Audit all recurring meetings — cancel any that can be replaced by OpSight dashboards or async updates",
+          "Audit all recurring meetings — cancel any that can be replaced by Syncore dashboards or async updates",
           "Introduce 'No Meeting Wednesday' — protect at least one full deep-work day per week",
-          "Replace status update meetings with OpSight weekly digest report shared via email/Teams",
-          "Implement async-first communication for non-urgent items (written updates, OpSight comments)",
+          "Replace status update meetings with Syncore weekly digest report shared via email/Teams",
+          "Implement async-first communication for non-urgent items (written updates, Syncore comments)",
           "Cap engineer participation in cross-functional meetings to <2 per week without manager approval",
         ],
         kpi:`Meeting time: ${meetingPct}% -> Target <10% | Time recoverable: ${fmtM(Math.round(Math.max(0,meetingPct-10)/100*totalMins))}`,
@@ -19103,7 +19108,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
         {activeTab==="trends" && (
           <div>
             <InfoBanner color="#1e40af" bg="var(--brand-light)" border="#bfdbfe" icon="📈">
-              Trend data shows simulated 6-month trajectory. Current period (Mar) reflects actual OpSight data. Historical months use interpolated estimates.
+              Trend data shows simulated 6-month trajectory. Current period (Mar) reflects actual Syncore data. Historical months use interpolated estimates.
             </InfoBanner>
 
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}>
@@ -19356,10 +19361,10 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
                actions:[
                  {owner:"All Managers",  action:`Conduct Problem Management review on top 5 recurring incidents (${incidentPct}% incident load)`, impact:"High", effort:"Low"},
                  {owner:"All Teams",     action:"Implement WIP limit of 2 active activities per engineer — reduce stale backlog", impact:"High", effort:"Low"},
-                 {owner:"OpSight Admin",    action:"Mandate daily time logging — every member logs before end of day", impact:"High", effort:"Low"},
+                 {owner:"Syncore Admin",    action:"Mandate daily time logging — every member logs before end of day", impact:"High", effort:"Low"},
                  {owner:"Team Leads",    action:`Review all ${staleActs} stale activities — close, defer or reassign within 48h`, impact:"Medium", effort:"Low"},
                  {owner:"All Managers",  action:`Review Level Analysis — redirect below-grade work away from ${underLevelledCount} senior engineer${underLevelledCount!==1?"s":""}`, impact:"High", effort:"Low"},
-                 {owner:"Management",    action:"Schedule capacity review — validate OpSight data vs actual headcount and planned projects", impact:"High", effort:"Low"},
+                 {owner:"Management",    action:"Schedule capacity review — validate Syncore data vs actual headcount and planned projects", impact:"High", effort:"Low"},
                ]},
               {period:"Days 31–60", icon:"⚡", color:"#d97706", bg:"#fffbeb", border:"#fde68a",
                focus:"Process improvements — build the habits",
@@ -19367,7 +19372,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
                  {owner:"All Teams",     action:`Identify and ticket top 5 automation candidates from BAU backlog (${bauPct}% BAU currently)`, impact:"High", effort:"Medium"},
                  {owner:"All Teams",     action:`Automate top 3 repeat SR types from Repeat Patterns page — ~${Math.round(totalToilHrs*0.6)}h recoverable`, impact:"High", effort:"Medium"},
                  {owner:"Team Leads",    action:"Create Skills Matrix per team — map to required cloud/infra skills for next 12 months", impact:"Medium", effort:"Medium"},
-                 {owner:"Engineering",   action:"Introduce post-mortems for all P1/P2 incidents — action items tracked in OpSight", impact:"High", effort:"Medium"},
+                 {owner:"Engineering",   action:"Introduce post-mortems for all P1/P2 incidents — action items tracked in Syncore", impact:"High", effort:"Medium"},
                  {owner:"All Teams",     action:`Reserve 4h/week for learning — block in calendars (training currently at ${trainingPct}% vs 10% target)`, impact:"Medium", effort:"Low"},
                ]},
               {period:"Days 61–90", icon:"🎯", color:"#059669", bg:"#f0fdf4", border:"#a7f3d0",
@@ -19376,7 +19381,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
                  {owner:"Engineering",   action:"Deliver first automation sprint — target toil reduction of 20% on top 3 manual processes", impact:"High", effort:"High"},
                  {owner:"All Managers",  action:`Set Q3 level-match targets per engineer — use Level Analysis trends for appraisals (current: ${avgLevelMatch}% -> target 75%)`, impact:"Medium", effort:"Medium"},
                  {owner:"Team Leads",    action:"Run quarterly estimation retrospective — build reference class forecast for activity types", impact:"Medium", effort:"Medium"},
-                 {owner:"Management",    action:"Present intelligence report to senior leadership — use OpSight data to justify Q3 headcount/tooling investment", impact:"High", effort:"Medium"},
+                 {owner:"Management",    action:"Present intelligence report to senior leadership — use Syncore data to justify Q3 headcount/tooling investment", impact:"High", effort:"Medium"},
                  {owner:"All Teams",     action:`Set Q3 OKRs using this benchmark report — reactive<30%, automation>20%, incidents<15%, level-match>${avgLevelMatch+10}%`, impact:"High", effort:"Medium"},
                ]},
             ].map(phase=>(
@@ -20133,7 +20138,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
 
 
   // ====================================================================
-  //  PAGE: ABOUT OpSight — FEATURE GUIDE
+  //  PAGE: ABOUT Syncore — FEATURE GUIDE
   //  Fully derived from FEATURE_REGISTRY — no separate hardcoded list.
   //  Adding/removing/editing an entry in FEATURE_REGISTRY automatically
   //  updates the nav AND this guide simultaneously.
@@ -20245,7 +20250,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
                 </svg>
               </div>
               <div>
-                <div style={{fontSize:28,fontWeight:800,color:"#fff",letterSpacing:-.8,lineHeight:1}}>OpSight Feature Guide</div>
+                <div style={{fontSize:28,fontWeight:800,color:"#fff",letterSpacing:-.8,lineHeight:1}}>Syncore Feature Guide</div>
                 <div style={{fontSize:13,color:"rgba(255,255,255,.5)",marginTop:4,fontFamily:"var(--font-mono)",letterSpacing:1}}>INFRASTRUCTURE SERVICE MANAGEMENT SYSTEM</div>
               </div>
             </div>
@@ -20674,7 +20679,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
             <OpsMark size={20}/>
           </div>
           <div>
-            <div style={{fontSize:16,fontWeight:800,letterSpacing:-.5,color:"var(--text-1)",fontFamily:"var(--font-sans)"}}>OpSight</div>
+            <div style={{fontSize:16,fontWeight:800,letterSpacing:-.5,color:"var(--text-1)",fontFamily:"var(--font-sans)"}}>Syncore</div>
             <div style={{fontSize:8,color:"rgba(15,23,42,0.60)",letterSpacing:2.5,textTransform:"uppercase",fontWeight:600,fontFamily:"var(--font-mono)"}}>Ops & Team Mgmt</div>
           </div>
         </div>
@@ -20783,7 +20788,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
             <span style={{fontSize:11,fontWeight:600,color:"rgba(15,23,42,0.85)",flex:1,textAlign:"left"}}>Feature Guide</span>
             <span style={{fontSize:9,color:"rgba(15,23,42,0.55)"}}>-></span>
           </button>
-          <div style={{fontSize:9,color:"rgba(15,23,42,0.48)",textAlign:"center",fontFamily:"var(--font-mono)",letterSpacing:1}}>OpSight v1.0.0 · ENTERPRISE</div>
+          <div style={{fontSize:9,color:"rgba(15,23,42,0.48)",textAlign:"center",fontFamily:"var(--font-mono)",letterSpacing:1}}>Syncore v1.0.0 · ENTERPRISE</div>
         </div>
       </div>
 
@@ -20797,7 +20802,7 @@ function PortalApp({initialUser, allUsersInit, cloud}) {
             <div style={{minWidth:0}}>
               <div style={{fontSize:15,fontWeight:800,color:"var(--text-1)",letterSpacing:-.3,lineHeight:1.2}}>{PAGE_TITLE[page]||page}</div>
               <div style={{fontSize:10,color:"var(--text-4)",fontFamily:"var(--font-mono)",marginTop:1,display:"flex",alignItems:"center",gap:4}}>
-                <span>OpSight</span>
+                <span>Syncore</span>
                 {user.team && <><span style={{color:"var(--border-2)"}}>›</span><span style={{color:tCol(user.team),fontWeight:600}}>{user.team}</span></>}
                 <span style={{color:"var(--border-2)"}}>›</span>
                 <span style={{color:"var(--brand)"}}>{PAGE_TITLE[page]||page}</span>
