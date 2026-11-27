@@ -7261,11 +7261,13 @@ function ResourcePlanningPage({items, setItems, users, leaves, cloud, user, isAd
             <Lbl t="To"><input type="date" style={iS} value={to} onChange={e=>setTo(e.target.value)}/></Lbl>
             <label style={{fontSize:12.5,color:"var(--text-2)",display:"flex",gap:6,alignItems:"center",paddingBottom:10}}><input type="checkbox" checked={cross} onChange={e=>setCross(e.target.checked)}/> Allow cover from other teams</label>
             <div style={{flex:1}}/>
-            <Btn v="sec" onClick={runAssign} disabled={ai.busy||!eff.length}>{ai.busy?"Analysing…":"✨ Ask AI to review assignments"}</Btn>
+            <Btn v="sec" onClick={runAssign} disabled={ai.busy||!projects.length}>{ai.busy?"Analysing…":"✨ Ask AI to review assignments"}</Btn>
             <Btn v="suc" onClick={publish}>Confirm & publish plan</Btn>
           </div>
           {published && <div style={{fontSize:11.5,color:"var(--text-3)",marginTop:8}}>Last published {new Date(published.at).toLocaleString()} by {published.by} for {rpRange(published.from,published.to)} · {published.pct}% covered</div>}
           {ai.err && <div style={{color:"#b91c1c",fontSize:12.5,marginTop:8}}>{ai.err}</div>}
+          {!projects.length && <div style={{fontSize:12,color:"var(--text-3)",marginTop:8}}>Add a project first to enable the AI review.</div>}
+          {projects.length>0 && !eff.length && <div style={{fontSize:12,color:"var(--text-3)",marginTop:8}}>No leave needs cover in this period; the AI will review staffing depth and risks instead.</div>}
         </Card>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10}}>
           <StStat icon="🛡" label="Cover coverage" value={pct+"%"} sub={(needDays-openDays)+" of "+needDays+" person-days"} tone={pct>=100?"green":pct>=80?"amber":"red"}/>
