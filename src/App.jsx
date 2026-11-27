@@ -7105,6 +7105,7 @@ function ResourcePlanningPage({items, setItems, users, leaves, cloud, user, isAd
   const [from, setFrom] = React.useState(rpToday());
   const [to, setTo] = React.useState(lvStr(new Date(Date.now()+28*86400000)));
   const [cross, setCross] = React.useState(true);
+  const [calProj, setCalProj] = React.useState("");
   const [ov, setOv] = React.useState({});            // manual overrides: segment key -> userId
   const plan = React.useMemo(()=>rpBuildPlan({from, to, projects, memberSkills:mskills, users, leaves, opts:{crossTeam:cross}}), [items, users, leaves, from, to, cross]);
   // effective picks after manual overrides (an override is only honoured when the person still holds the skill and is free)
@@ -7123,6 +7124,8 @@ function ResourcePlanningPage({items, setItems, users, leaves, cloud, user, isAd
   const effGaps = plan.gaps.filter(g=>{ const s = eff.find(x=>x.projectId===g.projectId && x.skill===g.skill && x.from<=g.from && x.to>=g.to); return !s || s.open.length>0; });
   const needDays = plan.stats.needDays, openDays = effGaps.reduce((a,g)=>a+g.dates.length,0);
   const pct = needDays ? Math.round((needDays-openDays)/needDays*100) : 100;
+  const vEff = eff.filter(s=>!calProj||s.projectId===calProj), vGaps = effGaps.filter(g=>!calProj||g.projectId===calProj), vUnst = plan.unstaffed.filter(u=>!calProj||u.projectId===calProj);
+  const vNeed = vEff.reduce((a,s)=>a+s.dates.length*s.deficit,0), vOpen = vGaps.reduce((a,g)=>a+g.dates.length,0), vPct = vNeed ? Math.round((vNeed-vOpen)/vNeed*100) : 100;
 
   // ---- AI optimise ----
   const [ai, setAi] = React.useState({busy:false, err:"", res:null});
@@ -7201,9 +7204,8 @@ function ResourcePlanningPage({items, setItems, users, leaves, cloud, user, isAd
 
   // ---- monthly calendar per project ----
   const [calMonth, setCalMonth] = React.useState(rpToday().slice(0,7));
-  const [calProj, setCalProj] = React.useState("");
   const calData = React.useMemo(()=>{
-    if(tab!=="cal") return null;
+    if(tab!=="cal" && tab!=="plan") return null;
     const [y,m] = calMonth.split("-").map(Number);
     const first = calMonth+"-01"; const last = lvStr(new Date(Date.UTC(y, m, 0)));
     const cp = rpBuildPlan({from:first, to:last, projects, memberSkills:mskills, users, leaves, opts:{crossTeam:cross}});
@@ -7242,93 +7244,16 @@ function ResourcePlanningPage({items, setItems, users, leaves, cloud, user, isAd
   }, [tab, calMonth, items, users, leaves, cross, ov]);
   const shiftMonth = n => { const [y,m] = calMonth.split("-").map(Number); setCalMonth(lvStr(new Date(Date.UTC(y,m-1+n,1))).slice(0,7)); };
 
-  const TABS = [["plan","🗓 Coverage plan"],["cal","📅 Calendar"],["projects","📁 Projects ("+projects.length+")"],["skills","🧩 Skills & people"],["train","🎓 Training"]];
-  const cell = {padding:"8px 10px",borderBottom:"1px solid var(--border)",fontSize:12.5,verticalAlign:"top"};
-  const th = {...cell,fontWeight:700,color:"var(--text-2)",background:"var(--surface-2)",textAlign:"left",whiteSpace:"nowrap"};
-  const setReq = (i,k,v) => setPm(p=>({...p, requirements:p.requirements.map((r,j)=>j===i?{...r,[k]:v}:r)}));
-  const setStf = (i,k,v) => setPm(p=>({...p, staff:p.staff.map((r,j)=>j===i?{...r,[k]:v}:r)}));
-
-  return (
-    <div style={{display:"flex",flexDirection:"column",gap:14}}>
-      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-        {TABS.map(([k,l])=><button key={k} onClick={()=>setTab(k)} style={{padding:"8px 14px",borderRadius:10,border:"1px solid "+(tab===k?"var(--brand)":"var(--border-2)"),background:tab===k?"var(--brand)":"var(--surface)",color:tab===k?"#fff":"var(--text-2)",fontWeight:600,fontSize:13,cursor:"pointer"}}>{l}</button>)}
-      </div>
-
-      {tab==="plan" && <>
-        <Card style={{padding:14}}>
-          <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-end"}}>
-            <Lbl t="From"><input type="date" style={iS} value={from} onChange={e=>setFrom(e.target.value)}/></Lbl>
-            <Lbl t="To"><input type="date" style={iS} value={to} onChange={e=>setTo(e.target.value)}/></Lbl>
-            <label style={{fontSize:12.5,color:"var(--text-2)",display:"flex",gap:6,alignItems:"center",paddingBottom:10}}><input type="checkbox" checked={cross} onChange={e=>setCross(e.target.checked)}/> Allow cover from other teams</label>
-            <div style={{flex:1}}/>
-            <Btn v="sec" onClick={runAssign} disabled={ai.busy||!projects.length}>{ai.busy?"Analysing…":"✨ Ask AI to review assignments"}</Btn>
-            <Btn v="suc" onClick={publish}>Confirm & publish plan</Btn>
-          </div>
-          {published && <div style={{fontSize:11.5,color:"var(--text-3)",marginTop:8}}>Last published {new Date(published.at).toLocaleString()} by {published.by} for {rpRange(published.from,published.to)} · {published.pct}% covered</div>}
-          {ai.err && <div style={{color:"#b91c1c",fontSize:12.5,marginTop:8}}>{ai.err}</div>}
-          {!projects.length && <div style={{fontSize:12,color:"var(--text-3)",marginTop:8}}>Add a project first to enable the AI review.</div>}
-          {projects.length>0 && !eff.length && <div style={{fontSize:12,color:"var(--text-3)",marginTop:8}}>No leave needs cover in this period; the AI will review staffing depth and risks instead.</div>}
-        </Card>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10}}>
-          <StStat icon="🛡" label="Cover coverage" value={pct+"%"} sub={(needDays-openDays)+" of "+needDays+" person-days"} tone={pct>=100?"green":pct>=80?"amber":"red"}/>
-          <StStat icon="🏖" label="Absences needing cover" value={eff.length} tone="blue"/>
-          <StStat icon="🚨" label="Gaps (nobody available)" value={effGaps.length} tone={effGaps.length?"red":"green"}/>
-          <StStat icon="⚠" label="Skills with no owner" value={plan.unstaffed.length} sub="on a project, nobody staffed" tone={plan.unstaffed.length?"amber":"green"}/>
-        </div>
-        {!projects.length && <Card><StEmpty icon="📁" title="No projects yet" text="Add your client projects, the skills each needs and who works on them, then the plan appears here."/></Card>}
-        {ai.res && <Card style={{padding:14,borderLeft:"4px solid #7c3aed"}}>
-          <div style={{fontWeight:700,marginBottom:6}}>✨ AI review</div>
-          <div style={{fontSize:13,marginBottom:8}}>{ai.res.summary}</div>
-          {ai.res.changes.length===0 && <div style={{fontSize:12.5,color:"var(--text-3)"}}>The AI found no better valid assignment than the automatic one.</div>}
-          {ai.res.changes.map((c,i)=><div key={i} style={{display:"flex",gap:10,alignItems:"center",padding:"6px 0",borderTop:"1px solid var(--border)",fontSize:12.5}}>
-            <div style={{flex:1}}><b>{projName(c.seg.projectId)}</b> · {c.seg.skill} · {rpRange(c.seg.from,c.seg.to)} → <b>{nameOf(c.userId)}</b><div style={{color:"var(--text-3)"}}>{c.why}</div></div>
-            <Btn sm v="sec" onClick={()=>applyChange(c)}>Apply</Btn></div>)}
-          {ai.res.risks.length>0 && <ul style={{margin:"8px 0 0 18px",padding:0,fontSize:12.5,color:"var(--text-2)"}}>{ai.res.risks.map((r,i)=><li key={i}>{r}</li>)}</ul>}
-        </Card>}
-        {effGaps.length>0 && <Card style={{padding:0,border:"1.5px solid #fecaca"}}>
-          <div style={{padding:"10px 14px",background:"#fee2e2",color:"#991b1b",fontWeight:700,borderRadius:"12px 12px 0 0"}}>🚨 Coverage gaps – nobody available</div>
-          {effGaps.map((g,i)=>{ const adv = ai.res && ai.res.gapAdvice.find(a=>a.id===g.projectId+"|"+g.skill+"|"+g.from);
-            return <div key={i} style={{padding:"10px 14px",borderTop:i?"1px solid var(--border)":"none",fontSize:13}}>
-              <StPill tone={g.severity==="critical"?"red":"amber"}>{g.severity==="critical"?"Critical":"Warning"}</StPill> <b>{projName(g.projectId)}</b> · {g.skill} · {rpRange(g.from,g.to)} ({g.dates.length} day{g.dates.length===1?"":"s"})
-              <div style={{fontSize:12,color:"var(--text-2)",marginTop:3}}>{g.absent.length?nameOf(g.absent[0])+(g.absent.length>1?" +"+(g.absent.length-1):"")+" is on leave. ":""}{g.reason}.{g.noOneHasSkill?" Consider training someone (see Training tab).":""}</div>
-              {adv && <div style={{fontSize:12,color:"#6d28d9",marginTop:3}}>✨ {adv.advice}</div>}
-            </div>; })}
-        </Card>}
-        {plan.unstaffed.length>0 && <Card style={{padding:"10px 14px",background:"#fffbeb"}}>
-          <b style={{fontSize:13}}>⚠ Projects with a required skill but nobody staffed on it</b>
-          <div style={{fontSize:12.5,marginTop:4}}>{plan.unstaffed.map((u,i)=><div key={i}>{projName(u.projectId)} needs {u.skill} (×{u.need})</div>)}</div>
-        </Card>}
-        {eff.length>0 && <Card style={{padding:0,overflowX:"auto"}}>
-          <table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr>{["Project","Skill","When","Out of office","Cover (best match)","Why",""].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
-          <tbody>{eff.map(s=>{ const key = rpKey(s); const first = s.picks[0];
-            const opts = people.filter(u=>!(s.absent||[]).includes(u.id) && rpLevelOf(mskills,u.id,s.skill));
-            return <tr key={key} style={{background:s.open.length?"#fff5f5":"transparent"}}>
-              <td style={cell}><b>{projName(s.projectId)}</b>{s.criticality==="critical" && <> <StPill tone="red">critical</StPill></>}</td>
-              <td style={cell}>{s.skill}</td>
-              <td style={cell}>{rpRange(s.from,s.to)}<div style={{color:"var(--text-3)",fontSize:11}}>{s.dates.length} working day{s.dates.length===1?"":"s"}</div></td>
-              <td style={cell}>{s.absent.map(nameOf).join(", ")}</td>
-              <td style={cell}>
-                {s.picks.map((pk,i)=><div key={i}>{pk.manual && <span title="Manual">✋ </span>}<b>{nameOf(pk.userId)}</b>{s.picks.length>1 && <span style={{color:"var(--text-3)"}}> {rpRange(pk.dates[0],pk.dates[pk.dates.length-1])}</span>}</div>)}
-                {s.open.length>0 && <div style={{color:"#b91c1c",fontWeight:700}}>Not covered: {rpRange(s.open[0],s.open[s.open.length-1])}</div>}
-              </td>
-              <td style={{...cell,color:"var(--text-3)",fontSize:11.5}}>{first && !first.manual ? (()=>{ const f = first.factors||{}; const bits = []; const e = rpLevelOf(mskills, first.userId, s.skill); if(e) bits.push(RP_LEVELS[e.level]+" "+s.skill+", "+e.years+"y"); if(f.onProject) bits.push("already on this project"); if(f.sameTeam) bits.push("same team"); if(f.freeTime>1) bits.push("light load"); return bits.join(" · "); })() : first && first.manual ? "Chosen by "+user.name : ""}</td>
-              <td style={cell}><select style={{...sS,padding:"4px 8px",fontSize:12,width:130}} value={ov[key]||""} onChange={e=>setOv(o=>{ const n={...o}; if(e.target.value) n[key]=e.target.value; else delete n[key]; return n; })}><option value="">Auto</option>{opts.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></td>
-            </tr>; })}</tbody></table>
-        </Card>}
-        {eff.length===0 && projects.length>0 && <Card><StEmpty icon="✅" title="No cover needed in this period" text="Nobody staffed on a required skill is on leave between these dates."/></Card>}
-      </>}
-
-      {tab==="cal" && calData && <>
-        <Card style={{padding:14,display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+  const calControls = (showProj) => (<Card style={{padding:14,display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
           <Btn sm v="sec" onClick={()=>shiftMonth(-1)}>‹</Btn>
           <b style={{minWidth:150,textAlign:"center"}}>{["January","February","March","April","May","June","July","August","September","October","November","December"][Number(calMonth.slice(5))-1]} {calMonth.slice(0,4)}</b>
           <Btn sm v="sec" onClick={()=>shiftMonth(1)}>›</Btn>
           <Btn sm v="sec" onClick={()=>setCalMonth(rpToday().slice(0,7))}>Today</Btn>
           <div style={{flex:1}}/>
-          <select aria-label="Project filter" style={{...sS,width:220}} value={calProj} onChange={e=>setCalProj(e.target.value)}><option value="">All projects</option>{projects.filter(p=>p.status!=="Closed").map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
+          {showProj && <select aria-label="Project filter" style={{...sS,width:220}} value={calProj} onChange={e=>setCalProj(e.target.value)}><option value="">All projects</option>{projects.filter(p=>p.status!=="Closed").map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>}
           <div style={{display:"flex",gap:10,fontSize:11.5,color:"var(--text-2)",flexWrap:"wrap"}}><span>🟩 Fully staffed (minimum met)</span><span>🟨 Partially staffed</span><span>🟥 Short staffed</span><span>⬜ Weekly off (Sat–Sun)</span></div>
-        </Card>
-        {!projects.length && <Card><StEmpty icon="📁" title="No projects yet"/></Card>}
+        </Card>);
+  const calGrid = !calData ? null : (<>{!projects.length && <Card><StEmpty icon="📁" title="No projects yet"/></Card>}
         {projects.filter(p=>p.status!=="Closed" && (!calProj||p.id===calProj)).map(p=>{ return <Card key={p.id} style={{padding:12}}>
           <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:8,flexWrap:"wrap"}}><b>{p.name}</b>{p.client && <span style={{color:"var(--text-3)",fontSize:12}}>{p.client}</span>}<StPill tone={p.criticality==="critical"?"red":"grey"}>{p.criticality||"normal"}</StPill><span style={{fontSize:12,color:"var(--text-3)"}}>Needs: {(p.requirements||[]).map(r=>r.skill).join(", ")||"–"}</span></div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(7,minmax(0,1fr))",gap:4}}>
@@ -7347,6 +7272,93 @@ function ResourcePlanningPage({items, setItems, users, leaves, cloud, user, isAd
               </div>; })}
           </div>
         </Card>; })}
+      </>);
+  const TABS = [["plan","🗓 Coverage plan"],["cal","📅 Calendar"],["projects","📁 Projects ("+projects.length+")"],["skills","🧩 Skills & people"],["train","🎓 Training"]];
+  const cell = {padding:"8px 10px",borderBottom:"1px solid var(--border)",fontSize:12.5,verticalAlign:"top"};
+  const th = {...cell,fontWeight:700,color:"var(--text-2)",background:"var(--surface-2)",textAlign:"left",whiteSpace:"nowrap"};
+  const setReq = (i,k,v) => setPm(p=>({...p, requirements:p.requirements.map((r,j)=>j===i?{...r,[k]:v}:r)}));
+  const setStf = (i,k,v) => setPm(p=>({...p, staff:p.staff.map((r,j)=>j===i?{...r,[k]:v}:r)}));
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:14}}>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+        {TABS.map(([k,l])=><button key={k} onClick={()=>setTab(k)} style={{padding:"8px 14px",borderRadius:10,border:"1px solid "+(tab===k?"var(--brand)":"var(--border-2)"),background:tab===k?"var(--brand)":"var(--surface)",color:tab===k?"#fff":"var(--text-2)",fontWeight:600,fontSize:13,cursor:"pointer"}}>{l}</button>)}
+      </div>
+
+      {tab==="plan" && <>
+        <Card style={{padding:14}}>
+          <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-end"}}>
+            <Lbl t="From"><input type="date" style={iS} value={from} onChange={e=>setFrom(e.target.value)}/></Lbl>
+            <Lbl t="To"><input type="date" style={iS} value={to} onChange={e=>setTo(e.target.value)}/></Lbl>
+            <label style={{fontSize:12.5,color:"var(--text-2)",display:"flex",gap:6,alignItems:"center",paddingBottom:10}}><input type="checkbox" checked={cross} onChange={e=>setCross(e.target.checked)}/> Allow cover from other teams</label>
+            <Lbl t="Project"><select aria-label="Plan project filter" style={{...sS,width:210}} value={calProj} onChange={e=>setCalProj(e.target.value)}><option value="">All projects</option>{projects.filter(p=>p.status!=="Closed").map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></Lbl>
+            <div style={{flex:1}}/>
+            <Btn v="sec" onClick={runAssign} disabled={ai.busy||!projects.length}>{ai.busy?"Analysing…":"✨ Ask AI to review assignments"}</Btn>
+            <Btn v="suc" onClick={publish}>Confirm & publish plan</Btn>
+          </div>
+          {published && <div style={{fontSize:11.5,color:"var(--text-3)",marginTop:8}}>Last published {new Date(published.at).toLocaleString()} by {published.by} for {rpRange(published.from,published.to)} · {published.pct}% covered</div>}
+          {ai.err && <div style={{color:"#b91c1c",fontSize:12.5,marginTop:8}}>{ai.err}</div>}
+          {!projects.length && <div style={{fontSize:12,color:"var(--text-3)",marginTop:8}}>Add a project first to enable the AI review.</div>}
+          {projects.length>0 && !eff.length && <div style={{fontSize:12,color:"var(--text-3)",marginTop:8}}>No leave needs cover in this period; the AI will review staffing depth and risks instead.</div>}
+        </Card>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10}}>
+          <StStat icon="🛡" label="Cover coverage" value={vPct+"%"} sub={(vNeed-vOpen)+" of "+vNeed+" person-days"} tone={vPct>=100?"green":vPct>=80?"amber":"red"}/>
+          <StStat icon="🏖" label="Absences needing cover" value={vEff.length} tone="blue"/>
+          <StStat icon="🚨" label="Gaps (nobody available)" value={vGaps.length} tone={vGaps.length?"red":"green"}/>
+          <StStat icon="⚠" label="Skills with no owner" value={vUnst.length} sub="on a project, nobody staffed" tone={vUnst.length?"amber":"green"}/>
+        </div>
+        {!projects.length && <Card><StEmpty icon="📁" title="No projects yet" text="Add your client projects, the skills each needs and who works on them, then the plan appears here."/></Card>}
+        {ai.res && <Card style={{padding:14,borderLeft:"4px solid #7c3aed"}}>
+          <div style={{fontWeight:700,marginBottom:6}}>✨ AI review</div>
+          <div style={{fontSize:13,marginBottom:8}}>{ai.res.summary}</div>
+          {ai.res.changes.length===0 && <div style={{fontSize:12.5,color:"var(--text-3)"}}>The AI found no better valid assignment than the automatic one.</div>}
+          {ai.res.changes.map((c,i)=><div key={i} style={{display:"flex",gap:10,alignItems:"center",padding:"6px 0",borderTop:"1px solid var(--border)",fontSize:12.5}}>
+            <div style={{flex:1}}><b>{projName(c.seg.projectId)}</b> · {c.seg.skill} · {rpRange(c.seg.from,c.seg.to)} → <b>{nameOf(c.userId)}</b><div style={{color:"var(--text-3)"}}>{c.why}</div></div>
+            <Btn sm v="sec" onClick={()=>applyChange(c)}>Apply</Btn></div>)}
+          {ai.res.risks.length>0 && <ul style={{margin:"8px 0 0 18px",padding:0,fontSize:12.5,color:"var(--text-2)"}}>{ai.res.risks.map((r,i)=><li key={i}>{r}</li>)}</ul>}
+        </Card>}
+        {vGaps.length>0 && <Card style={{padding:0,border:"1.5px solid #fecaca"}}>
+          <div style={{padding:"10px 14px",background:"#fee2e2",color:"#991b1b",fontWeight:700,borderRadius:"12px 12px 0 0"}}>🚨 Coverage gaps – nobody available</div>
+          {vGaps.map((g,i)=>{ const adv = ai.res && ai.res.gapAdvice.find(a=>a.id===g.projectId+"|"+g.skill+"|"+g.from);
+            return <div key={i} style={{padding:"10px 14px",borderTop:i?"1px solid var(--border)":"none",fontSize:13}}>
+              <StPill tone={g.severity==="critical"?"red":"amber"}>{g.severity==="critical"?"Critical":"Warning"}</StPill> <b>{projName(g.projectId)}</b> · {g.skill} · {rpRange(g.from,g.to)} ({g.dates.length} day{g.dates.length===1?"":"s"})
+              <div style={{fontSize:12,color:"var(--text-2)",marginTop:3}}>{g.absent.length?nameOf(g.absent[0])+(g.absent.length>1?" +"+(g.absent.length-1):"")+" is on leave. ":""}{g.reason}.{g.noOneHasSkill?" Consider training someone (see Training tab).":""}</div>
+              {adv && <div style={{fontSize:12,color:"#6d28d9",marginTop:3}}>✨ {adv.advice}</div>}
+            </div>; })}
+        </Card>}
+        {vUnst.length>0 && <Card style={{padding:"10px 14px",background:"#fffbeb"}}>
+          <b style={{fontSize:13}}>⚠ Projects with a required skill but nobody staffed on it</b>
+          <div style={{fontSize:12.5,marginTop:4}}>{vUnst.map((u,i)=><div key={i}>{projName(u.projectId)} needs {u.skill} (×{u.need})</div>)}</div>
+        </Card>}
+        {vEff.length>0 && <Card style={{padding:0,overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr>{["Project","Skill","When","Out of office","Cover (best match)","Why",""].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
+          <tbody>{vEff.map(s=>{ const key = rpKey(s); const first = s.picks[0];
+            const opts = people.filter(u=>!(s.absent||[]).includes(u.id) && rpLevelOf(mskills,u.id,s.skill));
+            return <tr key={key} style={{background:s.open.length?"#fff5f5":"transparent"}}>
+              <td style={cell}><b>{projName(s.projectId)}</b>{s.criticality==="critical" && <> <StPill tone="red">critical</StPill></>}</td>
+              <td style={cell}>{s.skill}</td>
+              <td style={cell}>{rpRange(s.from,s.to)}<div style={{color:"var(--text-3)",fontSize:11}}>{s.dates.length} working day{s.dates.length===1?"":"s"}</div></td>
+              <td style={cell}>{s.absent.map(nameOf).join(", ")}</td>
+              <td style={cell}>
+                {s.picks.map((pk,i)=><div key={i}>{pk.manual && <span title="Manual">✋ </span>}<b>{nameOf(pk.userId)}</b>{s.picks.length>1 && <span style={{color:"var(--text-3)"}}> {rpRange(pk.dates[0],pk.dates[pk.dates.length-1])}</span>}</div>)}
+                {s.open.length>0 && <div style={{color:"#b91c1c",fontWeight:700}}>Not covered: {rpRange(s.open[0],s.open[s.open.length-1])}</div>}
+              </td>
+              <td style={{...cell,color:"var(--text-3)",fontSize:11.5}}>{first && !first.manual ? (()=>{ const f = first.factors||{}; const bits = []; const e = rpLevelOf(mskills, first.userId, s.skill); if(e) bits.push(RP_LEVELS[e.level]+" "+s.skill+", "+e.years+"y"); if(f.onProject) bits.push("already on this project"); if(f.sameTeam) bits.push("same team"); if(f.freeTime>1) bits.push("light load"); return bits.join(" · "); })() : first && first.manual ? "Chosen by "+user.name : ""}</td>
+              <td style={cell}><select style={{...sS,padding:"4px 8px",fontSize:12,width:130}} value={ov[key]||""} onChange={e=>setOv(o=>{ const n={...o}; if(e.target.value) n[key]=e.target.value; else delete n[key]; return n; })}><option value="">Auto</option>{opts.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></td>
+            </tr>; })}</tbody></table>
+        </Card>}
+        {vEff.length===0 && projects.length>0 && <Card><StEmpty icon="✅" title="No cover needed in this period" text="Nobody staffed on a required skill is on leave between these dates."/></Card>}
+      
+        {calData && <>
+          <div style={{fontWeight:700,fontSize:14,marginTop:4}}>Monthly calendar{calProj?" – "+projName(calProj):" – all projects"}</div>
+          {calControls(false)}
+          {calGrid}
+        </>}
+      </>}
+
+      {tab==="cal" && calData && <>
+        {calControls(true)}
+        {calGrid}
       </>}
 
       {tab==="projects" && <>
